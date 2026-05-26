@@ -1,0 +1,78 @@
+/**
+ * LitPilot brand — map Meso design tokens to brand/tokens.css (see brand/README.md).
+ */
+@import "../../../brand/tokens.css";
+
+:root {
+  --color-bg: var(--lp-paper);
+  --color-bg-elevated: #ffffff;
+  --color-bg-white: #ffffff;
+  --color-bg-sidebar: color-mix(in srgb, var(--lp-paper) 92%, var(--lp-line));
+
+  --color-text: var(--lp-ink);
+  --color-text-secondary: var(--lp-ink-soft);
+  --color-text-muted: var(--lp-muted);
+
+  --color-accent: var(--lp-accent);
+  --color-accent-dark: #d45512;
+
+  --color-border: var(--lp-line);
+  --color-border-light: color-mix(in srgb, var(--lp-ink) 10%, transparent);
+
+  --color-success: #2a7a4f;
+  --color-error: #c53030;
+  --color-warning: #b45309;
+  --color-info: var(--lp-accent);
+
+  --nav-hover-bg: color-mix(in srgb, var(--lp-accent) 8%, transparent);
+  --nav-active-bg: color-mix(in srgb, var(--lp-accent) 14%, transparent);
+  --session-hover-bg: color-mix(in srgb, var(--lp-accent) 6%, transparent);
+  --session-active-bg: color-mix(in srgb, var(--lp-accent) 12%, transparent);
+  --badge-bg: var(--lp-accent-soft);
+
+  font-family: var(--lp-font-sans);
+}
+
+[data-theme="dark"] {
+  --color-bg: var(--lp-ink);
+  --color-bg-elevated: var(--lp-ink-soft);
+  --color-bg-white: var(--lp-ink-soft);
+  --color-bg-sidebar: #0a1024;
+
+  --color-text: var(--lp-paper);
+  --color-text-secondary: color-mix(in srgb, var(--lp-paper) 75%, transparent);
+  --color-text-muted: var(--lp-muted);
+
+  --color-border: color-mix(in srgb, var(--lp-paper) 18%, transparent);
+  --color-border-light: color-mix(in srgb, var(--lp-paper) 10%, transparent);
+}
+
+.litpilot-branded .meso-sidebar__logo--custom {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  background: transparent !important;
+  color: inherit;
+  border-radius: var(--lp-radius-sm);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meso-sidebar--collapsed .meso-sidebar__logo--custom {
+  width: 26px;
+  height: 26px;
+}
+
+.litpilot-branded .meso-sidebar__title--brand {
+  font-family: var(--lp-font-sans);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.meso-sidebar--collapsed .meso-sidebar__title--brand {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}

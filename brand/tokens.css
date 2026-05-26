@@ -1,0 +1,18 @@
+/* LitPilot brand tokens — drop into your global CSS. */
+:root {
+  --lp-ink: #0E1633;
+  --lp-ink-soft: #1B2547;
+  --lp-accent: #F26A1F;
+  --lp-accent-soft: #FDE3D2;
+  --lp-paper: #F6F4EE;
+  --lp-line: #E4E1D8;
+  --lp-muted: #8C92A8;
+
+  --lp-font-sans: Geist, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --lp-font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --lp-radius-sm: 4px;
+  --lp-radius-md: 8px;
+  --lp-radius-lg: 16px;
+  --lp-radius-app: 22px;
+}

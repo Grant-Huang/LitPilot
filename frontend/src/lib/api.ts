@@ -1,0 +1,158 @@
+import { apiRequestData } from "@/lib/http";
+import type { ExecutionTrace } from "@/lib/executionTrace";
+import type { LibraryItem } from "@/lib/libraryTypes";
+
+export type SessionMeta = {
+  id: string;
+  title: string;
+  updated_at?: string;
+  created_at?: string;
+  pinned?: boolean;
+};
+
+export type FailedLiteratureMeta = {
+  url: string;
+  title?: string;
+  reason: string;
+  kind: string;
+};
+
+export type ChatMessage = {
+  role: string;
+  content: string;
+  ts?: string;
+  meta?: {
+    think?: string;
+    thinkContent?: string;
+    failed_literature?: FailedLiteratureMeta[];
+    execution_trace?: ExecutionTrace;
+  };
+};
+
+export type AgentSettings = {
+  tavily_api_key?: string;
+  jina_api_key?: string;
+  llm_provider?: string;
+  llm_api_key?: string;
+  llm_model?: string;
+  llm_base_url?: string;
+  fetch_parallel?: number;
+  fetch_timeout_sec?: number;
+  tavily_max_results?: number;
+  max_fetch_urls?: number;
+  literature_source_mode?: "merge" | "user_only";
+  tavily_retry_count?: number;
+  fetch_retry_count?: number;
+  fetch_retry_delay_ms?: number;
+  plan_confirm?: boolean;
+  citation_format?: "apa" | "acm";
+  llm_group_id?: string;
+  has_tavily?: boolean;
+  has_jina?: boolean;
+  has_llm?: boolean;
+  use_llm_planner?: boolean;
+  think_mode?: "off" | "lite" | "full";
+  think_use_reasoning?: boolean;
+  think_model?: string;
+  think_max_tokens_per_phase?: number;
+};
+
+export type RefIndex = {
+  refs: Array<{
+    index: number;
+    apa: string;
+    citation?: string;
+    format?: "apa" | "acm";
+    title: string;
+    authors: string;
+    year: string;
+    url: string;
+    doi: string;
+  }>;
+};
+
+export const sessionsApi = {
+  list: () => apiRequestData<SessionMeta[]>("/sessions"),
+  create: (title?: string) =>
+    apiRequestData<SessionMeta>("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: title || "新综述" }),
+    }),
+  delete: (id: string) =>
+    apiRequestData<{ deleted: string }>(`/sessions/${id}`, { method: "DELETE" }),
+  update: (id: string, body: { title?: string; pinned?: boolean }) =>
+    apiRequestData<SessionMeta>(`/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  messages: (id: string) =>
+    apiRequestData<ChatMessage[]>(`/sessions/${id}/messages`),
+  review: (id: string) =>
+    apiRequestData<{
+      filename: string;
+      content: string;
+      updated_at?: string;
+    } | null>(`/sessions/${id}/review`),
+};
+
+export const settingsApi = {
+  getAgent: () => apiRequestData<AgentSettings>("/settings/agent"),
+  saveAgent: (body: Partial<AgentSettings>) =>
+    apiRequestData<AgentSettings>("/settings/agent", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  testTavily: (api_key?: string) =>
+    apiRequestData<{ hits: number; answer_preview: string }>(
+      "/settings/agent/test-tavily",
+      {
+        method: "POST",
+        body: JSON.stringify({ api_key }),
+      },
+    ),
+};
+
+export const libraryApi = {
+  items: () =>
+    apiRequestData<{ items: LibraryItem[]; total: number }>("/library/items"),
+  item: (id: string) =>
+    apiRequestData<{ item: LibraryItem; full_text: string }>(
+      `/library/items/${encodeURIComponent(id)}`,
+    ),
+  refs: () =>
+    apiRequestData<{
+      index: RefIndex;
+      ref_list_text: string;
+      items?: LibraryItem[];
+    }>("/library/refs"),
+  pdfs: () => apiRequestData<{ files: string[] }>("/library/pdfs"),
+  reconcile: (body: {
+    session_id?: string;
+    mode?: "session" | "all" | "failed_only";
+  }) =>
+    apiRequestData<Record<string, number>>("/library/reconcile", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  dedupe: () =>
+    apiRequestData<Record<string, number>>("/library/dedupe", {
+      method: "POST",
+    }),
+  migrate: () =>
+    apiRequestData<Record<string, number>>("/library/migrate", {
+      method: "POST",
+    }),
+  enrich: (itemId: string) =>
+    apiRequestData<{ ok: boolean; citation_count?: number; item?: LibraryItem }>(
+      `/library/items/${encodeURIComponent(itemId)}/enrich`,
+      { method: "POST" },
+    ),
+  star: (itemId: string, starred: boolean) =>
+    apiRequestData<{ item: LibraryItem }>(
+      `/library/items/${encodeURIComponent(itemId)}/star`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ starred }),
+      },
+    ),
+};

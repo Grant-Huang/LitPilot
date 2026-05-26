@@ -1,0 +1,5 @@
+# pnpm 11+：显式允许依赖的安装脚本（Next / Vitest / ESLint 等需要）
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
