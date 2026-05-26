@@ -230,9 +230,13 @@
   text-align: center;
 }
 
-.litpilot-chat-welcome h2 {
-  margin: 0 0 8px;
-  font-size: 1.25rem;
+.litpilot-chat-welcome__brand {
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+
+.litpilot-chat-welcome__brand .litpilot-brand-lockup__page {
+  font-size: 1.1rem;
 }
 
 .litpilot-stream-badge {

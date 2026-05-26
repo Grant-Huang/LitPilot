@@ -8,6 +8,7 @@ import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext"
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { LitPilotSessionColumn } from "@/integrations/meso/LitPilotSessionColumn";
 import { LitPilotMark, LitPilotWordmark } from "@/components/brand/LitPilotMark";
+import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotSidebarUser } from "@/components/layout/LitPilotSidebarUser";
 import { getAppLayoutFlags } from "@/lib/appLayout";
 
@@ -131,13 +132,20 @@ export function LitPilotAppShell({ children }: Props) {
     <div className={layoutExtraClass}>
       <ThreeColumnLayout
         appName="LitPilot"
-        sidebarLogo={<LitPilotMark size={26} aria-label="LitPilot" />}
+        sidebarLogo={
+          <LitPilotMark size={26} aria-label="LitPilot" className="litpilot-sidebar-mark" />
+        }
         sidebarTitle={<LitPilotWordmark size={15} />}
         navItems={navItems}
         sidebarFooter={<LitPilotSidebarUser />}
         sessionColumn={layoutFlags.showSessionColumn ? sessionColumn : <div />}
         mainHeader={
-          <span className="litpilot-main-header__title">{mainTitle}</span>
+          <LitPilotBrandLockup
+            markSize={22}
+            wordmarkSize={14}
+            pageTitle={isChat ? mainTitle : undefined}
+            className="litpilot-main-header"
+          />
         }
         artifactPanel={layoutFlags.isChat ? chatBridge?.artifactPanel : null}
         artifactVisible={layoutFlags.artifactVisible}

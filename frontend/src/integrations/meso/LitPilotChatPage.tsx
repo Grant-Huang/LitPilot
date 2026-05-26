@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { message } from "antd";
+import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotComposer } from "@/components/chat/LitPilotComposer";
 import { useSSEStream } from "@meso/ui";
 import { LitPilotMessageList } from "@/components/chat/LitPilotMessageList";
@@ -380,7 +381,12 @@ export function LitPilotChatPage() {
             emptyState={
               historyMessages.length === 0 && !activeStreaming ? (
                 <div className="litpilot-chat-welcome">
-                  <h2>LitPilot 文献综述</h2>
+                  <LitPilotBrandLockup
+                    markSize={40}
+                    wordmarkSize={22}
+                    pageTitle="文献综述"
+                    className="litpilot-chat-welcome__brand"
+                  />
                   <p style={{ color: "var(--color-text-muted)" }}>
                     描述研究主题，系统将检索文献并生成 APA / ACM 格式综述。执行过程中会在此显示阶段、思考与工具调用进度。
                   </p>

@@ -47,17 +47,39 @@
   --color-border-light: color-mix(in srgb, var(--lp-paper) 10%, transparent);
 }
 
+/* 未传入 sidebarLogo 时的兜底：用品牌 SVG，避免 Meso 默认橙色 L */
+.litpilot-branded .meso-sidebar__logo:not(.meso-sidebar__logo--custom) {
+  background: transparent !important;
+  background-image: url("/brand/svg/mark.svg");
+  background-size: 26px 26px;
+  background-repeat: no-repeat;
+  background-position: center;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0;
+  overflow: hidden;
+}
+
 .litpilot-branded .meso-sidebar__logo--custom {
   width: 28px;
   height: 28px;
   min-width: 28px;
   background: transparent !important;
   color: inherit;
-  border-radius: var(--lp-radius-sm);
+  border-radius: 0;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: visible;
+}
+
+.litpilot-branded .meso-sidebar__logo--custom .litpilot-sidebar-mark,
+.litpilot-branded .meso-sidebar__logo--custom svg {
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
 }
 
 .meso-sidebar--collapsed .meso-sidebar__logo--custom {
@@ -77,14 +99,20 @@
   overflow: hidden;
 }
 
-.litpilot-main-header {
+.litpilot-brand-lockup {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.litpilot-main-header__title {
+.litpilot-brand-lockup__page {
   font-weight: 600;
+  font-size: 14px;
   color: var(--color-text);
+  white-space: nowrap;
+}
+
+.litpilot-main-header .litpilot-brand-lockup__page {
+  margin-left: 2px;
 }
