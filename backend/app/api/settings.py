@@ -4,6 +4,7 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.agents.agent_settings import TAVILY_MAX_RESULTS_CAP
 from app.agents.tavily_key import looks_like_tavily_api_key, tavily_key_hint
 from app.agents.tools.tavily_search import tavily_search
 from app.core.response import err, ok
@@ -64,7 +65,9 @@ async def save_agent_settings(body: AgentSettingsBody):
     if "citation_format" in partial:
         partial["citation_format"] = normalize_citation_format(partial["citation_format"])
     if "tavily_max_results" in partial:
-        partial["tavily_max_results"] = max(1, min(int(partial["tavily_max_results"]), 20))
+        partial["tavily_max_results"] = max(
+            1, min(int(partial["tavily_max_results"]), TAVILY_MAX_RESULTS_CAP)
+        )
     if "max_fetch_urls" in partial:
         partial["max_fetch_urls"] = max(1, min(int(partial["max_fetch_urls"]), 20))
     if "literature_source_mode" in partial:

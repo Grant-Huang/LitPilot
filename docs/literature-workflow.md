@@ -17,7 +17,7 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 
 | 配置项 | 作用 |
 |--------|------|
-| `tavily_max_results` | `web_search` 单次最多返回条数 |
+| `tavily_max_results` | `web_search` 单次最多返回条数（1–80，默认 8） |
 | `max_fetch_urls` | `web_fetch` 队列上限 |
 | `fetch_parallel` | Jina 并行并发 |
 | `fetch_timeout_sec` | 单 URL 超时 |

@@ -28,9 +28,12 @@ async def get_fetch_timeout_sec() -> float:
     return max(10.0, min(t, 120.0))
 
 
+TAVILY_MAX_RESULTS_CAP = 80
+
+
 async def get_tavily_max_results() -> int:
     n = int((await get_merged_settings()).get("tavily_max_results") or 8)
-    return max(1, min(n, 20))
+    return max(1, min(n, TAVILY_MAX_RESULTS_CAP))
 
 
 async def get_max_fetch_urls() -> int:

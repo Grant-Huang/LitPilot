@@ -426,14 +426,14 @@ export default function SettingsPage() {
       >
         <div className="settings-field-row">
           <Field
-            label="检索条数（1–20）"
+            label="检索条数（1–80）"
             hint="单次 web_search 最大命中数 max_results"
           >
             <input
               className="input"
               type="number"
               min={1}
-              max={20}
+              max={80}
               value={tavilyMaxResults}
               onChange={(e) => setTavilyMaxResults(Number(e.target.value))}
             />
