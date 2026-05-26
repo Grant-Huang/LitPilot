@@ -135,8 +135,10 @@ export function LitPilotAppShell({ children }: Props) {
         sidebarTitle={<LitPilotWordmark size={15} />}
         navItems={navItems}
         sidebarFooter={<LitPilotSidebarUser />}
-        sessionColumn={sessionColumn}
-        mainHeader={<span>{mainTitle}</span>}
+        sessionColumn={layoutFlags.showSessionColumn ? sessionColumn : <div />}
+        mainHeader={
+          <span className="litpilot-main-header__title">{mainTitle}</span>
+        }
         artifactPanel={layoutFlags.isChat ? chatBridge?.artifactPanel : null}
         artifactVisible={layoutFlags.artifactVisible}
         showArtifactToggle={layoutFlags.showArtifactToggle}

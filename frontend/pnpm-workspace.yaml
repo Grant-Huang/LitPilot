@@ -1,4 +1,8 @@
-# pnpm 11+：显式允许依赖的安装脚本（Next / Vitest / ESLint 等需要）
+# pnpm 11+：仅下列包可跑 install 脚本；@meso/ui 使用仓库内 dist/，不执行 prepare
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver
 allowBuilds:
   esbuild: true
   sharp: true

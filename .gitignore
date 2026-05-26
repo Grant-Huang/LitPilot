@@ -19,6 +19,10 @@ data/
 .env
 .env.local
 
+# Brand source archives (assets live under brand/ and frontend/public/brand/)
+logo of litpilot.zip
+*.zip
+
 # IDE
 .DS_Store
 .idea/

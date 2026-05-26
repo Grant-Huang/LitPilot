@@ -76,3 +76,15 @@
   width: 0;
   overflow: hidden;
 }
+
+.litpilot-main-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.litpilot-main-header__title {
+  font-weight: 600;
+  color: var(--color-text);
+}

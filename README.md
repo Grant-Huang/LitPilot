@@ -48,7 +48,7 @@ LitPilot/
 
 - **Python** 3.11+（推荐 3.13；仓库内 venv 可能为 3.14）
 - **Node.js** 18+ 与 **pnpm**
-- **[MESO](https://github.com/Grant-Huang/MESO)** 本地构建（前端依赖 `file:../../projects/meso/packages/meso-ui`）
+- **pnpm**（前端通过 GitHub 安装 [MESO](https://github.com/Grant-Huang/meso) 的 `@meso/ui` / `@meso/types`）
 - API Key：**Tavily**（必填）、**LLM**（必填，Ollama 除外）、**Jina**（可选）
 
 ## 快速开始
@@ -95,25 +95,46 @@ export LITPILOT_DATA_DIR=../data
 uvicorn app.main:app --reload --port 8001
 ```
 
-**前端**（需已构建 MESO，见下文）
+**前端**
 
 ```bash
 cd frontend
-pnpm install
+pnpm install   # 会从 GitHub 拉取 MESO 子包，需可访问 github.com
 pnpm dev
 ```
 
 浏览器打开 [http://localhost:3002](http://localhost:3002)，在 **会话** 页描述研究主题并点击「生成综述」。
 
-## MESO 依赖
+## MESO 依赖（GitHub）
 
-前端通过 `package.json` 引用本地 MESO 包：
+前端**不**把 MESO 源码放进 LitPilot 仓库，而是通过 **pnpm 的 Git 子目录依赖** 安装：
+
+```json
+"@meso/types": "github:Grant-Huang/meso#main&path:/packages/meso-types",
+"@meso/ui": "github:Grant-Huang/meso#main&path:/packages/meso-ui"
+```
+
+说明：
+
+| 项 | 含义 |
+|----|------|
+| `github:Grant-Huang/meso` | 仓库 [Grant-Huang/meso](https://github.com/Grant-Huang/meso) |
+| `#main` | 分支（可改为 `#v2.0.0` 等 tag 以锁定版本） |
+| `&path:/packages/meso-ui` | monorepo 内子包路径（注意 `path:` 前要有 `/`） |
+
+安装后包位于 `node_modules/@meso/ui`，`pnpm-lock.yaml` 会记录解析到的 **commit SHA**，保证可复现。
+
+**无需**在本机单独 clone MESO 或配置 `file:../../projects/meso`。若需调试 MESO 本身，可临时改回本地路径：
 
 ```json
 "@meso/ui": "file:../../projects/meso/packages/meso-ui"
 ```
 
-请确保 MESO 仓库与 LitPilot 处于预期的相对路径，或修改 `frontend/package.json` 中的 `file:` 路径后重新 `pnpm install`。
+**注意：**
+
+- `@meso/ui` 发布字段指向仓库内已提交的 `dist/`。MESO 发版前应 `pnpm build` 并提交 `packages/*/dist`。
+- `packages/meso-ui` 若保留 `prepare` 脚本，从 Git 安装会在无 workspace 环境下失败。LitPilot 在 `frontend/pnpm-workspace.yaml` 用 `onlyBuiltDependencies` 跳过 `@meso/ui` 的 build；**建议 MESO 删除 `prepare`**，仅依赖已提交的 `dist/`。
+- LitPilot 侧栏品牌使用 Meso `ThreeColumnLayout` 的 `sidebarLogo` / `sidebarTitle`（白牌 API），其余品牌与业务 UI 均在 LitPilot 内实现。
 
 ## 配置说明
 
@@ -260,4 +281,4 @@ pnpm lint
 ## 相关文档
 
 - [文献综述工作流](docs/literature-workflow.md)
-- [MESO UI 框架](https://github.com/Grant-Huang/MESO)
+- [MESO UI 框架](https://github.com/Grant-Huang/meso)
