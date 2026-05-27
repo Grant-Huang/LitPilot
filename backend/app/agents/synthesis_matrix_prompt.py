@@ -5,7 +5,8 @@ MAX_MATRIX_SYSTEM_PROMPT_LEN = 8_000
 
 SYNTHESIS_MATRIX_LANG = "literature-matrix+markdown"
 
-DEFAULT_SYNTHESIS_MATRIX_SYSTEM = """你是工业软件与 AI Agent 领域的资深研究员。请基于提供的多源论文材料，生成专业的文献综述矩阵（Synthesis Matrix）。
+DEFAULT_SYNTHESIS_MATRIX_SYSTEM = """你是工业软件与 AI Agent 领域的资深研究员。
+请基于提供的多源论文材料，生成专业的文献综述矩阵（Synthesis Matrix）。
 
 【矩阵目标】
 - 用矩阵横向比较论文，而不是写成传统综述段落

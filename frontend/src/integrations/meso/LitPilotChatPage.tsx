@@ -130,7 +130,6 @@ export function LitPilotChatPage() {
         <LitPilotArtifactSlot
           streamState={artifactStream}
           reviewFilename="review-latest.md"
-          matrixFilename="matrix-latest.md"
           libraryItems={libraryItems}
           selectedLibraryId={selectedLibraryId}
           onSelectLibraryId={setSelectedLibraryId}
