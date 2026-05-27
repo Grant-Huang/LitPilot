@@ -1,46 +1,104 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Dropdown, Spin, message } from "antd";
-import type { MenuProps } from "antd";
+import { Spin, message } from "antd";
 import { libraryApi } from "@/lib/api";
 import type { LibraryItem } from "@/lib/libraryTypes";
 import { formatAuthors, formatVenueLine } from "@/lib/libraryTypes";
+import {
+  formatBibliographicLine,
+  formatCitationStats,
+} from "@/lib/libraryBibliography";
+import {
+  openReviewSession,
+  resolveAbstractText,
+  resolveDisplayTitle,
+  uniqueProvenanceSessions,
+} from "@/lib/libraryDisplay";
 import { renderSimpleMarkdown } from "@/lib/simpleMarkdown";
+import { LibraryTagEditor } from "./LibraryTagEditor";
+import { LibraryMetadataEditor } from "./LibraryMetadataEditor";
 
-type DetailTab = "abstract" | "fulltext" | "meta" | "pdf";
+export type LibraryDetailTab = "abstract" | "fulltext" | "meta" | "pdf" | "reviews";
+
+type RelatedSession = {
+  session_id: string;
+  session_title: string;
+  first_question: string;
+  review_ref_index?: number | null;
+};
 
 type Props = {
   itemId: string | null;
+  listIndex?: number;
   variant?: "page" | "artifact";
   onBack?: () => void;
-  initialTab?: DetailTab;
-  onStarChange?: (item: LibraryItem) => void;
+  activeTab?: LibraryDetailTab;
+  onTabChange?: (tab: LibraryDetailTab) => void;
+  onItemChange?: (item: LibraryItem) => void;
 };
 
-function pickInitialTab(item: LibraryItem, prefer?: DetailTab): DetailTab {
+function pickInitialTab(item: LibraryItem, prefer?: LibraryDetailTab): LibraryDetailTab {
+  if (prefer === "reviews" && (item.provenance?.length ?? 0) > 0) return "reviews";
   if (prefer === "fulltext" && item.availability?.has_full_text) return "fulltext";
-  if (item.abstract?.trim()) return "abstract";
+  const abs = resolveAbstractText(item);
+  if (abs.text) return "abstract";
   if (item.availability?.has_full_text) return "fulltext";
-  return "abstract";
+  if ((item.provenance?.length ?? 0) > 0) return "reviews";
+  return "meta";
 }
 
 export function LibraryDetailPane({
   itemId,
+  listIndex,
   variant = "page",
   onBack,
-  initialTab,
-  onStarChange,
+  activeTab,
+  onTabChange,
+  onItemChange,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [item, setItem] = useState<LibraryItem | null>(null);
   const [fullText, setFullText] = useState("");
-  const [tab, setTab] = useState<DetailTab>("abstract");
+  const [tab, setTab] = useState<LibraryDetailTab>("abstract");
+  const [relatedSessions, setRelatedSessions] = useState<RelatedSession[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [tagCatalog, setTagCatalog] = useState<{ name: string; count: number }[]>([]);
+
+  const handleItemUpdated = useCallback(
+    (updated: LibraryItem) => {
+      setItem(updated);
+      onItemChange?.(updated);
+      void libraryApi
+        .tags()
+        .then((res) => setTagCatalog(res.tags || []))
+        .catch(() => {});
+    },
+    [onItemChange],
+  );
+
+  const setActiveTab = useCallback(
+    (t: LibraryDetailTab) => {
+      if (onTabChange) onTabChange(t);
+      else setTab(t);
+    },
+    [onTabChange],
+  );
+
+  const currentTab = activeTab ?? tab;
+
+  useEffect(() => {
+    void libraryApi
+      .tags()
+      .then((res) => setTagCatalog(res.tags || []))
+      .catch(() => setTagCatalog([]));
+  }, [itemId]);
 
   useEffect(() => {
     if (!itemId) {
       setItem(null);
       setFullText("");
+      setRelatedSessions([]);
       return;
     }
     setLoading(true);
@@ -49,38 +107,50 @@ export function LibraryDetailPane({
       .then((res) => {
         setItem(res.item);
         setFullText(res.full_text || "");
-        setTab(pickInitialTab(res.item, initialTab));
+        if (!activeTab) setTab(pickInitialTab(res.item));
       })
       .catch(() => message.error("加载文献详情失败"))
       .finally(() => setLoading(false));
-  }, [itemId, initialTab]);
+  }, [itemId, activeTab]);
 
-  const toggleStar = useCallback(async () => {
-    if (!item) return;
-    try {
-      const res = await libraryApi.star(item.id, !item.starred);
-      setItem(res.item);
-      onStarChange?.(res.item);
-    } catch {
-      message.error("更新收藏失败");
-    }
-  }, [item, onStarChange]);
+  useEffect(() => {
+    if (!itemId || currentTab !== "reviews") return;
+    setReviewsLoading(true);
+    void libraryApi
+      .relatedSessions(itemId)
+      .then((res) => setRelatedSessions(res.sessions || []))
+      .catch(() => {
+        setRelatedSessions(
+          uniqueProvenanceSessions(item || { id: "", display_index: 0, title: "", authors: [], url: "", availability: {} }).map(
+            (p) => ({
+              session_id: p.session_id,
+              session_title: p.session_title,
+              first_question: "",
+              review_ref_index: p.review_ref_index,
+            }),
+          ),
+        );
+      })
+      .finally(() => setReviewsLoading(false));
+  }, [itemId, currentTab, item]);
 
   const enrich = useCallback(async () => {
     if (!item?.doi) {
-      message.info("该文献无 DOI，暂无法查询被引数");
+      message.info("请先补充 DOI（可在元数据页手工填写）");
       return;
     }
     try {
       const res = await libraryApi.enrich(item.id);
       if (res.item) {
-        setItem(res.item);
-        message.success(`被引数：${res.citation_count ?? "—"}`);
+        handleItemUpdated(res.item);
+        message.success(
+          `被引 ${res.citation_count ?? "—"} · 他引 ${res.references_count ?? "—"}`,
+        );
       }
     } catch {
       message.error("元数据补全失败");
     }
-  }, [item]);
+  }, [item, handleItemUpdated]);
 
   if (!itemId) {
     return (
@@ -103,32 +173,18 @@ export function LibraryDetailPane({
   }
 
   const av = item.availability || {};
-  const apa = item.citations?.apa || item.citations?.acm || "";
+  const displayTitle = resolveDisplayTitle(item);
+  const indexLabel = listIndex ?? item.display_index;
+  const abstractResolved = resolveAbstractText(item, fullText);
+  const hasProv = (item.provenance?.length ?? 0) > 0;
   const isArtifact = variant === "artifact";
 
-  const menuItems: MenuProps["items"] = [
-    {
-      key: "star",
-      label: item.starred ? "取消收藏" : "收藏",
-      onClick: () => void toggleStar(),
-    },
-    {
-      key: "enrich",
-      label: "补全被引数",
-      onClick: () => void enrich(),
-    },
-    ...(apa
-      ? [
-          {
-            key: "copy",
-            label: "复制引用",
-            onClick: () => {
-              void navigator.clipboard.writeText(apa);
-              message.success("已复制引用");
-            },
-          },
-        ]
-      : []),
+  const tabDefs: { key: LibraryDetailTab; label: string; show: boolean }[] = [
+    { key: "abstract", label: "摘要", show: true },
+    { key: "fulltext", label: "全文", show: Boolean(av.has_full_text) },
+    { key: "meta", label: "元数据", show: true },
+    { key: "reviews", label: "综述", show: hasProv },
+    { key: "pdf", label: "PDF", show: Boolean(av.has_pdf) },
   ];
 
   return (
@@ -147,54 +203,80 @@ export function LibraryDetailPane({
           </button>
         )}
         <h2 className="library-detail__title">
-          [{item.display_index}] {item.title}
+          [{indexLabel}] {displayTitle}
         </h2>
-        <div className="library-detail__actions">
-          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-            <button type="button" className="btn-ghost">
-              更多操作 ▾
-            </button>
-          </Dropdown>
-        </div>
       </header>
 
       <nav className="library-detail__tabs" aria-label="文献详情">
-        {(["abstract", "fulltext", "meta", "pdf"] as DetailTab[]).map((t) => {
-          if (t === "fulltext" && !av.has_full_text) return null;
-          if (t === "pdf" && !av.has_pdf) return null;
-          const labels: Record<DetailTab, string> = {
-            abstract: "摘要",
-            fulltext: "全文",
-            meta: "元数据",
-            pdf: "PDF",
-          };
-          return (
+        {tabDefs
+          .filter((t) => t.show)
+          .map((t) => (
             <button
-              key={t}
+              key={t.key}
               type="button"
-              className={`library-detail__tab${tab === t ? " library-detail__tab--active" : ""}`}
-              onClick={() => setTab(t)}
+              className={`library-detail__tab${
+                currentTab === t.key ? " library-detail__tab--active" : ""
+              }`}
+              onClick={() => setActiveTab(t.key)}
             >
-              {labels[t]}
+              {t.label}
             </button>
-          );
-        })}
+          ))}
       </nav>
 
       <div className="library-detail__body">
-        {tab === "abstract" && (
+        {currentTab === "abstract" && (
           <div className="library-detail__section">
-            <p className="library-detail__authors">{formatAuthors(item.authors)}</p>
-            <p className="library-detail__venue">{formatVenueLine(item)}</p>
-            {item.abstract ? (
-              <div className="library-detail__abstract">{item.abstract}</div>
+            <dl className="library-detail__biblio">
+              <dt>标题</dt>
+              <dd>{displayTitle}</dd>
+              <dt>作者</dt>
+              <dd>{formatAuthors(item.authors) || "—"}</dd>
+              <dt>出处</dt>
+              <dd>{formatBibliographicLine(item)}</dd>
+              {(item.citation_count != null || item.references_count != null) && (
+                <>
+                  <dt>引证</dt>
+                  <dd>{formatCitationStats(item) || "—"}</dd>
+                </>
+              )}
+              {item.doi && (
+                <>
+                  <dt>DOI</dt>
+                  <dd>
+                    <a
+                      href={`https://doi.org/${item.doi}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {item.doi}
+                    </a>
+                  </dd>
+                </>
+              )}
+              {item.publisher && (
+                <>
+                  <dt>出版社</dt>
+                  <dd>{item.publisher}</dd>
+                </>
+              )}
+            </dl>
+            <LibraryMetadataEditor item={item} onChange={handleItemUpdated} />
+            <h3 className="library-detail__subheading">摘要</h3>
+            {abstractResolved.text ? (
+              <>
+                {abstractResolved.source === "extracted" && (
+                  <p className="library-detail__hint">以下摘自抓取正文中的 Abstract 段落。</p>
+                )}
+                <div className="library-detail__abstract">{abstractResolved.text}</div>
+              </>
             ) : av.has_full_text ? (
               <p className="functional-card__empty">
                 暂无结构化摘要，
                 <button
                   type="button"
                   className="library-detail__inline-link"
-                  onClick={() => setTab("fulltext")}
+                  onClick={() => setActiveTab("fulltext")}
                 >
                   查看抓取全文
                 </button>
@@ -202,14 +284,15 @@ export function LibraryDetailPane({
             ) : (
               <p className="functional-card__empty">
                 暂无摘要。
-                {av.fetch_status === "failed" && " 该来源抓取失败，可在文献库重试。"}
+                {av.fetch_status === "failed" && " 该来源抓取失败。"}
                 {av.cite_status === "failed" && " 引用元数据抽取失败。"}
               </p>
             )}
           </div>
         )}
-        {tab === "fulltext" && (
-          fullText.trim() ? (
+
+        {currentTab === "fulltext" &&
+          (fullText.trim() ? (
             <div
               className="library-detail__markdown meso-markdown"
               dangerouslySetInnerHTML={{
@@ -218,40 +301,98 @@ export function LibraryDetailPane({
             />
           ) : (
             <p className="functional-card__empty">全文尚未落盘或抓取失败。</p>
-          )
-        )}
-        {tab === "meta" && (
+          ))}
+
+        {currentTab === "meta" && (
           <dl className="library-detail__meta">
+            <dt>被引</dt>
+            <dd className="library-detail__meta-row">
+              {item.citation_count != null ? (
+                <span>{item.citation_count}</span>
+              ) : (
+                <span className="library-detail__muted">未查询</span>
+              )}
+              {item.doi && (
+                <button type="button" className="library-detail__inline-link" onClick={() => void enrich()}>
+                  刷新
+                </button>
+              )}
+            </dd>
+            <dt>他引</dt>
+            <dd className="library-detail__meta-row">
+              {item.references_count != null ? (
+                <span>{item.references_count} 条参考文献</span>
+              ) : (
+                <span className="library-detail__muted">未查询</span>
+              )}
+            </dd>
+            {(item.references_preview?.length ?? 0) > 0 && (
+              <>
+                <dt>他引预览</dt>
+                <dd>
+                  <ul className="library-detail__ref-preview">
+                    {item.references_preview!.slice(0, 10).map((r, i) => (
+                      <li key={`${r.doi || r.title}-${i}`}>
+                        {r.title || "Untitled"}
+                        {r.year ? ` (${r.year})` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            )}
+            <dt>DOI</dt>
+            <dd>
+              <LibraryMetadataEditor item={item} onChange={handleItemUpdated} />
+            </dd>
             <dt>URL</dt>
             <dd>
               <a href={item.url} target="_blank" rel="noreferrer">
                 {item.url}
               </a>
             </dd>
-            {item.doi && (
+            {item.volume && (
               <>
-                <dt>DOI</dt>
-                <dd>
-                  <a
-                    href={`https://doi.org/${item.doi}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {item.doi}
-                  </a>
-                </dd>
+                <dt>卷</dt>
+                <dd>{item.volume}</dd>
+              </>
+            )}
+            {item.issue && (
+              <>
+                <dt>期</dt>
+                <dd>{item.issue}</dd>
+              </>
+            )}
+            {item.pages && (
+              <>
+                <dt>页码</dt>
+                <dd>{item.pages}</dd>
               </>
             )}
             <dt>出版社</dt>
             <dd>{item.publisher || "—"}</dd>
+            <dt>标签</dt>
+            <dd>
+              <LibraryTagEditor
+                item={item}
+                suggestions={tagCatalog}
+                onChange={handleItemUpdated}
+              />
+            </dd>
             <dt>收录综述</dt>
             <dd>
-              {(item.provenance || []).length ? (
+              {hasProv ? (
                 <ul className="library-detail__prov">
-                  {(item.provenance || []).map((p, i) => (
-                    <li key={`${p.session_id}-${p.role}-${i}`}>
-                      {p.session_title || p.session_id} · {p.role}
-                      {p.review_ref_index != null ? ` · [${p.review_ref_index}]` : ""}
+                  {uniqueProvenanceSessions(item).map((p) => (
+                    <li key={p.session_id}>
+                      <button
+                        type="button"
+                        className="library-detail__session-link"
+                        onClick={() => openReviewSession(p.session_id)}
+                      >
+                        {p.session_title}
+                      </button>
+                      {p.review_ref_index != null ? ` · 文中 [${p.review_ref_index}]` : ""}
                     </li>
                   ))}
                 </ul>
@@ -259,17 +400,57 @@ export function LibraryDetailPane({
                 "—"
               )}
             </dd>
-            {apa && (
+            {(item.citations?.apa || item.citations?.acm) && (
               <>
                 <dt>引用</dt>
                 <dd>
-                  <pre className="library-detail__cite">{apa}</pre>
+                  {item.citations?.apa && (
+                    <pre className="library-detail__cite">{item.citations.apa}</pre>
+                  )}
+                  {item.citations?.acm && (
+                    <pre className="library-detail__cite">{item.citations.acm}</pre>
+                  )}
                 </dd>
               </>
             )}
           </dl>
         )}
-        {tab === "pdf" && item.full_text?.path?.includes("pdfs/") && (
+
+        {currentTab === "reviews" && (
+          <div className="library-detail__reviews">
+            {reviewsLoading ? (
+              <Spin size="small" />
+            ) : relatedSessions.length === 0 ? (
+              <p className="functional-card__empty">暂无关联综述会话。</p>
+            ) : (
+              <ul className="library-detail__review-list">
+                {relatedSessions.map((s) => (
+                  <li key={s.session_id} className="library-detail__review-item">
+                    <button
+                      type="button"
+                      className="library-detail__session-link library-detail__review-title"
+                      onClick={() => openReviewSession(s.session_id)}
+                    >
+                      {s.session_title}
+                    </button>
+                    {s.review_ref_index != null && (
+                      <span className="library-detail__review-ref">
+                        文中引用 [{s.review_ref_index}]
+                      </span>
+                    )}
+                    {s.first_question ? (
+                      <p className="library-detail__review-question">{s.first_question}</p>
+                    ) : (
+                      <p className="library-detail__muted">暂无首问记录</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {currentTab === "pdf" && item.full_text?.path?.includes("pdfs/") && (
           <iframe
             title="PDF 预览"
             className="library-detail__pdf"

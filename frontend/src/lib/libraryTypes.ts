@@ -22,7 +22,13 @@ export type LibraryItem = {
   authors: string[];
   venue?: string;
   year?: string;
+  month?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
   citation_count?: number | null;
+  references_count?: number | null;
+  references_preview?: { title?: string; year?: string; doi?: string }[];
   url: string;
   doi?: string;
   publisher?: string;
@@ -37,6 +43,7 @@ export type LibraryItem = {
   availability: LibraryAvailability;
   citations?: Record<string, string>;
   provenance?: LibraryProvenance[];
+  tags?: string[];
   starred?: boolean;
   updated_at?: string;
 };
@@ -64,7 +71,15 @@ export function normalizeLibraryItem(raw: Record<string, unknown>): LibraryItem 
     authors,
     venue: String(raw.venue || ""),
     year: String(raw.year || ""),
+    month: String(raw.month || ""),
+    volume: String(raw.volume || ""),
+    issue: String(raw.issue || ""),
+    pages: String(raw.pages || ""),
     citation_count: raw.citation_count as number | null | undefined,
+    references_count: raw.references_count as number | null | undefined,
+    references_preview: Array.isArray(raw.references_preview)
+      ? (raw.references_preview as { title?: string; year?: string; doi?: string }[])
+      : [],
     url: String(raw.url || ""),
     doi: String(raw.doi || ""),
     publisher: String(raw.publisher || ""),
@@ -75,6 +90,9 @@ export function normalizeLibraryItem(raw: Record<string, unknown>): LibraryItem 
     },
     citations: raw.citations as Record<string, string> | undefined,
     provenance: raw.provenance as LibraryProvenance[] | undefined,
+    tags: Array.isArray(raw.tags)
+      ? (raw.tags as unknown[]).map(String).filter(Boolean)
+      : [],
     starred: Boolean(raw.starred),
   };
 }
@@ -83,8 +101,18 @@ export function formatVenueLine(item: LibraryItem): string {
   const parts: string[] = [];
   if (item.venue) parts.push(item.venue);
   if (item.year) parts.push(item.year);
+  const stats = formatCitationStats(item);
+  if (stats) parts.push(stats);
+  return parts.join(" · ") || "—";
+}
+
+function formatCitationStats(item: LibraryItem): string {
+  const parts: string[] = [];
   if (item.citation_count != null && item.citation_count > 0) {
     parts.push(`被引 ${item.citation_count}`);
   }
-  return parts.join(" · ") || "—";
+  if (item.references_count != null && item.references_count > 0) {
+    parts.push(`他引 ${item.references_count}`);
+  }
+  return parts.join(" · ");
 }

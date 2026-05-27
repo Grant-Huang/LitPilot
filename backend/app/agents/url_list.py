@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 _URL_IN_TEXT = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
-_MAX_REQUEST_URLS = 20
+_MAX_REQUEST_URLS = 50
 
 
 def _normalize_url(raw: str) -> str | None:
@@ -166,7 +166,40 @@ def merge_fetch_hits(
     return merged, extra_count
 
 
+def resolve_fetch_display_title(hit: dict[str, str], ctx_md: str = "") -> str:
+    """用于 UI 展示的文章标题（不用域名冒充标题）。"""
+    url = str(hit.get("url") or "").strip()
+    title = str(hit.get("title") or "").strip()
+    if title and title != url:
+        return title[:200]
+
+    if ctx_md:
+        # 兼容两种 header：
+        # - 旧格式：## [网页材料] Title
+        # - 新格式：## Title
+        for pat in (
+            r"^##\s*\[网页材料\]\s*(.+?)\s*$",
+            r"^##\s+(.+?)\s*$",
+        ):
+            m = re.search(pat, ctx_md.strip(), re.MULTILINE)
+            if not m:
+                continue
+            cand = m.group(1).strip()
+            if cand and cand != url and not cand.lower().startswith("http"):
+                return cand[:200]
+
+    snippet = str(hit.get("snippet") or "").strip()
+    if snippet:
+        first = snippet.split("\n")[0].strip()
+        if len(first) >= 12 and not first.lower().startswith("http"):
+            return first[:160]
+
+    return ""
+
+
 def effective_fetch_cap(base_max: int, extra_urls: list[str]) -> int:
+    from app.agents.agent_settings import MAX_FETCH_URLS_CAP
+
     if not extra_urls:
-        return base_max
-    return min(max(base_max, len(extra_urls)), 20)
+        return min(base_max, MAX_FETCH_URLS_CAP)
+    return min(max(base_max, len(extra_urls)), MAX_FETCH_URLS_CAP)

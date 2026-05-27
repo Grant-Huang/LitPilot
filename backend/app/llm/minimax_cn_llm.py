@@ -86,6 +86,10 @@ class MinimaxCNLLM(BaseLLM):
 
         raw = data["choices"][0]["message"]["content"] or ""
         reasoning, content = self._split_think(raw)
+        # 部分模型把正文全部放在 thinking 区，可见 content 为空
+        if not (content or "").strip() and (reasoning or "").strip():
+            content = reasoning.strip()
+            reasoning = None
         return LLMResponse(
             content=content,
             reasoning=reasoning or None,
@@ -159,12 +163,6 @@ class MinimaxCNLLM(BaseLLM):
                     if not piece:
                         continue
 
-                    if not use_reasoning:
-                        visible, _ = self._split_think(piece)
-                        if visible:
-                            yield ("content", visible)
-                        continue
-
                     tag_buf += piece
                     while tag_buf:
                         if not in_think:
@@ -183,10 +181,15 @@ class MinimaxCNLLM(BaseLLM):
                         low = tag_buf.lower()
                         close_idx = low.find("</think>")
                         if close_idx == -1:
-                            yield ("reasoning", tag_buf)
+                            # 综述生成等场景：正文可能在 thinking 标签内，需流出为 content
+                            kind: StreamPartKind = (
+                                "reasoning" if use_reasoning else "content"
+                            )
+                            yield (kind, tag_buf)
                             tag_buf = ""
                             break
                         if close_idx > 0:
-                            yield ("reasoning", tag_buf[:close_idx])
+                            kind = "reasoning" if use_reasoning else "content"
+                            yield (kind, tag_buf[:close_idx])
                         tag_buf = tag_buf[close_idx + len("</think>") :]
                         in_think = False

@@ -1,6 +1,6 @@
 "use client";
 
-import type { WorkflowRunState } from "@meso/types";
+import type { WorkflowRunState } from "@meso.ai/types";
 import type { WorkflowGraphJson } from "@/lib/workflowGraph";
 import { WorkflowGraphView } from "./WorkflowGraphView";
 import { WorkflowNodeList } from "./WorkflowNodeList";

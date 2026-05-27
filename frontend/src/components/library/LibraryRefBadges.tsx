@@ -115,21 +115,26 @@ export function LibraryRefBadges({ item, onOpenDetail }: Props) {
             </a>
           );
         }
-        return (
-          <button
-            key={b.key}
-            type="button"
-            className={cls}
-            title={b.title}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (b.key === "fulltext" && onOpenDetail) {
+        if ((b.key === "fulltext" || b.key === "prov") && onOpenDetail) {
+          return (
+            <button
+              key={b.key}
+              type="button"
+              className={cls}
+              title={b.title}
+              onClick={(e) => {
+                e.stopPropagation();
                 onOpenDetail(b);
-              }
-            }}
-          >
+              }}
+            >
+              {b.label}
+            </button>
+          );
+        }
+        return (
+          <span key={b.key} className={cls} title={b.title}>
             {b.label}
-          </button>
+          </span>
         );
       })}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { StreamState } from "@meso/ui";
+import type { StreamState } from "@meso.ai/ui";
 import { LitPilotArtifactPane } from "@/components/artifact/LitPilotArtifactPane";
 import type { LibraryItem } from "@/lib/libraryTypes";
 

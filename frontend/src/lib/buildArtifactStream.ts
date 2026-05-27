@@ -1,5 +1,5 @@
-import { createInitialStreamState } from "@meso/ui/runtime";
-import type { StreamState } from "@meso/ui";
+import { createInitialStreamState } from "@meso.ai/ui/runtime";
+import type { StreamState } from "@meso.ai/ui";
 
 /** 将已保存的综述 Markdown 注入 Artifact 流状态 */
 export function streamStateWithReview(

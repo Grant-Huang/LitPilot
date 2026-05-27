@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.library.models import provenance_entry
+from app.library.metadata_enrich import build_enrich_patch_for_record, merge_enrich_into_patch
+from app.library.models import merge_item, parse_authors, provenance_entry
 from app.library.store import LibraryStore
 from app.skills.citation_extractor import CitationFormat, CitationRecord
 
@@ -16,6 +17,7 @@ def upsert_from_citation(
     session_id: str = "",
     session_title: str = "",
     display_index_hint: int | None = None,
+    enrich_patch: dict[str, Any] | None = None,
 ) -> Optional[dict[str, Any]]:
     lib = lib or LibraryStore()
     url = rec.url or ""
@@ -37,7 +39,7 @@ def upsert_from_citation(
         cite_line = rec.format_line(idx, citation_format)
         patch: dict[str, Any] = {
             "title": rec.title,
-            "authors": rec.authors,
+            "authors": parse_authors(rec.authors),
             "year": rec.year,
             "venue": rec.venue,
             "url": url,
@@ -52,7 +54,10 @@ def upsert_from_citation(
                 "fetch_status": "ok",
             },
         }
-        item = lib.upsert(patch, url=url, doi=rec.doi)
+        cr = enrich_patch if enrich_patch is not None else build_enrich_patch_for_record(rec)
+        if cr:
+            merge_enrich_into_patch(patch, cr, rec_doi=rec.doi or "")
+        item = lib.upsert(patch, url=url, doi=patch.get("doi") or rec.doi or "")
         lib._with_lock(
             lambda db: _set_display_index(db, item["id"], idx) or {}
         )
@@ -85,8 +90,6 @@ def _set_display_index(db: dict[str, Any], item_id: str, idx: int) -> None:
     db["next_display_index"] = max(int(db.get("next_display_index") or 0), idx)
     apa = (item.get("citations") or {}).get("apa") or ""
     if apa and f"[{idx}]" not in apa[:8]:
-        from app.skills.citation_extractor import CitationRecord
-
         rec = CitationRecord(
             title=item.get("title", ""),
             authors=", ".join(item.get("authors") or []),

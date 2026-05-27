@@ -55,6 +55,10 @@ export type AgentSettings = {
   think_use_reasoning?: boolean;
   think_model?: string;
   think_max_tokens_per_phase?: number;
+  /** 自定义综述生成 system prompt；空字符串表示使用内置默认 */
+  review_system_prompt_template?: string;
+  /** 内置默认模板（含 {fmt_label}、{citation_format} 占位符） */
+  review_system_prompt_default?: string;
 };
 
 export type RefIndex = {
@@ -143,9 +147,35 @@ export const libraryApi = {
       method: "POST",
     }),
   enrich: (itemId: string) =>
-    apiRequestData<{ ok: boolean; citation_count?: number; item?: LibraryItem }>(
-      `/library/items/${encodeURIComponent(itemId)}/enrich`,
-      { method: "POST" },
+    apiRequestData<{
+      ok: boolean;
+      citation_count?: number;
+      references_count?: number;
+      item?: LibraryItem;
+    }>(`/library/items/${encodeURIComponent(itemId)}/enrich`, { method: "POST" }),
+  updateMetadata: (
+    itemId: string,
+    body: {
+      title?: string;
+      authors?: string[];
+      year?: string;
+      venue?: string;
+      doi?: string;
+      publisher?: string;
+      abstract?: string;
+      volume?: string;
+      issue?: string;
+      pages?: string;
+      month?: string;
+      refresh_crossref?: boolean;
+    },
+  ) =>
+    apiRequestData<{ item: LibraryItem }>(
+      `/library/items/${encodeURIComponent(itemId)}/metadata`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
     ),
   star: (itemId: string, starred: boolean) =>
     apiRequestData<{ item: LibraryItem }>(
@@ -153,6 +183,30 @@ export const libraryApi = {
       {
         method: "PATCH",
         body: JSON.stringify({ starred }),
+      },
+    ),
+  delete: (itemId: string) =>
+    apiRequestData<{ deleted: boolean; item_id: string }>(
+      `/library/items/${encodeURIComponent(itemId)}`,
+      { method: "DELETE" },
+    ),
+  relatedSessions: (itemId: string) =>
+    apiRequestData<{
+      sessions: {
+        session_id: string;
+        session_title: string;
+        first_question: string;
+        review_ref_index?: number | null;
+      }[];
+    }>(`/library/items/${encodeURIComponent(itemId)}/related-sessions`),
+  tags: () =>
+    apiRequestData<{ tags: { name: string; count: number }[] }>("/library/tags"),
+  updateTags: (itemId: string, tags: string[]) =>
+    apiRequestData<{ item: LibraryItem }>(
+      `/library/items/${encodeURIComponent(itemId)}/tags`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ tags }),
       },
     ),
 };

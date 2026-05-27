@@ -1,4 +1,4 @@
-import type { StreamState } from "@meso/ui";
+import type { StreamState } from "@meso.ai/ui";
 import { describeToolAction } from "@/lib/toolLabels";
 
 export type FailedLiteratureItem = {

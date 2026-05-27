@@ -1,6 +1,7 @@
 from app.agents.url_list import (
     merge_fetch_hits,
     parse_url_list_file,
+    resolve_fetch_display_title,
     sanitize_fetch_urls,
 )
 
@@ -31,3 +32,30 @@ def test_merge_prioritizes_upload() -> None:
 def test_sanitize_caps() -> None:
     raw = [f"https://example.com/{i}" for i in range(30)]
     assert len(sanitize_fetch_urls(raw, max_items=20)) == 20
+
+
+def test_resolve_fetch_display_title_from_ctx_md() -> None:
+    hit = {"url": "https://example.com/p", "title": "", "snippet": ""}
+    ctx = "## [网页材料] Real Article Title\n\nbody"
+    assert resolve_fetch_display_title(hit, ctx) == "Real Article Title"
+
+
+def test_resolve_fetch_display_title_prefers_hit_title() -> None:
+    hit = {
+        "url": "https://example.com/p",
+        "title": "From Tavily",
+        "snippet": "short",
+    }
+    assert resolve_fetch_display_title(hit, "") == "From Tavily"
+
+
+def test_resolve_fetch_display_title_snippet_fallback() -> None:
+    hit = {
+        "url": "https://example.com/p",
+        "title": "",
+        "snippet": "A long enough snippet line for display",
+    }
+    assert (
+        resolve_fetch_display_title(hit, "")
+        == "A long enough snippet line for display"
+    )

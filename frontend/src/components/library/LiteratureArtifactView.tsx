@@ -38,7 +38,6 @@ export function LiteratureArtifactView({
           variant="artifact"
           itemId={selectedId}
           onBack={handleBack}
-          initialTab="abstract"
         />
       </div>
     );

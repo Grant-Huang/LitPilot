@@ -2,7 +2,7 @@
 
 ## 分层
 
-- **@meso/ui**（GitHub：`github:Grant-Huang/meso#main&path:/packages/meso-ui`）：三栏布局、SSE 流式消息、Artifact、WorkflowTimeline
+- **@meso.ai/ui**（npm：`@meso.ai/ui` / `@meso.ai/types`）：三栏布局、SSE 流式消息、Artifact、WorkflowTimeline
 - **LitPilot 前端**：会话、文献库、设置页
 - **LitPilot 后端**：`literature_workflow` DAG、文件存储、无 SQL
 

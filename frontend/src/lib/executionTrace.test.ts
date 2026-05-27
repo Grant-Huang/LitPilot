@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialStreamState } from "@meso/ui";
+import { createInitialStreamState } from "@meso.ai/ui";
 import {
   buildProcessLines,
   collectExecutionTraceFromStream,

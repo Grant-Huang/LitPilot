@@ -4,7 +4,11 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.agents.agent_settings import TAVILY_MAX_RESULTS_CAP
+from app.agents.agent_settings import MAX_FETCH_URLS_CAP, TAVILY_MAX_RESULTS_CAP
+from app.agents.review_prompt import (
+    MAX_REVIEW_SYSTEM_PROMPT_LEN,
+    default_review_system_prompt_template,
+)
 from app.agents.tavily_key import looks_like_tavily_api_key, tavily_key_hint
 from app.agents.tools.tavily_search import tavily_search
 from app.core.response import err, ok
@@ -38,6 +42,7 @@ class AgentSettingsBody(BaseModel):
     think_use_reasoning: bool | None = None
     think_model: str | None = None
     think_max_tokens_per_phase: int | None = None
+    review_system_prompt_template: str | None = None
 
 
 def _agent_settings_response(merged: dict) -> dict:
@@ -50,6 +55,10 @@ def _agent_settings_response(merged: dict) -> dict:
     for k in ("tavily_api_key", "jina_api_key", "llm_api_key"):
         if safe.get(k):
             safe[k] = "***" + str(merged[k])[-4:]
+    safe["review_system_prompt_default"] = default_review_system_prompt_template()
+    safe["review_system_prompt_template"] = str(
+        merged.get("review_system_prompt_template") or ""
+    )
     return safe
 
 
@@ -69,7 +78,9 @@ async def save_agent_settings(body: AgentSettingsBody):
             1, min(int(partial["tavily_max_results"]), TAVILY_MAX_RESULTS_CAP)
         )
     if "max_fetch_urls" in partial:
-        partial["max_fetch_urls"] = max(1, min(int(partial["max_fetch_urls"]), 20))
+        partial["max_fetch_urls"] = max(
+            1, min(int(partial["max_fetch_urls"]), MAX_FETCH_URLS_CAP)
+        )
     if "literature_source_mode" in partial:
         partial["literature_source_mode"] = normalize_literature_source_mode(
             partial["literature_source_mode"]
@@ -95,6 +106,13 @@ async def save_agent_settings(body: AgentSettingsBody):
         partial["think_max_tokens_per_phase"] = max(
             80, min(int(partial["think_max_tokens_per_phase"]), 500)
         )
+    if "review_system_prompt_template" in partial:
+        tpl = str(partial["review_system_prompt_template"])
+        if len(tpl) > MAX_REVIEW_SYSTEM_PROMPT_LEN:
+            return err(
+                f"综述生成 system prompt 过长（最多 {MAX_REVIEW_SYSTEM_PROMPT_LEN} 字符）"
+            )
+        partial["review_system_prompt_template"] = tpl
     saved = get_store().save_agent_settings(partial)
     return ok(_agent_settings_response(saved), message="设置已保存")
 

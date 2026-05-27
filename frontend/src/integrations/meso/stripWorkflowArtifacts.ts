@@ -1,4 +1,4 @@
-import type { StreamState } from "@meso/ui";
+import type { StreamState } from "@meso.ai/ui";
 import { WORKFLOW_GRAPH_LANG } from "@/lib/workflowGraph";
 
 /** Hide workflow-graph from inline chat; show in right Artifact column. */

@@ -83,8 +83,12 @@ def should_auto_rename_session(
     *,
     user_message_count: int,
 ) -> bool:
-    """Rename only on the first user turn and when title is still auto-generated."""
-    if user_message_count != 1 or not meta:
+    """仅首轮用户消息后自动改标题一次；之后不再改（用户可手动改名）。"""
+    if not meta or user_message_count != 1:
+        return False
+    if meta.get("title_auto_set"):
+        return False
+    if not user_message.strip():
         return False
     title = (meta.get("title") or "").strip()
     if is_default_session_title(title):

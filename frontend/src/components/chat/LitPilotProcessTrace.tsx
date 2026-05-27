@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { StageTimeline, type Stage } from "@meso/ui";
+import { StageTimeline, type Stage } from "@meso.ai/ui";
 import type { ExecutionTrace } from "@/lib/executionTrace";
 import {
   buildProcessLines,
@@ -9,7 +9,9 @@ import {
 } from "@/lib/executionTrace";
 import { LitPilotThinkFold } from "./LitPilotThinkFold";
 import { LitPilotToolStep } from "./LitPilotToolStep";
-import { toolStepToState } from "@/lib/executionTrace";
+import { WebFetchStepTitle } from "./WebFetchStepTitle";
+import { isWebFetchCharOnlyPreview } from "@/lib/toolLabels";
+import { toolStepToState, type WebFetchLineMeta } from "@/lib/executionTrace";
 
 type Props = {
   trace: ExecutionTrace;
@@ -20,12 +22,14 @@ type Props = {
 
 function LitPilotWorkflowStep({
   title,
+  webFetch,
   status,
   preview,
   detail,
   duration_ms,
 }: {
   title: string;
+  webFetch?: WebFetchLineMeta;
   status: "pending" | "running" | "done" | "error";
   preview?: string;
   detail?: string;
@@ -50,8 +54,21 @@ function LitPilotWorkflowStep({
           )}
         </span>
         <div className="litpilot-tool-step__main">
-          <div className="litpilot-tool-step__title">{title}</div>
-          {preview && (status === "done" || status === "error") && (
+          <div className="litpilot-tool-step__title">
+            {webFetch ? (
+              <WebFetchStepTitle
+                articleTitle={webFetch.articleTitle}
+                url={webFetch.url}
+                prefix={webFetch.prefix ?? "抓取网页："}
+                charCount={webFetch.charCount}
+              />
+            ) : (
+              title
+            )}
+          </div>
+          {preview &&
+            (status === "done" || status === "error") &&
+            !(webFetch && isWebFetchCharOnlyPreview(preview, undefined)) && (
             <button
               type="button"
               className="litpilot-tool-step__preview"
@@ -150,6 +167,7 @@ export function LitPilotProcessTrace({
                   <LitPilotWorkflowStep
                     key={line.key}
                     title={line.title}
+                    webFetch={line.webFetch}
                     status={line.status}
                     preview={line.preview}
                     detail={line.detail}

@@ -36,9 +36,12 @@ async def get_tavily_max_results() -> int:
     return max(1, min(n, TAVILY_MAX_RESULTS_CAP))
 
 
+MAX_FETCH_URLS_CAP = 50
+
+
 async def get_max_fetch_urls() -> int:
     n = int((await get_merged_settings()).get("max_fetch_urls") or 5)
-    return max(1, min(n, 20))
+    return max(1, min(n, MAX_FETCH_URLS_CAP))
 
 
 async def get_literature_source_mode() -> str:
@@ -71,6 +74,14 @@ async def get_citation_format() -> str:
     from app.skills.citation_extractor import normalize_citation_format
 
     return normalize_citation_format((await get_merged_settings()).get("citation_format"))
+
+
+async def get_review_system_prompt_template() -> str | None:
+    raw = (await get_merged_settings()).get("review_system_prompt_template")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 async def get_use_llm_planner() -> bool:

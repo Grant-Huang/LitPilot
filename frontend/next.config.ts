@@ -6,7 +6,7 @@ const backendBase =
   "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@meso/ui"],
+  transpilePackages: ["@meso.ai/ui"],
   skipTrailingSlashRedirect: true,
   async rewrites() {
     return [

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArtifactPanel } from "@meso/ui";
-import type { StreamState } from "@meso/ui";
+import { ArtifactPanel } from "@meso.ai/ui";
+import type { StreamState } from "@meso.ai/ui";
 import { WorkflowArtifactPanel } from "@/components/workflow/WorkflowArtifactPanel";
 import { downloadTextFile } from "@/lib/buildArtifactStream";
 import { LITERATURE_PLAN_GRAPH } from "@/lib/literaturePlanGraph";

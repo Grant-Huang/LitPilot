@@ -2,11 +2,13 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.response import ok
+from app.library.crossref import normalize_doi
 from app.library.dedupe import dedupe_library
 from app.library.enrich import enrich_item_citations
+from app.library.metadata_enrich import enrich_item_from_crossref
 from app.library.migrate import migrate_legacy_refs
 from app.library.reconcile import reconcile_library
 from app.library.store import LibraryStore
@@ -22,6 +24,28 @@ class ReconcileBody(BaseModel):
 
 class StarBody(BaseModel):
     starred: bool = True
+
+
+class TagsBody(BaseModel):
+    tags: list[str] = []
+
+
+class MetadataBody(BaseModel):
+    title: Optional[str] = None
+    authors: Optional[list[str]] = None
+    year: Optional[str] = None
+    venue: Optional[str] = None
+    doi: Optional[str] = None
+    publisher: Optional[str] = None
+    abstract: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
+    pages: Optional[str] = None
+    month: Optional[str] = None
+    refresh_crossref: bool = Field(
+        default=True,
+        description="DOI 变更或补全时是否从 Crossref 拉取被引/他引与书目",
+    )
 
 
 def _ensure_library() -> LibraryStore:
@@ -95,6 +119,31 @@ async def enrich_item(item_id: str):
     return ok(result)
 
 
+@router.patch("/items/{item_id}/metadata")
+async def patch_item_metadata(item_id: str, body: MetadataBody):
+    lib = _ensure_library()
+    item = lib.get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    patch = body.model_dump(exclude={"refresh_crossref"}, exclude_none=True)
+    doi_in = patch.pop("doi", None)
+    force_doi = doi_in is not None
+    if doi_in is not None:
+        patch["doi"] = normalize_doi(doi_in)
+
+    updated = lib.patch_item_metadata(item_id, patch, force_doi=force_doi)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if body.refresh_crossref and (updated.get("doi") or doi_in):
+        result = enrich_item_from_crossref(item_id, lib, doi=updated.get("doi"))
+        if result.get("ok"):
+            updated = result.get("item") or updated
+
+    return ok({"item": updated})
+
+
 @router.patch("/items/{item_id}/star")
 async def star_item(item_id: str, body: StarBody):
     lib = _ensure_library()
@@ -102,6 +151,58 @@ async def star_item(item_id: str, body: StarBody):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return ok({"item": item})
+
+
+@router.patch("/items/{item_id}/tags")
+async def update_item_tags(item_id: str, body: TagsBody):
+    lib = _ensure_library()
+    item = lib.set_tags(item_id, body.tags)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return ok({"item": item})
+
+
+@router.get("/tags")
+async def list_library_tags():
+    lib = _ensure_library()
+    return ok({"tags": lib.list_tags()})
+
+
+@router.delete("/items/{item_id}")
+async def delete_library_item(item_id: str):
+    lib = _ensure_library()
+    if not lib.delete_item(item_id):
+        raise HTTPException(status_code=404, detail="Item not found")
+    return ok({"deleted": True, "item_id": item_id})
+
+
+@router.get("/items/{item_id}/related-sessions")
+async def related_sessions(item_id: str):
+    lib = _ensure_library()
+    item = lib.get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    store = get_store()
+    seen: set[str] = set()
+    sessions: list[dict[str, Any]] = []
+    for prov in item.get("provenance") or []:
+        sid = str(prov.get("session_id") or "").strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        meta = store.get_session(sid) or {}
+        title = (
+            str(prov.get("session_title") or "").strip()
+            or str(meta.get("title") or "").strip()
+            or sid
+        )
+        sessions.append({
+            "session_id": sid,
+            "session_title": title,
+            "first_question": store.load_first_user_message(sid),
+            "review_ref_index": prov.get("review_ref_index"),
+        })
+    return ok({"sessions": sessions})
 
 
 @router.get("/pdfs")

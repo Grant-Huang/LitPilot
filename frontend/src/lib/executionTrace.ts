@@ -1,6 +1,12 @@
-import type { StreamState, ToolCallState } from "@meso/ui";
-import type { WorkflowNodeState } from "@meso/types";
-import { describeToolAction, previewToolResult } from "@/lib/toolLabels";
+import type { StreamState, ToolCallState } from "@meso.ai/ui";
+import type { WorkflowNodeState } from "@meso.ai/types";
+import {
+  describeToolAction,
+  formatWebFetchPlainText,
+  isWebFetchCharOnlyPreview,
+  previewToolResult,
+  webFetchLineMeta,
+} from "@/lib/toolLabels";
 
 export type SerializedToolStep = {
   id: string;
@@ -18,6 +24,7 @@ export type SerializedWorkflowStep = {
   state: WorkflowNodeState;
   title?: string;
   url?: string;
+  char_count?: number;
   error?: string;
   duration_ms?: number;
 };
@@ -45,11 +52,20 @@ export function mergeThinkIntoTrace(
   return { ...base, thinkContent: mergedThink };
 }
 
+export type WebFetchLineMeta = {
+  articleTitle: string;
+  url: string;
+  /** 行首前缀，默认「抓取网页全文：」 */
+  prefix?: string;
+  charCount?: number;
+};
+
 export type ProcessLine = {
   key: string;
   kind: "tool" | "workflow";
   status: "pending" | "running" | "done" | "error";
   title: string;
+  webFetch?: WebFetchLineMeta;
   preview?: string;
   detail?: string;
   duration_ms?: number;
@@ -74,12 +90,18 @@ export function collectExecutionTraceFromStream(
       if (!node) continue;
       if (nodeId === "fetch" && node.name === "fetch") continue;
       const meta = node.metadata ?? {};
+      const rawCount = meta.char_count;
+      const char_count =
+        typeof rawCount === "number" && rawCount > 0
+          ? Math.floor(rawCount)
+          : undefined;
       workflows.push({
         node_id: nodeId,
         name: node.name,
         state: node.state,
         title: String(meta.title ?? "").trim() || undefined,
         url: String(meta.url ?? "").trim() || undefined,
+        char_count,
         error: String(meta.error ?? "").trim() || undefined,
         duration_ms: node.duration_ms,
       });
@@ -126,6 +148,20 @@ export function toolStepToState(step: SerializedToolStep): ToolCallState {
   };
 }
 
+function workflowWebFetchMeta(
+  step: SerializedWorkflowStep,
+): WebFetchLineMeta | undefined {
+  const meta = webFetchLineMeta(
+    step.name,
+    undefined,
+    step.title,
+    step.url,
+    step.char_count,
+  );
+  if (!meta) return undefined;
+  return { ...meta, prefix: "抓取网页：" };
+}
+
 function workflowTitle(step: SerializedWorkflowStep): string {
   const label =
     step.name === "web_fetch"
@@ -133,6 +169,14 @@ function workflowTitle(step: SerializedWorkflowStep): string {
       : step.name === "extract_citation" || step.name === "cite_extract"
         ? "引用抽取"
         : step.name.replace(/_/g, " ");
+  const wf = workflowWebFetchMeta(step);
+  if (wf) {
+    return `${wf.prefix ?? "抓取网页："}${formatWebFetchPlainText(
+      wf.articleTitle,
+      wf.url,
+      wf.charCount,
+    )}`;
+  }
   if (step.title) return `${label}：${step.title}`;
   if (step.url) {
     try {
@@ -170,6 +214,11 @@ export function buildProcessLines(trace: ExecutionTrace): ProcessLine[] {
         : t.status === "error"
           ? "error"
           : "done";
+    const wfMeta = webFetchLineMeta(t.name, t.args, undefined, undefined, undefined, t.output);
+    const previewRaw = previewToolResult(t.output, t.error);
+    const hideCharPreview =
+      wfMeta != null &&
+      (t.output ? isWebFetchCharOnlyPreview(t.output, t.error) : false);
     lines.push({
       key: `tool-${t.id}`,
       kind: "tool",
@@ -181,7 +230,8 @@ export function buildProcessLines(trace: ExecutionTrace): ProcessLine[] {
         risk: "safe",
         provider: "api",
       }),
-      preview: previewToolResult(t.output, t.error),
+      webFetch: wfMeta ?? undefined,
+      preview: hideCharPreview ? undefined : previewRaw,
       detail: t.error || t.output,
       duration_ms: t.duration_ms,
     });
@@ -202,6 +252,7 @@ export function buildProcessLines(trace: ExecutionTrace): ProcessLine[] {
       kind: "workflow",
       status,
       title: workflowTitle(w),
+      webFetch: workflowWebFetchMeta(w),
       preview: workflowPreview(w),
       detail: w.error,
       duration_ms: w.duration_ms,

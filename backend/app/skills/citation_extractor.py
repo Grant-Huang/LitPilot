@@ -131,6 +131,27 @@ def _extract_doi(text: str) -> str:
     return m.group(0) if m else ""
 
 
+def _extract_abstract(text: str) -> str:
+    m = re.search(
+        r"(?im)^#+\s*abstract\s*$[\s\S]*?(?=^#+\s|\Z)",
+        text,
+    )
+    if m:
+        block = re.sub(r"^#+\s*abstract\s*", "", m.group(0), flags=re.I).strip()
+        block = re.sub(r"\s+", " ", block)
+        if len(block) > 60:
+            return block[:2000]
+    m2 = re.search(
+        r"(?is)(?:^|\n)\s*abstract\s*[:\-]\s*(.+?)(?:\n\s*(?:keywords|introduction|1\.|index terms)|\Z)",
+        text,
+    )
+    if m2:
+        block = re.sub(r"\s+", " ", m2.group(1).strip())
+        if len(block) > 60:
+            return block[:2000]
+    return ""
+
+
 async def extract_citation_from_url(
     url: str,
     *,
@@ -171,9 +192,13 @@ async def extract_citation_from_url(
     elif publisher == "ieee":
         rec.venue = rec.venue or "IEEE"
 
-    paras = [p.strip() for p in body.split("\n\n") if len(p.strip()) > 80]
-    if paras:
-        rec.abstract = paras[0][:500]
+    abstract = _extract_abstract(body)
+    if abstract:
+        rec.abstract = abstract
+    else:
+        paras = [p.strip() for p in body.split("\n\n") if len(p.strip()) > 80]
+        if paras:
+            rec.abstract = paras[0][:500]
 
     rec.success = bool(rec.title and (rec.authors or rec.year))
     if not rec.success:
@@ -230,20 +255,66 @@ async def extract_and_persist_batch(
     session_id: str = "",
     session_title: str = "",
 ) -> list[CitationRecord]:
-    results: list[CitationRecord] = []
-    for hit in hits[:max_items]:
-        rec = await extract_citation_from_url(
-            hit["url"],
-            jina_api_key=jina_api_key,
-            title_hint=hit.get("title") or "",
-            timeout=timeout,
+    """Parallel Jina cite extract, then parallel OpenAlex+Crossref enrich, then persist."""
+    import asyncio
+
+    from app.agents.agent_settings import get_fetch_parallel
+    from app.library.metadata_enrich import enrich_records_parallel
+    from app.library.upsert_citation import upsert_from_citation
+    from app.library.from_run import _sync_exports
+    from app.library.store import LibraryStore
+
+    queue = hits[:max_items]
+    if not queue:
+        return []
+
+    parallel = await get_fetch_parallel()
+    extract_sem = asyncio.Semaphore(max(1, min(parallel, 8)))
+
+    async def _extract_one(hit: dict[str, str]) -> CitationRecord:
+        async with extract_sem:
+            return await extract_citation_from_url(
+                hit["url"],
+                jina_api_key=jina_api_key,
+                title_hint=hit.get("title") or "",
+                timeout=timeout,
+            )
+
+    results: list[CitationRecord] = list(
+        await asyncio.gather(*[_extract_one(h) for h in queue])
+    )
+
+    success_recs = [r for r in results if r.success]
+    enrich_list: list[dict] = []
+    if success_recs:
+        enrich_list = await enrich_records_parallel(
+            success_recs,
+            parallel=parallel,
         )
+
+    enrich_iter = iter(enrich_list)
+    lib = LibraryStore()
+    for rec in results:
         if rec.success:
-            await persist_citation(
+            ep = next(enrich_iter, {})
+            upsert_from_citation(
                 rec,
+                lib=lib,
+                citation_format=citation_format,
+                session_id=session_id,
+                session_title=session_title,
+                enrich_patch=ep,
+            )
+        else:
+            upsert_from_citation(
+                rec,
+                lib=lib,
                 citation_format=citation_format,
                 session_id=session_id,
                 session_title=session_title,
             )
-        results.append(rec)
+
+    if success_recs:
+        _sync_exports(lib)
+
     return results

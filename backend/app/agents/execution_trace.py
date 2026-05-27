@@ -49,6 +49,7 @@ def append_workflow(
     state: str,
     title: str = "",
     url: str = "",
+    char_count: int | None = None,
     error: str | None = None,
     duration_ms: int | None = None,
 ) -> None:
@@ -61,6 +62,8 @@ def append_workflow(
         entry["title"] = title
     if url:
         entry["url"] = url
+    if char_count is not None and char_count > 0:
+        entry["char_count"] = char_count
     if error:
         entry["error"] = error
     if duration_ms is not None:

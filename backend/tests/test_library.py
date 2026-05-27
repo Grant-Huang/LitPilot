@@ -7,6 +7,7 @@ from app.library.dedupe import dedupe_library
 from app.library.from_run import upsert_library_from_run
 from app.library.migrate import migrate_legacy_refs
 from app.library.store import LibraryStore
+from app.library.tags import normalize_tags
 from app.skills.citation_extractor import CitationRecord
 from app.storage.file_store import FileStore
 
@@ -101,3 +102,36 @@ def test_star_item(lib: LibraryStore) -> None:
     starred = lib.set_starred(item["id"], True)
     assert starred is not None
     assert starred["starred"] is True
+
+
+def test_delete_item(lib: LibraryStore) -> None:
+    item = lib.upsert({"title": "D", "url": "https://example.com/d"}, url="https://example.com/d")
+    lib.save_full_text(item["id"], "body")
+    assert lib.delete_item(item["id"]) is True
+    assert lib.get_item(item["id"]) is None
+    assert lib.read_full_text(item["id"]) == ""
+
+
+def test_normalize_tags_dedupes_case_insensitive() -> None:
+    assert normalize_tags(["精读", " 精读 ", "AI", "ai"]) == ["精读", "AI"]
+
+
+def test_set_tags_and_list_tags(lib: LibraryStore) -> None:
+    a = lib.upsert({"title": "A", "url": "https://example.com/a"}, url="https://example.com/a")
+    b = lib.upsert({"title": "B", "url": "https://example.com/b"}, url="https://example.com/b")
+    lib.set_tags(a["id"], ["精读", "工业软件"])
+    lib.set_tags(b["id"], ["精读"])
+    tags = {t["name"]: t["count"] for t in lib.list_tags()}
+    assert tags["精读"] == 2
+    assert tags["工业软件"] == 1
+    updated = lib.get_item(a["id"])
+    assert updated is not None
+    assert "精读" in updated["tags"]
+
+
+def test_load_first_user_message(store: FileStore) -> None:
+    meta = store.create_session(title="Review A")
+    sid = meta["id"]
+    store.append_message(sid, "assistant", "hello")
+    store.append_message(sid, "user", "What is AI-native industrial software?")
+    assert "AI-native" in store.load_first_user_message(sid)

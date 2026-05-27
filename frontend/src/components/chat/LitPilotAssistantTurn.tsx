@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ChatBubble } from "@meso/ui";
+import { ChatBubble } from "@meso.ai/ui";
 import type { LitPilotMessage } from "@/lib/chatTypes";
 import { mergeThinkIntoTrace } from "@/lib/executionTrace";
 import { renderSimpleMarkdown } from "@/lib/simpleMarkdown";

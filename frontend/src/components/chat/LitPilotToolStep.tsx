@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { ToolCallState } from "@meso/ui";
-import { describeToolAction, previewToolResult } from "@/lib/toolLabels";
+import type { ToolCallState } from "@meso.ai/ui";
+import {
+  describeToolAction,
+  isWebFetchCharOnlyPreview,
+  parseWebFetchArgs,
+  previewToolResult,
+  resolveWebFetchCharCount,
+} from "@/lib/toolLabels";
+import { WebFetchStepTitle } from "./WebFetchStepTitle";
 
 type Props = {
   toolCall: ToolCallState;
@@ -11,12 +18,21 @@ type Props = {
 export function LitPilotToolStep({ toolCall }: Props) {
   const [expanded, setExpanded] = useState(false);
   const { call, result, status } = toolCall;
-  const title = describeToolAction(call);
+  const args = call.args as Record<string, unknown>;
+  const webFetch = parseWebFetchArgs(args);
+  const charCount = webFetch
+    ? resolveWebFetchCharCount(args, result?.output)
+    : undefined;
+  const titleText = describeToolAction(call);
   const fullText =
     status === "error"
       ? result?.error || "执行失败"
       : result?.output || "";
-  const preview = previewToolResult(result?.output, result?.error);
+  const previewRaw = previewToolResult(result?.output, result?.error);
+  const hideCharPreview =
+    webFetch != null &&
+    isWebFetchCharOnlyPreview(result?.output, result?.error);
+  const preview = hideCharPreview ? "" : previewRaw;
   const pending = status === "pending" || status === "running";
 
   return (
@@ -35,8 +51,18 @@ export function LitPilotToolStep({ toolCall }: Props) {
           )}
         </span>
         <div className="litpilot-tool-step__main">
-          <div className="litpilot-tool-step__title">{title}</div>
-          {(status === "done" || status === "error") && fullText && (
+          <div className="litpilot-tool-step__title">
+            {webFetch ? (
+              <WebFetchStepTitle
+                articleTitle={webFetch.articleTitle}
+                url={webFetch.url}
+                charCount={charCount}
+              />
+            ) : (
+              titleText
+            )}
+          </div>
+          {(status === "done" || status === "error") && fullText && preview && (
             <button
               type="button"
               className="litpilot-tool-step__preview"

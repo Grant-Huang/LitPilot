@@ -1,5 +1,14 @@
+import { MAX_FETCH_URLS_CAP, clampFetchUrlLimit } from "@/lib/fetchUrlLimits";
+
 const URL_RE = /https?:\/\/[^\s<>'"]+/gi;
-const MAX_URLS = 20;
+
+export type ParseUrlListResult = {
+  urls: string[];
+  /** 去重后、截断前的条数 */
+  totalFound: number;
+  limit: number;
+  truncated: boolean;
+};
 
 function normalizeUrl(raw: string): string | null {
   let u = raw.trim().replace(/[.,;)]+$/, "");
@@ -28,20 +37,37 @@ function dedupe(urls: string[]): string[] {
   return out;
 }
 
-export function parseUrlsFromText(text: string): string[] {
-  const found = (text.match(URL_RE) ?? [])
-    .map((m) => normalizeUrl(m))
-    .filter((u): u is string => Boolean(u));
-  return dedupe(found).slice(0, MAX_URLS);
+function applyLimit(urls: string[], limit: number): ParseUrlListResult {
+  const cap = clampFetchUrlLimit(limit);
+  const totalFound = urls.length;
+  return {
+    urls: urls.slice(0, cap),
+    totalFound,
+    limit: cap,
+    truncated: totalFound > cap,
+  };
 }
 
-function parseUrlsFromLines(text: string): string[] {
+export function parseUrlsFromText(
+  text: string,
+  limit = MAX_FETCH_URLS_CAP,
+): ParseUrlListResult {
+  return applyLimit(dedupe(extractUrlsFromText(text)), limit);
+}
+
+function extractUrlsFromText(text: string): string[] {
+  return (text.match(URL_RE) ?? [])
+    .map((m) => normalizeUrl(m))
+    .filter((u): u is string => Boolean(u));
+}
+
+function parseUrlsFromLines(text: string, limit: number): ParseUrlListResult {
   const urls: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     if (/https?:\/\//i.test(trimmed)) {
-      urls.push(...parseUrlsFromText(trimmed));
+      urls.push(...extractUrlsFromText(trimmed));
       continue;
     }
     for (const cell of trimmed.split(/[\t,;|]/)) {
@@ -49,10 +75,10 @@ function parseUrlsFromLines(text: string): string[] {
       if (u) urls.push(u);
     }
   }
-  return dedupe(urls).slice(0, MAX_URLS);
+  return applyLimit(dedupe(urls), limit);
 }
 
-function parseUrlsFromJson(text: string): string[] {
+function parseUrlsFromJson(text: string, limit: number): ParseUrlListResult {
   const data: unknown = JSON.parse(text);
   const urls: string[] = [];
 
@@ -60,7 +86,7 @@ function parseUrlsFromJson(text: string): string[] {
     if (typeof node === "string") {
       const u = normalizeUrl(node);
       if (u) urls.push(u);
-      else urls.push(...parseUrlsFromText(node));
+      else urls.push(...extractUrlsFromText(node));
     } else if (Array.isArray(node)) {
       node.forEach(walk);
     } else if (node && typeof node === "object") {
@@ -75,22 +101,26 @@ function parseUrlsFromJson(text: string): string[] {
   };
 
   walk(data);
-  return dedupe(urls).slice(0, MAX_URLS);
+  return applyLimit(dedupe(urls), limit);
 }
 
-export async function parseUrlListFile(file: File): Promise<string[]> {
+export async function parseUrlListFile(
+  file: File,
+  limit: number = MAX_FETCH_URLS_CAP,
+): Promise<ParseUrlListResult> {
   const text = await file.text();
   const name = file.name.toLowerCase();
+  const cap = clampFetchUrlLimit(limit);
 
   if (name.endsWith(".json")) {
     try {
-      return parseUrlsFromJson(text);
+      return parseUrlsFromJson(text, cap);
     } catch {
       /* fall through */
     }
   }
 
-  const fromLines = parseUrlsFromLines(text);
-  if (fromLines.length) return fromLines;
-  return parseUrlsFromText(text);
+  const fromLines = parseUrlsFromLines(text, cap);
+  if (fromLines.urls.length) return fromLines;
+  return parseUrlsFromText(text, cap);
 }

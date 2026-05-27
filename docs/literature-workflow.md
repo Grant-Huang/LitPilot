@@ -18,8 +18,8 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 | 配置项 | 作用 |
 |--------|------|
 | `tavily_max_results` | `web_search` 单次最多返回条数（1–80，默认 8） |
-| `max_fetch_urls` | `web_fetch` 队列上限 |
-| `fetch_parallel` | Jina 并行并发 |
+| `max_fetch_urls` | `web_fetch` 队列上限（1–50，默认 5） |
+| `fetch_parallel` | Jina 并行并发；**cite 阶段**引用抽取与 Crossref/OpenAlex 元数据补全共用该并发上限 |
 | `fetch_timeout_sec` | 单 URL 超时 |
 | `tavily_retry_count` | Tavily 请求异常重试 |
 | `fetch_retry_count` | 单 URL 抓取异常重试 |
@@ -30,6 +30,18 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 - `[Tavily]` — 检索摘要
 - `[网页材料]` — Jina 正文要点（content_pipeline 压缩）
 - `[Citations]` — `ref-list.txt` 中已收录 APA / ACM 条目
+
+## 引用元数据补全（cite_extract）
+
+每条成功抓取的 URL 会：
+
+1. **并行** Jina 抽取 APA/ACM 书目字段（`fetch_parallel` 限流）。
+2. **并行** 元数据 enrich：
+   - 页面已解析出 DOI → 直接 **Crossref** 补全被引数、他引数、卷期页等；
+   - 无 DOI → 用 **标题 + 首作者 + 年份** 调 **OpenAlex** 反查 DOI，再 Crossref enrich。
+3. 串行写入文献库（文件锁），并同步 `ref-list` / 导出。
+
+文献库详情页可手工补 DOI；保存时可选 `refresh_crossref` 重新拉 Crossref。无 DOI 时后端 enrich 接口也会尝试 OpenAlex。
 
 ## 失败策略
 
@@ -76,4 +88,24 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 
 右侧 Artifact 在收到 `workflow_node` 后即可展示实时 DAG（`mergeWorkflowRunsIntoGraph`）。
 
-关键事件：`stage`、`tool_call`、`workflow_node`、`artifact`（`workflow-graph` / `markdown`）、`text`、`done`。
+关键事件：`stage`、`tool_call`、`workflow_node`、`artifact`（`workflow-graph` / `markdown`）、`text`、`literature_intent`、`done`。
+
+## 续聊意图（P0–P2）
+
+首轮走完整流程 `new_topic`；后续轮次由 `literature_intent` 路由：
+
+| intent | 说明 | 典型行为 |
+|--------|------|----------|
+| `new_topic` | 首轮 / 新主题 | 完整 search → fetch → cite → generate |
+| `supplement` | 补充 URL / 文件 | 增量 fetch，合并 session corpus |
+| `refine_gen` | 调整写作要求 | 复用语料，增强 gen_prompt |
+| `regen_only` | 仅重生成 | 同 refine，不追加约束 |
+| `expand_search` | 扩展检索 | Tavily 增量 + fetch 新命中 |
+| `retry_failed` | 重试失败项 | 仅 fetch 失败 URL |
+| `query_corpus` | 文献问答 | 短回答，不生成完整综述 |
+| `manage_library` | 库管理 | 删除 / 导出 / 去重 |
+
+SSE 推送 `literature_intent` extension，字段含 `intent`、`defer_generate` 等。
+
+会话 `meta.json` 扩展：`initial_query`、`gen_constraints`、`review_versions`、`last_intent`。
+语料快照：`sessions/{id}/corpus.json`。

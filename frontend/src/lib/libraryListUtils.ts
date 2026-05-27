@@ -1,5 +1,6 @@
 import type { LibraryItem } from "@/lib/libraryTypes";
 import { filterLibraryRefs } from "@/lib/libraryRefs";
+import { itemMatchesTagFilter } from "@/lib/libraryTags";
 
 export type LibraryListFilter =
   | "all"
@@ -36,10 +37,15 @@ export function prepareLibraryList(
     query?: string;
     filter?: LibraryListFilter;
     sessionId?: string;
+    tagFilters?: string[];
     groupFailedFirst?: boolean;
   },
 ): LibraryItem[] {
   let list = items;
+  const tagFilters = options.tagFilters || [];
+  if (tagFilters.length) {
+    list = list.filter((i) => itemMatchesTagFilter(i, tagFilters));
+  }
   if (options.filter === "session" && options.sessionId) {
     list = list.filter((i) => itemInSession(i, options.sessionId!));
   } else if (options.filter && options.filter !== "session") {

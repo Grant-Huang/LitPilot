@@ -1,27 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Spin, message } from "antd";
-import { useChatSession } from "@/contexts/ChatSessionContext";
-import { LibraryDetailPane } from "@/components/library/LibraryDetailPane";
+import { LibraryDetailPane, type LibraryDetailTab } from "@/components/library/LibraryDetailPane";
 import { LiteratureListPanel } from "@/components/library/LiteratureListPanel";
 import { libraryApi } from "@/lib/api";
 import { normalizeLibraryItem, type LibraryItem } from "@/lib/libraryTypes";
 
 export default function LibraryPage() {
-  const router = useRouter();
-  const { sessions, activeSessionId } = useChatSession();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [listIndexById, setListIndexById] = useState<Record<string, number>>({});
+  const [detailTab, setDetailTab] = useState<LibraryDetailTab | undefined>();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await libraryApi.items();
-      setItems(data.items || []);
+      const next = data.items || [];
+      setItems(next);
+      setSelectedId((prev) => {
+        if (prev && next.some((i) => i.id === prev)) return prev;
+        return next[0]?.id || null;
+      });
     } catch {
       try {
         const legacy = await libraryApi.refs();
@@ -29,7 +31,12 @@ export default function LibraryPage() {
           (legacy.items as Record<string, unknown>[]) ||
           (legacy.index?.refs as Record<string, unknown>[]) ||
           [];
-        setItems(raw.map((r) => normalizeLibraryItem(r)));
+        const next = raw.map((r) => normalizeLibraryItem(r));
+        setItems(next);
+        setSelectedId((prev) => {
+          if (prev && next.some((i) => i.id === prev)) return prev;
+          return next[0]?.id || null;
+        });
       } catch {
         message.error("加载文献库失败");
       }
@@ -42,40 +49,26 @@ export default function LibraryPage() {
     void load();
   }, [load]);
 
-  const handleReconcile = async (mode: "session" | "all" | "failed_only") => {
-    if (mode === "session" && !activeSessionId) {
-      message.warning("请先选择或创建一个综述会话");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await libraryApi.reconcile({
-        session_id: activeSessionId ?? undefined,
-        mode,
-      });
-      message.success(
-        `补全完成：新增 ${res.added ?? 0}，合并 ${res.merged ?? 0}，重试 ${res.retried ?? 0}`,
-      );
-      await load();
-    } catch {
-      message.error("补全失败");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleItemChange = useCallback((updated: LibraryItem) => {
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  }, []);
 
-  const handleDedupe = async () => {
-    setBusy(true);
-    try {
-      const res = await libraryApi.dedupe();
-      message.success(`去重完成：移除 ${res.removed ?? 0} 条重复`);
-      await load();
-    } catch {
-      message.error("去重失败");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await libraryApi.delete(id);
+        setItems((prev) => {
+          const next = prev.filter((i) => i.id !== id);
+          setSelectedId((cur) => (cur === id ? next[0]?.id || null : cur));
+          return next;
+        });
+        message.success("已删除文献");
+      } catch {
+        message.error("删除失败");
+      }
+    },
+    [],
+  );
 
   if (loading) {
     return (
@@ -96,43 +89,7 @@ export default function LibraryPage() {
             <h1>文献库</h1>
             <p className="functional-page__subtitle">共 {items.length} 条文献</p>
           </div>
-          <div className="functional-page__header-actions library-page__actions">
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={() => void handleReconcile("session")}
-            >
-              从当前会话补全
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={() => void handleReconcile("failed_only")}
-            >
-              重试失败项
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={() => void handleDedupe()}
-            >
-              全库去重
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => router.push("/chat")}
-            >
-              {activeSessionId ? "继续当前会话" : "前往综述会话"}
-            </button>
-          </div>
         </div>
-        {sessions.length > 0 && (
-          <p className="functional-page__meta">已有 {sessions.length} 个综述会话</p>
-        )}
       </header>
 
       <div className="functional-page__body">
@@ -141,22 +98,29 @@ export default function LibraryPage() {
             <LiteratureListPanel
               items={items}
               selectedId={selectedId}
-              onSelect={setSelectedId}
-              activeSessionId={activeSessionId}
-              showSessionFilter
+              onSelect={(id) => {
+                setSelectedId(id);
+                setDetailTab(undefined);
+              }}
               showDensityToggle
-              emptyHint="暂无收录文献。在会话中生成综述后会自动追加；也可点击「从当前会话补全」。"
+              onListIndexMap={setListIndexById}
+              onStarChange={handleItemChange}
+              onDelete={handleDelete}
+              onShowReviews={(id) => {
+                setSelectedId(id);
+                setDetailTab("reviews");
+              }}
+              emptyHint="暂无收录文献。在综述会话中生成引用后会自动追加到此库。"
             />
           </section>
 
           <aside className="library-page__detail-panel functional-card">
             <LibraryDetailPane
               itemId={selectedId}
-              onStarChange={(updated) => {
-                setItems((prev) =>
-                  prev.map((i) => (i.id === updated.id ? updated : i)),
-                );
-              }}
+              listIndex={selectedId ? listIndexById[selectedId] : undefined}
+              activeTab={detailTab}
+              onTabChange={setDetailTab}
+              onItemChange={handleItemChange}
             />
           </aside>
         </div>

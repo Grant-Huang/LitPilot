@@ -1,5 +1,5 @@
-import type { StreamState } from "@meso/ui";
-import type { WorkflowRunState } from "@meso/types";
+import type { StreamState } from "@meso.ai/ui";
+import type { WorkflowRunState } from "@meso.ai/types";
 
 export function workflowRunsFromStream(state: StreamState): WorkflowRunState[] {
   return state.workflowRunOrder

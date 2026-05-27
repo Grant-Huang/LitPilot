@@ -11,6 +11,7 @@ from filelock import FileLock
 
 from app.library.canonical import canonical_key
 from app.library.models import merge_item, new_item, utc_now
+from app.library.tags import normalize_tags
 from app.storage.file_store import FileStore, _read_json, _write_json_atomic, get_store
 
 
@@ -171,9 +172,76 @@ class LibraryStore:
         return self._with_lock(_op)
 
     def set_starred(self, item_id: str, starred: bool) -> Optional[dict[str, Any]]:
-        def _op(db: dict[str, Any]) -> dict[str, Any]:
+        def _op(db: dict[str, Any]) -> Optional[dict[str, Any]]:
             items = db["items"]
+            if item_id not in items:
+                return None
             merged = merge_item(items[item_id], {"starred": starred})
+            items[item_id] = merged
+            return merged
+
+        return self._with_lock(_op)
+
+    def set_tags(self, item_id: str, tags: list[str]) -> Optional[dict[str, Any]]:
+        normalized = normalize_tags(tags)
+
+        def _op(db: dict[str, Any]) -> Optional[dict[str, Any]]:
+            items = db["items"]
+            if item_id not in items:
+                return None
+            merged = merge_item(items[item_id], {"tags": normalized})
+            items[item_id] = merged
+            return merged
+
+        return self._with_lock(_op)
+
+    def list_tags(self) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for item in self.list_items():
+            for tag in item.get("tags") or []:
+                name = str(tag).strip()
+                if name:
+                    counts[name] = counts.get(name, 0) + 1
+        return [
+            {"name": name, "count": count}
+            for name, count in sorted(
+                counts.items(),
+                key=lambda x: (-x[1], x[0].casefold()),
+            )
+        ]
+
+    def patch_item_metadata(
+        self,
+        item_id: str,
+        patch: dict[str, Any],
+        *,
+        force_doi: bool = False,
+    ) -> Optional[dict[str, Any]]:
+        allowed = {
+            "title",
+            "authors",
+            "year",
+            "venue",
+            "doi",
+            "publisher",
+            "abstract",
+            "volume",
+            "issue",
+            "pages",
+            "month",
+        }
+        clean = {k: v for k, v in patch.items() if k in allowed and v is not None}
+
+        def _op(db: dict[str, Any]) -> Optional[dict[str, Any]]:
+            items = db["items"]
+            if item_id not in items:
+                return None
+            row = dict(items[item_id])
+            if force_doi and clean.get("doi") is not None:
+                from app.library.crossref import normalize_doi
+
+                row["doi"] = normalize_doi(str(clean.pop("doi", "") or ""))
+            merged = merge_item(row, clean)
             items[item_id] = merged
             return merged
 

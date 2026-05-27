@@ -18,6 +18,8 @@ type LitPilotComposerProps = {
   onInputChange: (value: string) => void;
   fetchUrls: string[];
   onFetchUrlsChange: (urls: string[]) => void;
+  /** 与设置页 max_fetch_urls 一致，默认 50 上限 */
+  maxFetchUrls?: number;
   literatureSourceMode?: LiteratureSourceMode;
   streaming: boolean;
   onSend: () => void;
@@ -29,6 +31,7 @@ export function LitPilotComposer({
   onInputChange,
   fetchUrls,
   onFetchUrlsChange,
+  maxFetchUrls = 50,
   literatureSourceMode = "merge",
   streaming,
   onSend,
@@ -39,18 +42,26 @@ export function LitPilotComposer({
   const handleFile = useCallback(
     async (file: File) => {
       try {
-        const urls = await parseUrlListFile(file);
+        const { urls, totalFound, limit, truncated } = await parseUrlListFile(
+          file,
+          maxFetchUrls,
+        );
         if (!urls.length) {
           message.warning("未在文件中找到有效 http(s) 链接");
           return;
         }
         onFetchUrlsChange(urls);
+        if (truncated) {
+          message.warning(
+            `文件中共 ${totalFound} 条链接，已按当前设置保留前 ${limit} 条`,
+          );
+        }
         message.success(`已添加 ${urls.length} 个抓取链接`);
       } catch {
         message.error("无法解析链接列表文件");
       }
     },
-    [onFetchUrlsChange],
+    [maxFetchUrls, onFetchUrlsChange],
   );
 
   const onFileChange = useCallback(
@@ -108,7 +119,9 @@ export function LitPilotComposer({
             disabled={streaming}
           />
           <div className="litpilot-composer__bar">
-            <Tooltip title="上传链接列表（.txt / .csv / .json），加入 web_fetch 抓取队列">
+            <Tooltip
+              title={`上传链接列表（.txt / .csv / .json），最多 ${maxFetchUrls} 条（与设置一致）`}
+            >
               <button
                 type="button"
                 className="litpilot-composer__attach"

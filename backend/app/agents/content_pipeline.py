@@ -131,18 +131,33 @@ async def process_url_for_context(
     except Exception as e:
         return "", str(e)
 
+    inferred_title = ""
+    if not title:
+        # Jina Reader 通常会在开头给出 Markdown 标题（# Title）
+        for ln in (raw or "").splitlines()[:30]:
+            s = ln.strip()
+            if s.startswith("# "):
+                inferred_title = s[2:].strip()
+                break
+            if s.startswith("## "):
+                inferred_title = s[3:].strip()
+                break
+        inferred_title = inferred_title[:200]
+
     text = clean_html_to_text(raw)
     text = extract_main_content(text)
     text = strip_instruction_injections(text)
     if len(text) < MIN_USEFUL_CHARS:
         return "", "content too short after filtering"
 
+    final_title = (title or inferred_title).strip()
+
     if llm and len(text) > CHUNK_SIZE:
         chunks = chunk_text(text)
         summary = await summarize_chunks(llm, chunks, url=url)
         if summary:
-            header = f"## {title or url}\n\n来源: {url}\n\n{summary}\n"
+            header = f"## {final_title or url}\n\n来源: {url}\n\n{summary}\n"
             return header, None
 
-    header = f"## {title or url}\n\n来源: {url}\n\n{text[:14_000]}\n"
+    header = f"## {final_title or url}\n\n来源: {url}\n\n{text[:14_000]}\n"
     return header, None

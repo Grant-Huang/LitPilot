@@ -1,4 +1,4 @@
-import type { Message } from "@meso/ui";
+import type { Message } from "@meso.ai/ui";
 import type { FailedLiteratureItem } from "@/lib/collectFailures";
 import type { ExecutionTrace } from "@/lib/executionTrace";
 

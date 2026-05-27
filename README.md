@@ -18,7 +18,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Next.js 15、React 19、`@meso/ui`、Ant Design、Tailwind |
+| 前端 | Next.js 15、React 19、`@meso.ai/ui`、Ant Design、Tailwind |
 | 后端 | FastAPI、httpx、OpenAI 兼容 LLM 客户端 |
 | 存储 | 本地文件（JSON / JSONL / Markdown），[filelock](https://pypi.org/project/filelock/) 并发安全 |
 | 外部服务 | Tavily、Jina Reader、可选多厂商 LLM |
@@ -48,7 +48,7 @@ LitPilot/
 
 - **Python** 3.11+（推荐 3.13；仓库内 venv 可能为 3.14）
 - **Node.js** 18+ 与 **pnpm**
-- **pnpm**（前端通过 GitHub 安装 [MESO](https://github.com/Grant-Huang/meso) 的 `@meso/ui` / `@meso/types`）
+- **pnpm** 或 **npm**（前端通过 npm 安装 [MESO](https://github.com/Grant-Huang/meso) 的 `@meso.ai/ui` / `@meso.ai/types`）
 - API Key：**Tavily**（必填）、**LLM**（必填，Ollama 除外）、**Jina**（可选）
 
 ## 快速开始
@@ -99,42 +99,31 @@ uvicorn app.main:app --reload --port 8001
 
 ```bash
 cd frontend
-pnpm install   # 会从 GitHub 拉取 MESO 子包，需可访问 github.com
+pnpm install   # 从 npm 安装 @meso.ai/ui、@meso.ai/types
 pnpm dev
 ```
 
 浏览器打开 [http://localhost:3002](http://localhost:3002)，在 **会话** 页描述研究主题并点击「生成综述」。
 
-## MESO 依赖（GitHub）
+## MESO 依赖（npm）
 
-前端**不**把 MESO 源码放进 LitPilot 仓库，而是通过 **pnpm 的 Git 子目录依赖** 安装：
+前端通过 **npm / pnpm** 安装已发布的 MESO 包（与 [MESO](https://github.com/Grant-Huang/meso) 仓库同源）：
 
-```json
-"@meso/types": "github:Grant-Huang/meso#main&path:/packages/meso-types",
-"@meso/ui": "github:Grant-Huang/meso#main&path:/packages/meso-ui"
+```bash
+npm install @meso.ai/ui @meso.ai/types
+# 或
+pnpm add @meso.ai/ui @meso.ai/types
 ```
 
-说明：
+`frontend/package.json` 已声明 `@meso.ai/ui@^2.0.0`、`@meso.ai/types@^1.0.0`；`pnpm-lock.yaml` 锁定具体版本。
 
-| 项 | 含义 |
-|----|------|
-| `github:Grant-Huang/meso` | 仓库 [Grant-Huang/meso](https://github.com/Grant-Huang/meso) |
-| `#main` | 分支（可改为 `#v2.0.0` 等 tag 以锁定版本） |
-| `&path:/packages/meso-ui` | monorepo 内子包路径（注意 `path:` 前要有 `/`） |
-
-安装后包位于 `node_modules/@meso/ui`，`pnpm-lock.yaml` 会记录解析到的 **commit SHA**，保证可复现。
-
-**无需**在本机单独 clone MESO 或配置 `file:../../projects/meso`。若需调试 MESO 本身，可临时改回本地路径：
+若需本地调试 MESO 源码，可临时改为 `file:` 路径，例如：
 
 ```json
-"@meso/ui": "file:../../projects/meso/packages/meso-ui"
+"@meso.ai/ui": "file:../../projects/meso/packages/meso-ui"
 ```
 
-**注意：**
-
-- `@meso/ui` 发布字段指向仓库内已提交的 `dist/`。MESO 发版前应 `pnpm build` 并提交 `packages/*/dist`。
-- `packages/meso-ui` 若保留 `prepare` 脚本，从 Git 安装会在无 workspace 环境下失败。LitPilot 在 `frontend/pnpm-workspace.yaml` 用 `onlyBuiltDependencies` 跳过 `@meso/ui` 的 build；**建议 MESO 删除 `prepare`**，仅依赖已提交的 `dist/`。
-- LitPilot 侧栏品牌使用 Meso `ThreeColumnLayout` 的 `sidebarLogo` / `sidebarTitle`（白牌 API），其余品牌与业务 UI 均在 LitPilot 内实现。
+LitPilot 侧栏品牌使用 Meso `ThreeColumnLayout` 的 `sidebarLogo` / `sidebarTitle`（白牌 API），其余品牌与业务 UI 均在 LitPilot 内实现。
 
 ## 配置说明
 

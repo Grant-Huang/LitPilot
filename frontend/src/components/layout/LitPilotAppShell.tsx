@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { BookOutlined, MessageOutlined } from "@ant-design/icons";
-import { ThreeColumnLayout } from "@meso/ui";
+import { ThreeColumnLayout } from "@meso.ai/ui";
 import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { LitPilotSessionColumn } from "@/integrations/meso/LitPilotSessionColumn";

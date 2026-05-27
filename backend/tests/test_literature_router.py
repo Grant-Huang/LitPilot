@@ -37,6 +37,11 @@ def test_should_auto_rename_first_turn_default() -> None:
         "hello",
         user_message_count=2,
     )
+    assert not should_auto_rename_session(
+        {"title": "新综述", "title_auto_set": True},
+        "hello again",
+        user_message_count=2,
+    )
 
 
 @pytest.mark.asyncio

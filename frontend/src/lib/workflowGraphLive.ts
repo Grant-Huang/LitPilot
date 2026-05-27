@@ -1,4 +1,4 @@
-import type { WorkflowNodeState, WorkflowRunState } from "@meso/types";
+import type { WorkflowNodeState, WorkflowRunState } from "@meso.ai/types";
 import type { NodeStatus, WorkflowGraphJson } from "@/lib/workflowGraph";
 
 export function workflowNodeStateToGraphStatus(

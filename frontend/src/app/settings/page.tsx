@@ -130,6 +130,8 @@ export default function SettingsPage() {
   const [fetchRetryCount, setFetchRetryCount] = useState(0);
   const [fetchRetryDelayMs, setFetchRetryDelayMs] = useState(500);
   const [citationFormat, setCitationFormat] = useState<"apa" | "acm">("apa");
+  const [reviewSystemPrompt, setReviewSystemPrompt] = useState("");
+  const [reviewPromptDefault, setReviewPromptDefault] = useState("");
 
   const [llmProvider, setLlmProvider] = useState("openai");
   const [llmKey, setLlmKey] = useState("");
@@ -194,6 +196,12 @@ export default function SettingsPage() {
     if (cfg.think_max_tokens_per_phase != null) {
       setThinkMaxTokens(cfg.think_max_tokens_per_phase);
     }
+    if (cfg.review_system_prompt_default) {
+      setReviewPromptDefault(cfg.review_system_prompt_default);
+    }
+    if (cfg.review_system_prompt_template != null) {
+      setReviewSystemPrompt(cfg.review_system_prompt_template);
+    }
     if (!cfg.has_tavily) setActiveTab("agent");
   };
 
@@ -240,6 +248,7 @@ export default function SettingsPage() {
         fetch_retry_count: fetchRetryCount,
         fetch_retry_delay_ms: fetchRetryDelayMs,
         citation_format: citationFormat,
+        review_system_prompt_template: reviewSystemPrompt,
       };
       if (tavilyKey.trim()) partial.tavily_api_key = tavilyKey.trim();
       if (jinaKey.trim()) partial.jina_api_key = jinaKey.trim();
@@ -479,12 +488,12 @@ export default function SettingsPage() {
           {hasJina ? "✓ Jina Key 已配置" : "未配置 Jina Key"}
         </p>
         <div className="settings-field-row">
-          <Field label="抓取篇数（1–20）" hint="进入抓取队列的 URL 上限">
+          <Field label="抓取篇数（1–50）" hint="进入抓取队列的 URL 上限">
             <input
               className="input"
               type="number"
               min={1}
-              max={20}
+              max={50}
               value={maxFetchUrls}
               onChange={(e) => setMaxFetchUrls(Number(e.target.value))}
             />
@@ -561,6 +570,51 @@ export default function SettingsPage() {
           执行前展示工作流拓扑并确认（plan_confirm）
         </label>
       </SettingsGroup>
+
+      <details className="settings-advanced">
+        <summary className="settings-advanced__summary">高级</summary>
+        <div className="settings-advanced__body">
+          <SettingsGroup
+            title="综述生成 · System Prompt"
+            description="控制最终综述阶段的 LLM 系统提示词；留空则使用内置默认"
+          >
+            <Field
+              label="System Prompt 模板"
+              hint="可用占位符：{fmt_label}（APA/ACM）、{citation_format}（apa/acm）。保存后在下一次生成综述时生效。"
+            >
+              <textarea
+                className="input settings-textarea font-mono"
+                rows={12}
+                placeholder={
+                  reviewPromptDefault
+                    ? "留空使用默认模板"
+                    : "加载默认模板中…"
+                }
+                value={reviewSystemPrompt}
+                onChange={(e) => setReviewSystemPrompt(e.target.value)}
+                spellCheck={false}
+              />
+            </Field>
+            <div className="settings-advanced__actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={!reviewPromptDefault}
+                onClick={() => setReviewSystemPrompt(reviewPromptDefault)}
+              >
+                恢复默认模板
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setReviewSystemPrompt("")}
+              >
+                清空（使用内置默认）
+              </button>
+            </div>
+          </SettingsGroup>
+        </div>
+      </details>
 
       <p className="settings-cost-notice">{COST_NOTICE}</p>
     </div>

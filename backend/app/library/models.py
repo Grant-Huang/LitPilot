@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.library.canonical import canonical_key
+from app.library.tags import normalize_tags
 
 
 def utc_now() -> str:
@@ -60,6 +61,12 @@ def new_item(
         "publisher": (publisher or "").strip(),
         "abstract": (abstract or "").strip()[:2000],
         "summary_bullets": [],
+        "volume": "",
+        "issue": "",
+        "pages": "",
+        "month": "",
+        "references_count": None,
+        "references_preview": [],
         "full_text": None,
         "availability": {
             "has_abstract": bool((abstract or "").strip()),
@@ -70,6 +77,7 @@ def new_item(
         },
         "citations": {},
         "provenance": [],
+        "tags": [],
         "starred": False,
         "updated_at": now,
         "created_at": now,
@@ -86,6 +94,10 @@ def merge_item(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
         "doi",
         "publisher",
         "abstract",
+        "volume",
+        "issue",
+        "pages",
+        "month",
     ):
         new_val = (patch.get(field) or "").strip()
         old_val = (out.get(field) or "").strip()
@@ -107,6 +119,12 @@ def merge_item(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
     if patch.get("citation_count") is not None:
         out["citation_count"] = patch["citation_count"]
 
+    if patch.get("references_count") is not None:
+        out["references_count"] = patch["references_count"]
+
+    if patch.get("references_preview"):
+        out["references_preview"] = patch["references_preview"][:30]
+
     if patch.get("citations"):
         cites = dict(out.get("citations") or {})
         cites.update(patch["citations"])
@@ -126,6 +144,9 @@ def merge_item(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
 
     if patch.get("starred") is not None:
         out["starred"] = bool(patch["starred"])
+
+    if "tags" in patch:
+        out["tags"] = normalize_tags(patch.get("tags"))
 
     prov = list(out.get("provenance") or [])
     for p in patch.get("provenance") or []:

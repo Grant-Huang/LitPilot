@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { ChatBubble } from "@meso/ui";
-import type { StreamState } from "@meso/ui";
+import { ChatBubble } from "@meso.ai/ui";
+import type { StreamState } from "@meso.ai/ui";
 import type { LitPilotMessage } from "@/lib/chatTypes";
 import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { LitPilotAssistantTurn } from "./LitPilotAssistantTurn";

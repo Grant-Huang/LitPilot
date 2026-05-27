@@ -33,6 +33,7 @@ export function filterLibraryRefs(
       ...(item.authors || []),
       item.citations?.apa,
       String(item.display_index),
+      ...(item.tags || []),
     ]
       .filter(Boolean)
       .join(" ")

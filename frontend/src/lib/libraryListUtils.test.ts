@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isFailedItem, itemInSession, sortLibraryItems } from "./libraryListUtils";
+import {
+  isFailedItem,
+  itemInSession,
+  prepareLibraryList,
+  sortLibraryItems,
+} from "./libraryListUtils";
 import type { LibraryItem } from "./libraryTypes";
 
 const base = (n: number, failed = false): LibraryItem => ({
@@ -18,6 +23,17 @@ describe("libraryListUtils", () => {
     const sorted = sortLibraryItems([base(2), base(1, true), base(3)]);
     expect(sorted[0].display_index).toBe(1);
     expect(isFailedItem(sorted[0])).toBe(true);
+  });
+
+  it("prepareLibraryList 按标签 OR 筛选", () => {
+    const items: LibraryItem[] = [
+      { ...base(1), tags: ["精读"] },
+      { ...base(2), tags: ["待读"] },
+      { ...base(3), tags: ["精读", "工业"] },
+    ];
+    const out = prepareLibraryList(items, { tagFilters: ["精读"] });
+    expect(out).toHaveLength(2);
+    expect(out.map((i) => i.display_index)).toEqual([1, 3]);
   });
 
   it("itemInSession 按 provenance 过滤", () => {

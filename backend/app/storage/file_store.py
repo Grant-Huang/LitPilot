@@ -125,6 +125,9 @@ class FileStore:
             "think_use_reasoning": bool(cfg.get("think_use_reasoning", False)),
             "think_model": (cfg.get("think_model") or "").strip(),
             "think_max_tokens_per_phase": int(cfg.get("think_max_tokens_per_phase") or 280),
+            "review_system_prompt_template": str(
+                cfg.get("review_system_prompt_template") or ""
+            ),
         }
         return merged
 
@@ -192,6 +195,7 @@ class FileStore:
         *,
         title: str | None = None,
         pinned: bool | None = None,
+        title_auto_set: bool | None = None,
     ) -> Optional[dict[str, Any]]:
         meta = self.get_session(session_id)
         if not meta:
@@ -201,6 +205,8 @@ class FileStore:
             meta["title"] = title
         if pinned is not None:
             meta["pinned"] = pinned
+        if title_auto_set is not None:
+            meta["title_auto_set"] = title_auto_set
         meta["updated_at"] = now
         _write_json_atomic(self.root / "sessions" / session_id / "meta.json", meta)
         idx_path = self.root / "sessions" / "index.json"
@@ -216,6 +222,39 @@ class FileStore:
                     s["updated_at"] = now
             _write_json_atomic(idx_path, idx)
         return meta
+
+    def patch_session_meta(
+        self,
+        session_id: str,
+        patch: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        meta = self.get_session(session_id)
+        if not meta:
+            return None
+        now = _utc_now()
+        for key, value in patch.items():
+            if value is not None:
+                meta[key] = value
+        meta["updated_at"] = now
+        _write_json_atomic(self.root / "sessions" / session_id / "meta.json", meta)
+        return meta
+
+    def save_corpus(self, session_id: str, data: dict[str, Any]) -> None:
+        data = dict(data)
+        data["updated_at"] = _utc_now()
+        path = self.root / "sessions" / session_id / "corpus.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(path, data)
+
+    def load_corpus(self, session_id: str) -> dict[str, Any] | None:
+        path = self.root / "sessions" / session_id / "corpus.json"
+        if not path.is_file():
+            return None
+        data = _read_json(path, None)
+        return data if isinstance(data, dict) else None
+
+    def has_corpus(self, session_id: str) -> bool:
+        return self.load_corpus(session_id) is not None
 
     def delete_session(self, session_id: str) -> bool:
         import shutil
@@ -289,19 +328,70 @@ class FileStore:
                     continue
         return msgs
 
+    def load_first_user_message(self, session_id: str, *, max_chars: int = 800) -> str:
+        """First user turn in session (for library provenance preview)."""
+        msg_path = self.root / "sessions" / session_id / "messages.jsonl"
+        if not msg_path.is_file():
+            return ""
+        try:
+            with open(msg_path, encoding="utf-8") as f:
+                for ln in f:
+                    line = ln.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("role") != "user":
+                        continue
+                    content = rec.get("content") or ""
+                    if isinstance(content, list):
+                        parts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                parts.append(str(block.get("text") or ""))
+                            elif isinstance(block, str):
+                                parts.append(block)
+                        content = "\n".join(parts)
+                    text = str(content).strip()
+                    if text:
+                        return text[:max_chars]
+        except OSError:
+            return ""
+        return ""
+
     def save_review_artifact(
         self,
         session_id: str,
         content: str,
-    ) -> Path:
+    ) -> tuple[Path, str]:
         art_dir = self.root / "artifacts" / session_id
         art_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        path = art_dir / f"review-{ts}.md"
+        version_id = f"review_{uuid.uuid4().hex[:12]}"
+        filename = f"review-{ts}.md"
+        path = art_dir / filename
         path.write_text(content, encoding="utf-8")
         latest = art_dir / "review-latest.md"
         latest.write_text(content, encoding="utf-8")
-        return path
+        meta = self.get_session(session_id)
+        if meta is not None:
+            versions = list(meta.get("review_versions") or [])
+            versions.append(
+                {
+                    "id": version_id,
+                    "filename": filename,
+                    "created_at": _utc_now(),
+                }
+            )
+            meta["review_versions"] = versions[-20:]
+            meta["updated_at"] = _utc_now()
+            _write_json_atomic(
+                self.root / "sessions" / session_id / "meta.json",
+                meta,
+            )
+        return path, version_id
 
     def get_latest_review(self, session_id: str) -> dict[str, Any] | None:
         art_dir = self.root / "artifacts" / session_id

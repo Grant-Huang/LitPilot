@@ -30,16 +30,21 @@ def test_chunk_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_requires_tavily_key() -> None:
+async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
     from app.agents.literature_workflow import stream_literature_turn
+    from app.storage.file_store import FileStore
+
+    store = FileStore(tmp_path)
+    monkeypatch.setattr("app.agents.literature_turn.get_store", lambda: store)
+    meta = store.create_session("test")
 
     with patch(
-        "app.agents.literature_workflow.get_tavily_api_key",
+        "app.agents.literature_turn.get_tavily_api_key",
         new_callable=AsyncMock,
         return_value="",
     ):
         events = []
-        async for ev in stream_literature_turn("sess1", "test query"):
+        async for ev in stream_literature_turn(meta["id"], "test query"):
             events.append(ev)
         assert any(e[0] == "error" for e in events)
 
@@ -51,7 +56,7 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
 
     store = FileStore(tmp_path)
     monkeypatch.setattr(
-        "app.agents.literature_workflow.get_store", lambda: store
+        "app.agents.literature_turn.get_store", lambda: store
     )
     monkeypatch.setattr(
         "app.agents.agent_settings.get_store", lambda: store
@@ -70,24 +75,24 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
 
     with (
         patch(
-            "app.agents.literature_workflow.get_tavily_api_key",
+            "app.agents.literature_turn.get_tavily_api_key",
             new_callable=AsyncMock,
             return_value="tvly-test",
         ),
         patch(
-            "app.agents.literature_workflow.stream_understanding_and_route",
+            "app.agents.literature_turn.stream_understanding_and_route",
             return_value=_mock_understanding_stream(),
         ),
         patch(
-            "app.agents.literature_workflow.cached_tavily_search",
+            "app.agents.literature_phases.cached_tavily_search",
             tavily_mock,
         ),
         patch(
-            "app.agents.literature_workflow.iter_fetch_sources_parallel",
+            "app.agents.literature_phases.iter_fetch_sources_parallel",
             return_value=_empty_fetch_iter(),
         ),
         patch(
-            "app.agents.literature_workflow.extract_and_persist_batch",
+            "app.agents.literature_phases.extract_and_persist_batch",
             new_callable=AsyncMock,
             return_value=[],
         ),
