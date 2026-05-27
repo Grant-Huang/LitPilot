@@ -11,7 +11,10 @@ def normalize_reader_target_url(url: str) -> str:
         target = f"https://{target}"
 
     parsed = urlparse(target)
-    if parsed.netloc.lower() == "arxiv.org" and parsed.path.startswith("/abs/"):
+    if (
+        parsed.netloc.lower() == "arxiv.org"
+        and parsed.path.startswith("/abs/")
+    ):
         paper_id = parsed.path.removeprefix("/abs/").strip("/")
         if paper_id:
             suffix = "" if paper_id.endswith(".pdf") else ".pdf"
@@ -32,7 +35,10 @@ async def jina_fetch(
         headers["Authorization"] = f"Bearer {api_key}"
 
     reader_url = f"https://r.jina.ai/{target}"
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+    ) as client:
         resp = await client.get(reader_url, headers=headers)
         resp.raise_for_status()
         text = resp.text or ""

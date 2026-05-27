@@ -2,7 +2,10 @@ from app.agents.tools.jina_reader import normalize_reader_target_url
 
 
 def test_normalize_reader_target_adds_scheme() -> None:
-    assert normalize_reader_target_url("example.com/paper") == "https://example.com/paper"
+    assert (
+        normalize_reader_target_url("example.com/paper")
+        == "https://example.com/paper"
+    )
 
 
 def test_normalize_reader_target_prefers_arxiv_pdf() -> None:

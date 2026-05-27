@@ -123,7 +123,10 @@ async def _sync_graph_node(
 def _augment_query(user_message: str) -> str:
     q = user_message.strip()
     if not any(x in q.lower() for x in ("site:", "arxiv", "doi", "paper")):
-        q = f"{q} (academic paper OR survey OR systematic review OR arXiv OR DOI)"
+        q = (
+            f"{q} (academic paper OR survey OR systematic review "
+            "OR arXiv OR DOI)"
+        )
     return q
 
 
