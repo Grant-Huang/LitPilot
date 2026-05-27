@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from app.agents.tools.jina_reader import jina_fetch
+from app.agents.tools.cached_tools import cached_jina_fetch
 from app.storage.file_store import get_store
 
 CitationFormat = Literal["apa", "acm"]
@@ -175,7 +175,7 @@ async def extract_citation_from_url(
         return rec
 
     try:
-        body = await jina_fetch(url, api_key=jina_api_key, timeout=timeout)
+        body = await cached_jina_fetch(url, api_key=jina_api_key, timeout=timeout)
     except Exception as e:
         rec.error = str(e)
         return rec

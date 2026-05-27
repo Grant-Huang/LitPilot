@@ -1,6 +1,22 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import httpx
+
+
+def normalize_reader_target_url(url: str) -> str:
+    target = url.strip()
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+
+    parsed = urlparse(target)
+    if parsed.netloc.lower() == "arxiv.org" and parsed.path.startswith("/abs/"):
+        paper_id = parsed.path.removeprefix("/abs/").strip("/")
+        if paper_id:
+            suffix = "" if paper_id.endswith(".pdf") else ".pdf"
+            return f"https://arxiv.org/pdf/{paper_id}{suffix}"
+    return target
 
 
 async def jina_fetch(
@@ -9,9 +25,7 @@ async def jina_fetch(
     api_key: str | None = None,
     timeout: float = 60.0,
 ) -> str:
-    target = url.strip()
-    if not target.startswith(("http://", "https://")):
-        target = f"https://{target}"
+    target = normalize_reader_target_url(url)
 
     headers: dict[str, str] = {"Accept": "text/markdown"}
     if api_key:
