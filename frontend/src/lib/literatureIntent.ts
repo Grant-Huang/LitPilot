@@ -7,6 +7,7 @@ export const LITERATURE_INTENT_LABELS: Record<string, string> = {
   retry_failed: "重试失败链接",
   query_corpus: "文献问答",
   manage_library: "文献库管理",
+  synthesis_matrix: "文献综述矩阵",
 };
 
 export function formatLiteratureIntentLabel(intent: string | undefined): string {

@@ -66,6 +66,33 @@ def test_refine_gen_keywords() -> None:
     assert result.skip_fetch is True
 
 
+def test_synthesis_matrix_reuses_existing_corpus() -> None:
+    ctx = _turn_ctx()
+    result = detect_intent_rules(
+        "请基于已有文献生成一个 Synthesis Matrix",
+        turn_ctx=ctx,
+        corpus=_make_corpus(),
+    )
+    assert result is not None
+    assert result.intent == "synthesis_matrix"
+    assert result.skip_tavily is True
+    assert result.skip_fetch is True
+    assert result.use_existing_corpus is True
+
+
+def test_synthesis_matrix_first_turn_searches() -> None:
+    ctx = _turn_ctx(has_corpus=False, user_turns=1)
+    result = detect_intent_rules(
+        "AI-Native MOM 架构重构文献综述矩阵",
+        turn_ctx=ctx,
+    )
+    assert result is not None
+    assert result.intent == "synthesis_matrix"
+    assert result.skip_tavily is False
+    assert result.skip_fetch is False
+    assert result.use_existing_corpus is False
+
+
 def test_retry_failed() -> None:
     ctx = _turn_ctx(failed=1)
     result = detect_intent_rules(

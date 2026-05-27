@@ -68,7 +68,11 @@ export function LitPilotArtifactPane({
       const art = streamState.artifacts[id];
       if (!art || art.lang === WORKFLOW_GRAPH_LANG) continue;
       const lang = art.lang.toLowerCase();
-      if (lang === "markdown" || lang.endsWith("/markdown")) {
+      if (
+        lang === "markdown" ||
+        lang.endsWith("/markdown") ||
+        lang.endsWith("+markdown")
+      ) {
         return { id, art };
       }
     }
@@ -145,7 +149,9 @@ export function LitPilotArtifactPane({
 
   const reviewLang = reviewArtifact?.art.lang.toLowerCase() ?? "markdown";
   const isMarkdownReview =
-    reviewLang === "markdown" || reviewLang.endsWith("/markdown");
+    reviewLang === "markdown" ||
+    reviewLang.endsWith("/markdown") ||
+    reviewLang.endsWith("+markdown");
   const reviewContent = reviewArtifact?.art.content ?? "";
   const reviewStreaming = reviewArtifact ? !reviewArtifact.art.done : false;
   const reviewRefIndices = extractReviewRefIndices(reviewContent);

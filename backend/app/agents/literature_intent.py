@@ -34,6 +34,7 @@ IntentKind = Literal[
     "retry_failed",
     "query_corpus",
     "manage_library",
+    "synthesis_matrix",
 ]
 
 VALID_INTENTS: frozenset[str] = frozenset(
@@ -46,6 +47,7 @@ VALID_INTENTS: frozenset[str] = frozenset(
         "retry_failed",
         "query_corpus",
         "manage_library",
+        "synthesis_matrix",
     }
 )
 
@@ -62,12 +64,16 @@ _QUERY_RE = re.compile(
 )
 _MANAGE_RE = re.compile(r"删除|去掉|移除|导出|去重|合并重复|不参与|排除", re.I)
 _DEFER_GEN_RE = re.compile(r"先不写|暂不生成|不要生成|只抓取|仅抓取|先补充", re.I)
+_MATRIX_RE = re.compile(
+    r"文献综述矩阵|综述矩阵|综合矩阵|synthesis\s+matrix|matrix",
+    re.I,
+)
 _JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
 
 INTENT_ROUTER_SYSTEM = """你是文献综述助手的续聊意图路由器。
 根据【会话状态】与【用户消息】判断本轮意图，输出唯一 JSON（无 markdown 代码块）：
 {
-  "intent": "new_topic|supplement|refine_gen|regen_only|expand_search|retry_failed|query_corpus|manage_library",
+  "intent": "new_topic|supplement|refine_gen|regen_only|expand_search|retry_failed|query_corpus|manage_library|synthesis_matrix",
   "session_title": "可选，8-24字",
   "search_query": "expand_search/supplement/new_topic 时的检索词，≤120字",
   "gen_directives": "refine_gen 时的写作要求摘要，≤200字",
@@ -85,6 +91,7 @@ INTENT_ROUTER_SYSTEM = """你是文献综述助手的续聊意图路由器。
 - 重试失败链接 → retry_failed
 - 针对已有文献提问、不需完整综述 → query_corpus
 - 删除/导出/去重文献 → manage_library
+- 要求生成“文献综述矩阵 / Synthesis Matrix” → synthesis_matrix
 仅输出 JSON。"""
 
 
@@ -180,6 +187,18 @@ def detect_intent_rules(
 
     urls = _extract_urls(msg, extra_urls)
     defer = bool(_DEFER_GEN_RE.search(msg))
+
+    if _MATRIX_RE.search(msg):
+        return LiteratureIntentResult(
+            intent="synthesis_matrix",
+            search_query=msg[:200],
+            gen_directives=msg[:500],
+            new_urls=urls,
+            defer_generate=False,
+            skip_tavily=turn_ctx.has_corpus and not urls,
+            skip_fetch=turn_ctx.has_corpus and not urls,
+            use_existing_corpus=turn_ctx.has_corpus,
+        )
 
     if not turn_ctx.has_corpus and turn_ctx.user_turns <= 1:
         return LiteratureIntentResult(
@@ -335,6 +354,7 @@ async def route_literature_intent(
             "query_corpus",
             "regen_only",
             "expand_search",
+            "synthesis_matrix",
         ):
             return ruled
 
@@ -387,6 +407,16 @@ async def route_literature_intent(
 
     if result.intent == "expand_search" and not result.search_query:
         result.search_query = user_message.strip()[:200]
+
+    if result.intent == "synthesis_matrix":
+        if not result.search_query:
+            result.search_query = user_message.strip()[:200]
+        if turn_ctx.has_corpus and not urls:
+            result.skip_tavily = True
+            result.skip_fetch = True
+            result.use_existing_corpus = True
+        elif not turn_ctx.has_corpus:
+            result.use_existing_corpus = False
 
     if result.intent in ("refine_gen", "regen_only") and not result.gen_directives:
         if result.intent == "refine_gen":

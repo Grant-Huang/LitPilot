@@ -7,6 +7,7 @@ import type { LibraryItem } from "@/lib/libraryTypes";
 type Props = {
   streamState: StreamState;
   reviewFilename?: string;
+  matrixFilename?: string;
   libraryItems?: LibraryItem[];
   selectedLibraryId?: string | null;
   onSelectLibraryId?: (id: string | null) => void;
@@ -17,6 +18,7 @@ type Props = {
 export function LitPilotArtifactSlot({
   streamState,
   reviewFilename,
+  matrixFilename,
   libraryItems,
   selectedLibraryId,
   onSelectLibraryId,
@@ -27,6 +29,7 @@ export function LitPilotArtifactSlot({
     <LitPilotArtifactPane
       streamState={streamState}
       reviewFilename={reviewFilename}
+      matrixFilename={matrixFilename}
       libraryItems={libraryItems}
       selectedLibraryId={selectedLibraryId}
       onSelectLibraryId={onSelectLibraryId}

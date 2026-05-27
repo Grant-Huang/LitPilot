@@ -366,18 +366,45 @@ class FileStore:
         session_id: str,
         content: str,
     ) -> tuple[Path, str]:
+        return self._save_markdown_artifact(
+            session_id,
+            content,
+            kind="review",
+            meta_key="review_versions",
+        )
+
+    def save_matrix_artifact(
+        self,
+        session_id: str,
+        content: str,
+    ) -> tuple[Path, str]:
+        return self._save_markdown_artifact(
+            session_id,
+            content,
+            kind="matrix",
+            meta_key="matrix_versions",
+        )
+
+    def _save_markdown_artifact(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        kind: str,
+        meta_key: str,
+    ) -> tuple[Path, str]:
         art_dir = self.root / "artifacts" / session_id
         art_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        version_id = f"review_{uuid.uuid4().hex[:12]}"
-        filename = f"review-{ts}.md"
+        version_id = f"{kind}_{uuid.uuid4().hex[:12]}"
+        filename = f"{kind}-{ts}.md"
         path = art_dir / filename
         path.write_text(content, encoding="utf-8")
-        latest = art_dir / "review-latest.md"
+        latest = art_dir / f"{kind}-latest.md"
         latest.write_text(content, encoding="utf-8")
         meta = self.get_session(session_id)
         if meta is not None:
-            versions = list(meta.get("review_versions") or [])
+            versions = list(meta.get(meta_key) or [])
             versions.append(
                 {
                     "id": version_id,
@@ -385,7 +412,7 @@ class FileStore:
                     "created_at": _utc_now(),
                 }
             )
-            meta["review_versions"] = versions[-20:]
+            meta[meta_key] = versions[-20:]
             meta["updated_at"] = _utc_now()
             _write_json_atomic(
                 self.root / "sessions" / session_id / "meta.json",
@@ -407,6 +434,31 @@ class FileStore:
         if not art_dir.is_dir():
             return None
         files = sorted(art_dir.glob("review-*.md"), key=lambda p: p.stat().st_mtime)
+        if not files:
+            return None
+        path = files[-1]
+        return {
+            "filename": path.name,
+            "content": path.read_text(encoding="utf-8"),
+            "updated_at": datetime.fromtimestamp(
+                path.stat().st_mtime, tz=timezone.utc
+            ).isoformat(),
+        }
+
+    def get_latest_matrix(self, session_id: str) -> dict[str, Any] | None:
+        art_dir = self.root / "artifacts" / session_id
+        latest = art_dir / "matrix-latest.md"
+        if latest.is_file():
+            return {
+                "filename": "matrix-latest.md",
+                "content": latest.read_text(encoding="utf-8"),
+                "updated_at": datetime.fromtimestamp(
+                    latest.stat().st_mtime, tz=timezone.utc
+                ).isoformat(),
+            }
+        if not art_dir.is_dir():
+            return None
+        files = sorted(art_dir.glob("matrix-*.md"), key=lambda p: p.stat().st_mtime)
         if not files:
             return None
         path = files[-1]

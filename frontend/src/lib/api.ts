@@ -97,6 +97,12 @@ export const sessionsApi = {
       content: string;
       updated_at?: string;
     } | null>(`/sessions/${id}/review`),
+  matrix: (id: string) =>
+    apiRequestData<{
+      filename: string;
+      content: string;
+      updated_at?: string;
+    } | null>(`/sessions/${id}/matrix`),
 };
 
 export const settingsApi = {
