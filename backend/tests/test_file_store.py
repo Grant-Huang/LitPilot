@@ -27,6 +27,17 @@ def test_append_ref(store: FileStore) -> None:
     assert "[1] Author" in text
 
 
+def test_save_matrix_artifact(store: FileStore) -> None:
+    meta = store.create_session("Matrix")
+    _, version_id = store.save_matrix_artifact(meta["id"], "# Matrix")
+    latest = store.get_latest_matrix(meta["id"])
+
+    assert version_id.startswith("matrix_")
+    assert latest is not None
+    assert latest["filename"] == "matrix-latest.md"
+    assert "# Matrix" in latest["content"]
+
+
 def test_session_pin_and_rename(store: FileStore) -> None:
     meta = store.create_session("原标题")
     sid = meta["id"]

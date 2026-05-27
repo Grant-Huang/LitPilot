@@ -23,6 +23,25 @@ export function streamStateWithReview(
   };
 }
 
+/** 将已保存的矩阵 Markdown 注入 Artifact 流状态 */
+export function streamStateWithMatrix(content: string): StreamState {
+  const id = "matrix-saved";
+  const base = createInitialStreamState();
+  return {
+    ...base,
+    status: "done",
+    artifactOrder: [id],
+    artifacts: {
+      [id]: {
+        id,
+        lang: "literature-matrix+markdown",
+        content,
+        done: true,
+      },
+    },
+  };
+}
+
 export function streamHasArtifactPane(state: StreamState | null): boolean {
   if (!state) return false;
   if (state.workflowRunOrder.length > 0) return true;

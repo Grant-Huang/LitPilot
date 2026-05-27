@@ -23,7 +23,10 @@ from app.agents.parallel_fetch import iter_fetch_sources_parallel
 from app.agents.retry_utils import retry_async
 from app.agents.session_corpus import SessionCorpus, hits_from_urls
 from app.agents.tools.cached_tools import cached_tavily_search
-from app.agents.tools.tavily_search import normalize_tavily_results
+from app.agents.tools.tavily_search import (
+    ACADEMIC_SEARCH_DOMAINS,
+    normalize_tavily_results,
+)
 from app.agents.url_list import resolve_fetch_display_title
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.skills.citation_extractor import extract_and_persist_batch
@@ -136,6 +139,7 @@ async def stream_search_phase(
                 query,
                 max_results=tavily_max_results,
                 search_depth="advanced",
+                include_domains=ACADEMIC_SEARCH_DOMAINS,
             )
 
         t0 = time.monotonic()

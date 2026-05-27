@@ -70,3 +70,13 @@ async def get_session_review(session_id: str):
     if not review:
         return ok(None)
     return ok(review)
+
+
+@router.get("/{session_id}/matrix")
+async def get_session_matrix(session_id: str):
+    if not get_store().get_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    matrix = get_store().get_latest_matrix(session_id)
+    if not matrix:
+        return ok(None)
+    return ok(matrix)

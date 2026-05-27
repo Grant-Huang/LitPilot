@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from app.agents.ttl_cache import jina_cache, normalize_cache_key, tavily_cache
 from app.agents.tools.jina_reader import jina_fetch
 from app.agents.tools.tavily_search import tavily_search

@@ -12,6 +12,7 @@ import type { LitPilotMessage } from "@/lib/chatTypes";
 import { mergeThinkIntoTrace } from "@/lib/executionTrace";
 import {
   streamHasArtifactPane,
+  streamStateWithMatrix,
   streamStateWithReview,
 } from "@/lib/buildArtifactStream";
 import { cloneStreamState } from "@/lib/streamState";
@@ -162,40 +163,76 @@ export function LitPilotChatPage() {
     }
   }, [hasArtifactPane, setChatLayout]);
 
-  const loadSessionReview = useCallback(async (sessionId: string) => {
+  const loadSessionArtifacts = useCallback(async (sessionId: string) => {
     try {
-      const review = await sessionsApi.review(sessionId);
-      if (!review?.content) return;
+      const [review, matrix] = await Promise.all([
+        sessionsApi.review(sessionId).catch(() => null),
+        sessionsApi.matrix(sessionId).catch(() => null),
+      ]);
+      if (!review?.content && !matrix?.content) return;
       setPinnedArtifact((prev) => {
         const merged = prev
           ? cloneStreamState(prev)
-          : streamStateWithReview(review.content, review.filename);
-        const id = "review-saved";
-        const order = merged.artifactOrder.includes(id)
-          ? merged.artifactOrder
-          : [...merged.artifactOrder, id];
+          : review?.content
+            ? streamStateWithReview(review.content, review.filename)
+            : streamStateWithMatrix(matrix?.content ?? "");
+        const artifacts = { ...merged.artifacts };
+        let order = [...merged.artifactOrder];
+        const savedArtifacts = [
+          review?.content
+            ? {
+                id: "review-saved",
+                lang: "markdown",
+                content: review.content,
+                updatedAt: review.updated_at ?? "",
+              }
+            : null,
+          matrix?.content
+            ? {
+                id: "matrix-saved",
+                lang: "literature-matrix+markdown",
+                content: matrix.content,
+                updatedAt: matrix.updated_at ?? "",
+              }
+            : null,
+        ]
+          .filter(
+            (
+              x,
+            ): x is {
+              id: string;
+              lang: string;
+              content: string;
+              updatedAt: string;
+            } => Boolean(x),
+          )
+          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+
+        for (const art of savedArtifacts) {
+          const id = art.id;
+          order = order.includes(id) ? order : [...order, id];
+          artifacts[id] = {
+            id,
+            lang: art.lang,
+            content: art.content,
+            done: true,
+          };
+        }
         return {
           ...merged,
+          status: "done",
           artifactOrder: order,
-          artifacts: {
-            ...merged.artifacts,
-            [id]: {
-              id,
-              lang: "markdown",
-              content: review.content,
-              done: true,
-            },
-          },
+          artifacts,
         };
       });
     } catch {
-      /* 无综述文件时忽略 */
+      /* 无已保存 artifact 时忽略 */
     }
   }, []);
 
   useEffect(() => {
-    if (activeSessionId) void loadSessionReview(activeSessionId);
-  }, [activeSessionId, loadSessionReview]);
+    if (activeSessionId) void loadSessionArtifacts(activeSessionId);
+  }, [activeSessionId, loadSessionArtifacts]);
 
   useEffect(() => {
     void loadLibrary();
@@ -204,9 +241,9 @@ export function LitPilotChatPage() {
   useEffect(() => {
     if (streamDone || streamError) {
       void loadLibrary();
-      if (activeSessionId) void loadSessionReview(activeSessionId);
+      if (activeSessionId) void loadSessionArtifacts(activeSessionId);
     }
-  }, [streamDone, streamError, loadLibrary, activeSessionId, loadSessionReview]);
+  }, [streamDone, streamError, loadLibrary, activeSessionId, loadSessionArtifacts]);
 
   const historyMessages: LitPilotMessage[] = useMemo(() => {
     return [...mapStoredMessages(storedMessages), ...liveMessages];

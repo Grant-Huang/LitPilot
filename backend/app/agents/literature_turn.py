@@ -53,6 +53,11 @@ from app.agents.session_corpus import (
     resolve_session_corpus,
     save_session_corpus,
 )
+from app.agents.synthesis_matrix_prompt import (
+    SYNTHESIS_MATRIX_LANG,
+    build_synthesis_matrix_system_prompt,
+    build_synthesis_matrix_user_prompt,
+)
 from app.agents.tavily_key import tavily_key_hint
 from app.agents.url_list import effective_fetch_cap, sanitize_fetch_urls
 from app.agents.workflow_graph import build_literature_graph
@@ -143,7 +148,12 @@ def _intent_needs_tavily(intent: LiteratureIntentResult) -> bool:
         return False
     if intent.skip_tavily:
         return False
-    return intent.intent in ("new_topic", "expand_search", "supplement")
+    return intent.intent in (
+        "new_topic",
+        "expand_search",
+        "supplement",
+        "synthesis_matrix",
+    )
 
 
 async def _finalize_turn(
@@ -373,12 +383,13 @@ async def stream_literature_turn(
     answer = ""
     run_search = intent.intent in ("new_topic", "expand_search") or (
         intent.intent == "supplement" and not intent.skip_tavily
-    )
+    ) or (intent.intent == "synthesis_matrix" and not intent.skip_tavily)
     run_fetch = intent.intent in (
         "new_topic",
         "expand_search",
         "supplement",
         "retry_failed",
+        "synthesis_matrix",
     ) and not intent.skip_fetch
 
     if intent.intent == "retry_failed":
@@ -617,7 +628,12 @@ async def stream_literature_turn(
                 )
                 yield ("stage", {"name": "完成", "state": "done"})
                 return
-    elif intent.intent in ("refine_gen", "regen_only", "query_corpus"):
+    elif intent.intent in (
+        "refine_gen",
+        "regen_only",
+        "query_corpus",
+        "synthesis_matrix",
+    ):
         yield (
             "literature_source",
             {
@@ -730,6 +746,128 @@ async def stream_literature_turn(
             main_text=main_text,
             gen_constraints=gen_constraints,
             is_review=False,
+        )
+        yield ("stage", {"name": "完成", "state": "done"})
+        return
+
+    if intent.intent == "synthesis_matrix":
+        async for ev in _sync_graph_node(
+            emitter,
+            g,
+            graph_artifact_id,
+            "generate",
+            "active",
+        ):
+            yield ev
+        yield ("stage", {"name": "矩阵生成", "state": "active"})
+        async for ev in emit_system_think_line(
+            "正在按论文与主题维度生成文献综述矩阵。",
+            accumulator=think_acc,
+        ):
+            yield ev
+
+        matrix_prompt = build_synthesis_matrix_user_prompt(context_block)
+        matrix_system = build_synthesis_matrix_system_prompt(
+            initial_query=initial_query,
+            gen_directives=intent.gen_directives or user_message,
+        )
+        matrix_parts = []
+        async for chunk in llm.chat_stream(
+            [LLMMessage(role="user", content=matrix_prompt)],
+            system=matrix_system,
+            max_tokens=4096,
+            temperature=0.25,
+        ):
+            matrix_parts.append(chunk)
+            yield ("text", {"delta": chunk})
+
+        matrix_text = "".join(matrix_parts)
+        if not matrix_text.strip():
+            try:
+                resp = await llm.chat(
+                    [LLMMessage(role="user", content=matrix_prompt)],
+                    system=matrix_system,
+                    max_tokens=4096,
+                    temperature=0.25,
+                )
+                matrix_text = (resp.content or "").strip()
+                if matrix_text:
+                    yield ("text", {"delta": matrix_text})
+            except Exception:
+                _log.exception("synthesis matrix fallback failed")
+                matrix_text = ""
+        if not matrix_text.strip():
+            matrix_text = "（矩阵生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
+            yield ("text", {"delta": matrix_text})
+
+        main_text = append_compliance_footer(matrix_text)
+        if main_text != matrix_text:
+            tail = main_text[len(matrix_text) :]
+            if tail:
+                yield ("text", {"delta": tail})
+
+        async for ev in _sync_graph_node(
+            emitter,
+            g,
+            graph_artifact_id,
+            "generate",
+            "done",
+        ):
+            yield ev
+        yield ("stage", {"name": "矩阵生成", "state": "done"})
+        upsert_stage(execution_trace, "矩阵生成", "done")
+
+        async for ev in _sync_graph_node(
+            emitter,
+            g,
+            graph_artifact_id,
+            "deliver",
+            "active",
+        ):
+            yield ev
+
+        _, version_id = store.save_matrix_artifact(session_id, main_text)
+        art_id = _new_id("matrix")
+        yield (
+            "artifact",
+            {
+                "id": art_id,
+                "lang": SYNTHESIS_MATRIX_LANG,
+                "delta": main_text,
+                "done": True,
+                "version_id": version_id,
+            },
+        )
+
+        async for ev in _sync_graph_node(
+            emitter,
+            g,
+            graph_artifact_id,
+            "deliver",
+            "done",
+        ):
+            yield ev
+        upsert_stage(execution_trace, "完成", "done")
+        lib_result = await _finalize_turn(
+            store=store,
+            session_id=session_id,
+            session_meta=session_meta,
+            session_title=session_title,
+            intent=intent,
+            user_message=user_message,
+            corpus=working,
+            execution_trace=execution_trace,
+            think_acc=think_acc,
+            fetch_results=fetch_results,
+            cite_records=cite_records,
+            failed_literature=failed_literature,
+            main_text=main_text,
+            gen_constraints=gen_constraints,
+            is_review=False,
+        )
+        yield (
+            "extension",
+            {"name": "library_updated", "version": "1.0", "data": lib_result},
         )
         yield ("stage", {"name": "完成", "state": "done"})
         return

@@ -68,7 +68,11 @@ export function LitPilotArtifactPane({
       const art = streamState.artifacts[id];
       if (!art || art.lang === WORKFLOW_GRAPH_LANG) continue;
       const lang = art.lang.toLowerCase();
-      if (lang === "markdown" || lang.endsWith("/markdown")) {
+      if (
+        lang === "markdown" ||
+        lang.endsWith("/markdown") ||
+        lang.endsWith("+markdown")
+      ) {
         return { id, art };
       }
     }
@@ -109,6 +113,15 @@ export function LitPilotArtifactPane({
   useEffect(() => {
     const reviewDone = showReview && Boolean(reviewArtifact?.art.done);
     if (!reviewDone) return;
+    const artifactLang = reviewArtifact?.art.lang.toLowerCase() ?? "";
+    const isMatrix =
+      artifactLang.includes("matrix") ||
+      Boolean(reviewArtifact?.id.includes("matrix"));
+    if (isMatrix) {
+      setMainTab("review");
+      reviewAutoOpenedRef.current = true;
+      return;
+    }
 
     if (showLiterature && !literatureAutoOpenedRef.current) {
       setMainTab("literature");
@@ -136,6 +149,7 @@ export function LitPilotArtifactPane({
   }, [
     showReview,
     reviewArtifact?.art.done,
+    reviewArtifact?.art.lang,
     reviewArtifact?.id,
     showLiterature,
     libraryItems,
@@ -145,7 +159,16 @@ export function LitPilotArtifactPane({
 
   const reviewLang = reviewArtifact?.art.lang.toLowerCase() ?? "markdown";
   const isMarkdownReview =
-    reviewLang === "markdown" || reviewLang.endsWith("/markdown");
+    reviewLang === "markdown" ||
+    reviewLang.endsWith("/markdown") ||
+    reviewLang.endsWith("+markdown");
+  const isMatrixArtifact =
+    reviewLang.includes("matrix") ||
+    Boolean(reviewArtifact?.id.includes("matrix"));
+  const artifactLabel = isMatrixArtifact ? "矩阵" : "综述";
+  const artifactFilename = isMatrixArtifact
+    ? "matrix-latest.md"
+    : reviewFilename;
   const reviewContent = reviewArtifact?.art.content ?? "";
   const reviewStreaming = reviewArtifact ? !reviewArtifact.art.done : false;
   const reviewRefIndices = extractReviewRefIndices(reviewContent);
@@ -153,9 +176,11 @@ export function LitPilotArtifactPane({
   const displayReview = useMemo(
     () =>
       reviewMarkdownForDisplay(reviewContent, {
-        collapseReferences: Boolean(showLiterature && reviewArtifact?.art.done),
+        collapseReferences: Boolean(
+          !isMatrixArtifact && showLiterature && reviewArtifact?.art.done,
+        ),
       }),
-    [reviewContent, showLiterature, reviewArtifact?.art.done],
+    [reviewContent, isMatrixArtifact, showLiterature, reviewArtifact?.art.done],
   );
 
   if (!showDag && !showReview && !showLiterature) {
@@ -176,7 +201,7 @@ export function LitPilotArtifactPane({
   };
 
   const handleDownload = (content: string) => {
-    downloadTextFile(reviewFilename, content);
+    downloadTextFile(artifactFilename, content);
   };
 
   const literatureDetailOpen =
@@ -215,7 +240,7 @@ export function LitPilotArtifactPane({
               }`}
               onClick={() => setMainTab("review")}
             >
-              综述
+              {artifactLabel}
             </button>
           )}
           {showLiterature && (
@@ -265,7 +290,7 @@ export function LitPilotArtifactPane({
       {mainTab === "review" && showReview && (
         <>
           <p className="litpilot-artifact-pane__file-hint">
-            文件：<code>{reviewFilename}</code>
+            文件：<code>{artifactFilename}</code>
           </p>
           {reviewRefIndices.length > 0 && showLiterature && (
             <div className="litpilot-artifact-pane__ref-jump">
@@ -301,7 +326,7 @@ export function LitPilotArtifactPane({
                 language="markdown"
                 streaming={reviewStreaming}
                 renderMarkdown={renderSimpleMarkdown}
-                onDownload={handleDownload}
+                onDownload={() => handleDownload(displayReview)}
               />
             ) : (
               <ArtifactPanel
@@ -309,7 +334,7 @@ export function LitPilotArtifactPane({
                 content={displayReview}
                 language="markdown"
                 streaming={reviewStreaming}
-                onDownload={handleDownload}
+                onDownload={() => handleDownload(displayReview)}
               />
             )}
           </>
