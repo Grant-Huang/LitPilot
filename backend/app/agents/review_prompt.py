@@ -112,7 +112,19 @@ def build_review_turn_system_prompt(
     return merged
 
 
-def build_review_materials_user_prompt(context_block: str) -> str:
+def build_review_materials_user_prompt(
+    context_block: str,
+    *,
+    prior_review_excerpt: str = "",
+) -> str:
     """User message for review LLM — materials only, no echoed user question."""
     block = (context_block or "").strip()
-    return f"请基于下列多源材料撰写结构化综述。\n\n【多源材料】\n{block}"
+    parts = ["请基于下列多源材料撰写结构化综述。"]
+    if prior_review_excerpt.strip():
+        parts.append(
+            "【上一版综述（修订参考：保留仍有效的论述，按系统指令中的本轮要求调整；"
+            "勿整段复制无关部分）】\n"
+            + prior_review_excerpt.strip()[-6000:]
+        )
+    parts.append(f"【多源材料】\n{block}")
+    return "\n\n".join(parts)

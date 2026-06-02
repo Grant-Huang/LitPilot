@@ -25,6 +25,9 @@ from app.agents.session_corpus import SessionCorpus, hits_from_urls
 from app.agents.tools.cached_tools import cached_tavily_search
 from app.agents.tools.tavily_search import (
     ACADEMIC_SEARCH_DOMAINS,
+    DEFAULT_EXCLUDE_DOMAINS,
+    filter_tavily_hits,
+    restrict_hits_to_domains,
     normalize_tavily_results,
 )
 from app.agents.url_list import resolve_fetch_display_title
@@ -96,12 +99,24 @@ async def stream_search_phase(
     execution_trace: dict[str, Any],
     corpus: SessionCorpus | None = None,
     result: dict[str, Any] | None = None,
+    tavily_include_domains: tuple[str, ...] | None = None,
+    tavily_exclude_domains: tuple[str, ...] | None = None,
+    tavily_search_depth: str = "advanced",
+    tavily_enforce_domain_filter: bool = True,
+    tavily_enable_junk_filter: bool = True,
+    pass_index: int = 1,
+    pass_total: int = 1,
+    emit_stage_lifecycle: bool = True,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    include_domains = tavily_include_domains or ACADEMIC_SEARCH_DOMAINS
+    exclude_domains = tavily_exclude_domains or DEFAULT_EXCLUDE_DOMAINS
+    search_depth = tavily_search_depth if tavily_search_depth in ("basic", "advanced") else "advanced"
     hits: list[dict[str, str]] = []
     answer = ""
     out = result if result is not None else {}
 
-    yield ("stage", {"name": "文献检索", "state": "active"})
+    if emit_stage_lifecycle and pass_index == 1:
+        yield ("stage", {"name": "文献检索", "state": "active"})
 
     if skip_tavily:
         async for ev in emit_system_think_line(
@@ -115,21 +130,28 @@ async def stream_search_phase(
         out["answer"] = answer
         return
 
-    search_before_ctx = format_search_before_context(
-        query=query,
-        source_mode=source_mode,
-        tavily_max_results=tavily_max_results,
-        upload_count=upload_count,
-        skipped_tavily=False,
-    )
-    async for ev in narrate_phase_stream(
-        "B",
-        user_message,
-        search_before_ctx,
-        think_acc=think_acc,
-        ctx=planner_ctx,
-    ):
-        yield ev
+    if pass_index == 1:
+        search_before_ctx = format_search_before_context(
+            query=query,
+            source_mode=source_mode,
+            tavily_max_results=tavily_max_results,
+            upload_count=upload_count,
+            skipped_tavily=False,
+        )
+        async for ev in narrate_phase_stream(
+            "B",
+            user_message,
+            search_before_ctx,
+            think_acc=think_acc,
+            ctx=planner_ctx,
+        ):
+            yield ev
+    elif pass_total > 1:
+        async for ev in emit_system_think_line(
+            f"⟦sys⟧第 {pass_index}/{pass_total} 轮检索：{query[:80]}⟦/sys⟧",
+            accumulator=think_acc,
+        ):
+            yield ev
 
     try:
 
@@ -138,8 +160,9 @@ async def stream_search_phase(
                 tavily_key,
                 query,
                 max_results=tavily_max_results,
-                search_depth="advanced",
-                include_domains=ACADEMIC_SEARCH_DOMAINS,
+                search_depth=search_depth,
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
             )
 
         t0 = time.monotonic()
@@ -150,6 +173,10 @@ async def stream_search_phase(
         )
         search_ms = int((time.monotonic() - t0) * 1000)
         hits = normalize_tavily_results(raw_search)
+        if tavily_enable_junk_filter:
+            hits = filter_tavily_hits(hits)
+        if tavily_enforce_domain_filter:
+            hits = restrict_hits_to_domains(hits, include_domains=include_domains)
         answer = str(raw_search.get("answer") or "").strip()
 
         if corpus:
@@ -158,7 +185,12 @@ async def stream_search_phase(
         async for ev in emit_tool_event(
             lambda p: f"{p}_search",
             "web_search",
-            {"query": query, "provider": "tavily"},
+            {
+                "query": query,
+                "provider": "tavily",
+                "pass_index": pass_index,
+                "pass_total": pass_total,
+            },
             json.dumps(
                 {
                     "answer": answer[:500],
@@ -183,19 +215,206 @@ async def stream_search_phase(
         if not hits and not answer and not upload_urls:
             raise ValueError("未检索到可用文献结果，本次会话已终止。")
 
-    search_ctx = format_search_context(hits, answer, query=query)
+    if pass_index == pass_total:
+        search_ctx = format_search_context(hits, answer, query=query)
+        async for ev in narrate_phase_stream(
+            "C",
+            user_message,
+            search_ctx,
+            think_acc=think_acc,
+            ctx=planner_ctx,
+        ):
+            yield ev
+        if emit_stage_lifecycle:
+            yield ("stage", {"name": "文献检索", "state": "done"})
+            upsert_stage(execution_trace, "文献检索", "done")
+    out["hits"] = hits
+    out["answer"] = answer
+
+
+async def stream_expanded_search_phase(
+    *,
+    user_message: str,
+    queries: list[str],
+    tavily_key: str,
+    tavily_max_results: int,
+    tavily_retry_count: int,
+    fetch_retry_delay_ms: int,
+    source_mode: str,
+    upload_count: int,
+    skip_tavily: bool,
+    upload_urls: list[str],
+    think_acc: ThinkAccumulator,
+    planner_ctx,
+    execution_trace: dict[str, Any],
+    corpus: SessionCorpus | None = None,
+    result: dict[str, Any] | None = None,
+    tavily_include_domains: tuple[str, ...] | None = None,
+    tavily_exclude_domains: tuple[str, ...] | None = None,
+    tavily_search_depth: str = "advanced",
+    tavily_enforce_domain_filter: bool = True,
+    tavily_enable_junk_filter: bool = True,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    from app.agents.search_merge import merge_search_hits
+
+    out = result if result is not None else {}
+    clean_queries = [q.strip() for q in queries if q and q.strip()]
+    if not clean_queries:
+        clean_queries = [""]
+    total = len(clean_queries)
+    per_query_max = max(2, tavily_max_results // total)
+    hits_lists: list[list[dict[str, str]]] = []
+    answers: list[str] = []
+    raw_total = 0
+
+    yield (
+        "literature_search_plan",
+        {
+            "queries": clean_queries,
+            "per_query_max_results": per_query_max,
+            "total_passes": total,
+        },
+    )
+
+    for idx, query in enumerate(clean_queries, start=1):
+        pass_out: dict[str, Any] = {}
+        async for ev in stream_search_phase(
+            user_message=user_message,
+            query=query,
+            tavily_key=tavily_key,
+            tavily_max_results=per_query_max,
+            tavily_retry_count=tavily_retry_count,
+            fetch_retry_delay_ms=fetch_retry_delay_ms,
+            source_mode=source_mode,
+            upload_count=upload_count if idx == 1 else 0,
+            skip_tavily=skip_tavily,
+            upload_urls=upload_urls if idx == 1 else [],
+            think_acc=think_acc,
+            planner_ctx=planner_ctx,
+            execution_trace=execution_trace,
+            corpus=corpus,
+            result=pass_out,
+            tavily_include_domains=tavily_include_domains,
+            tavily_exclude_domains=tavily_exclude_domains,
+            tavily_search_depth=tavily_search_depth,
+            tavily_enforce_domain_filter=tavily_enforce_domain_filter,
+            tavily_enable_junk_filter=tavily_enable_junk_filter,
+            pass_index=idx,
+            pass_total=total,
+            emit_stage_lifecycle=idx == 1 or idx == total,
+        ):
+            yield ev
+        pass_hits = list(pass_out.get("hits") or [])
+        raw_total += len(pass_hits)
+        hits_lists.append(pass_hits)
+        ans = str(pass_out.get("answer") or "").strip()
+        if ans:
+            answers.append(ans)
+
+    merged = merge_search_hits(hits_lists, max_results=tavily_max_results)
+    if corpus:
+        merged = [h for h in merged if not corpus.has_url(str(h.get("url") or ""))]
+
+    yield (
+        "literature_search_merge",
+        {
+            "raw_total": raw_total,
+            "deduped": len(merged),
+            "cap": tavily_max_results,
+        },
+    )
+
+    out["hits"] = merged
+    out["answer"] = answers[0] if answers else ""
+
+
+async def stream_attributes_phase(
+    *,
+    user_message: str,
+    corpus: SessionCorpus,
+    fetch_results: list[tuple[dict[str, str], str, str | None]],
+    cite_records: list[Any],
+    llm,
+    parallel: int,
+    think_acc: ThinkAccumulator,
+    planner_ctx,
+    execution_trace: dict[str, Any],
+    result: dict[str, Any] | None = None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    from app.skills.paper_attributes import (
+        build_extraction_jobs,
+        extract_attributes_batch,
+        merge_paper_index,
+        papers_needing_attributes,
+    )
+
+    out = result if result is not None else {}
+    yield ("stage", {"name": "文献结构化", "state": "active"})
+
+    jobs = build_extraction_jobs(
+        fetch_results=fetch_results,
+        cite_records=cite_records,
+        paper_index=corpus.paper_index,
+    )
+    if not jobs:
+        async for ev in emit_system_think_line(
+            "文献结构化：无新增抓取材料或均已结构化。",
+            accumulator=think_acc,
+        ):
+            yield ev
+        yield ("stage", {"name": "文献结构化", "state": "done"})
+        upsert_stage(execution_trace, "文献结构化", "done")
+        out["paper_index"] = corpus.paper_index
+        out["extracted"] = 0
+        return
+
+    async for ev in emit_system_think_line(
+        f"正在结构化 {len(jobs)} 篇文献（AttributeTree lite）…",
+        accumulator=think_acc,
+    ):
+        yield ev
+
+    extracted = await extract_attributes_batch(llm, jobs, parallel=parallel)
+    corpus.paper_index = merge_paper_index(corpus.paper_index, extracted)
+
+    for rec in extracted:
+        async for ev in emit_tool_event(
+            lambda p, rid=rec.paper_id: f"{p}_{rid}",
+            "extract_attributes",
+            {"paper_id": rec.paper_id, "url": rec.url, "title": rec.title[:120]},
+            str(rec.attri.get("problem") or rec.title)[:200],
+            trace=execution_trace,
+        ):
+            yield ev
+
+    attri_ctx = (
+        f"【结构化文献】{len(corpus.paper_index)} 篇；"
+        f"待补全 {papers_needing_attributes(corpus.paper_index)} 篇"
+    )
     async for ev in narrate_phase_stream(
-        "C",
+        "F2",
         user_message,
-        search_ctx,
+        attri_ctx,
         think_acc=think_acc,
         ctx=planner_ctx,
     ):
         yield ev
-    yield ("stage", {"name": "文献检索", "state": "done"})
-    upsert_stage(execution_trace, "文献检索", "done")
-    out["hits"] = hits
-    out["answer"] = answer
+
+    yield (
+        "literature_paper_index",
+        {
+            "count": len(corpus.paper_index),
+            "extracted": len(extracted),
+            "sample_titles": [
+                str(p.get("title") or "")[:80]
+                for p in corpus.paper_index[:5]
+            ],
+        },
+    )
+    yield ("stage", {"name": "文献结构化", "state": "done"})
+    upsert_stage(execution_trace, "文献结构化", "done")
+    out["paper_index"] = corpus.paper_index
+    out["extracted"] = len(extracted)
 
 
 async def stream_fetch_phase(
@@ -218,6 +437,7 @@ async def stream_fetch_phase(
     sync_graph_node,
     tavily_answer: str = "",
     result: dict[str, Any] | None = None,
+    max_source_chars: int = MAX_SOURCE_CHARS,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     out = result if result is not None else {}
     delta = SessionCorpus()
@@ -271,7 +491,7 @@ async def stream_fetch_phase(
         display_title = resolve_fetch_display_title(hit, ctx_md or "")
         if ctx_md:
             fetch_ok += 1
-            block = ctx_md[:MAX_SOURCE_CHARS]
+            block = ctx_md[:max_source_chars]
             if not block.lstrip().startswith("##"):
                 header = display_title or hit.get("title") or url
                 block = f"## [网页材料] {header}\n\n{block}"
@@ -514,3 +734,101 @@ def build_fetch_queue(
 
 def user_url_hits(urls: list[str]) -> list[dict[str, str]]:
     return hits_from_urls(urls)
+
+
+OUTLINE_ARTIFACT_LANG = "literature-outline+json"
+
+
+async def stream_outline_phase(
+    *,
+    user_message: str,
+    search_query: str,
+    session_title: str,
+    session_id: str,
+    corpus: SessionCorpus,
+    store,
+    think_acc: ThinkAccumulator,
+    planner_ctx,
+    execution_trace: dict[str, Any],
+    emitter,
+    graph,
+    graph_artifact_id: str,
+    sync_graph_node,
+    outline: Any | None = None,
+    result: dict[str, Any] | None = None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    from app.agents.literature_outline import mount_papers_to_outline, prepare_outline
+    from app.schemas.literature_outline import LiteratureOutline
+    import json
+
+    out = result if result is not None else {}
+    yield ("stage", {"name": "大纲规划", "state": "active"})
+    async for ev in sync_graph_node(
+        emitter,
+        graph,
+        graph_artifact_id,
+        "outline",
+        "active",
+        parent_id="attributes",
+    ):
+        yield ev
+
+    if outline is None:
+        outline = prepare_outline(
+            user_message=user_message,
+            search_query=search_query,
+            session_title=session_title,
+        )
+    elif isinstance(outline, dict):
+        outline = LiteratureOutline.from_dict(outline) or prepare_outline(
+            user_message=user_message,
+            search_query=search_query,
+            session_title=session_title,
+        )
+
+    outline = mount_papers_to_outline(outline, corpus.paper_index)
+    store.save_outline(session_id, outline.to_dict())
+
+    async for ev in emit_system_think_line(
+        f"大纲已确认：{len(outline.sections)} 个章节，"
+        f"{len(outline.sub_topics)} 个子主题。",
+        accumulator=think_acc,
+    ):
+        yield ev
+
+    art_id = f"outline_{session_id[:8]}"
+    yield (
+        "artifact",
+        {
+            "id": art_id,
+            "lang": OUTLINE_ARTIFACT_LANG,
+            "delta": json.dumps(outline.to_dict(), ensure_ascii=False),
+            "done": True,
+        },
+    )
+    yield (
+        "literature_outline",
+        {
+            "topic": outline.topic,
+            "section_count": len(outline.sections),
+            "sub_topic_count": len(outline.sub_topics),
+            "sections": [
+                {"id": s.id, "title": s.title, "papers": len(s.mounted_paper_ids)}
+                for s in outline.sections
+            ],
+        },
+    )
+
+    async for ev in sync_graph_node(
+        emitter,
+        graph,
+        graph_artifact_id,
+        "outline",
+        "done",
+        parent_id="attributes",
+    ):
+        yield ev
+    yield ("stage", {"name": "大纲规划", "state": "done"})
+    upsert_stage(execution_trace, "大纲规划", "done")
+    out["outline"] = outline
+

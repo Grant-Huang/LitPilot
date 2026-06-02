@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -9,9 +10,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.agent_settings import (
-    get_think_max_tokens,
-    get_think_mode,
-    get_think_use_reasoning,
+    get_orchestrator_max_tokens,
+    get_orchestrator_mode,
+    get_orchestrator_use_reasoning,
     get_use_llm_planner,
 )
 from app.agents.literature_router import (
@@ -30,6 +31,7 @@ from app.llm.base import LLMMessage
 from app.services.llm_service import get_planner_llm
 
 _JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
+_log = logging.getLogger(__name__)
 
 FETCH_NARRATE_EVERY_N = 5
 FETCH_NARRATE_INTERVAL_SEC = 8.0
@@ -40,6 +42,8 @@ UNDERSTANDING_SYSTEM = """你是文献综述助手的过程解说员与检索路
    不要编造具体论文标题、作者或 DOI；不要写综述正文。
 2. 最后一行单独输出 JSON（不要 markdown 代码块）：
 {"session_title":"8-24字会话标题","search_query":"≤120字学术检索查询"}
+search_query 须为学术检索式：突出技术主题（如 AI-native MOM、多智能体制造、知识图谱），
+避免「文献综述怎么写」类教程检索；制造 MOM/MES 须与 ML 的 Mixture-of-Memories 区分。
 禁止泛称「新综述」「文献综述」作为 session_title。"""
 
 NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 2–4 句话说明：
@@ -72,12 +76,18 @@ NARRATE_GENERATE_BEFORE = """你是文献综述的过程解说员。根据【生
 - 材料覆盖上的主要限制（若有）
 不要写综述正文。不要输出 JSON。"""
 
+NARRATE_ATTRIBUTES_AFTER = """你是文献综述的过程解说员。根据【结构化文献】用 2–3 句话说明：
+- 已完成多少篇文献的结构化提取
+- 对后续大纲与分节写作的意义
+不要编造条目。不要输出 JSON。"""
+
 CHECKPOINT_SYSTEM = {
     "B": NARRATE_SEARCH_BEFORE,
     "C": NARRATE_SEARCH_AFTER,
     "D": NARRATE_FETCH_PROGRESS,
     "E": NARRATE_FETCH_AFTER,
     "F": NARRATE_CITE_AFTER,
+    "F2": NARRATE_ATTRIBUTES_AFTER,
     "G": NARRATE_GENERATE_BEFORE,
 }
 
@@ -108,7 +118,7 @@ class FetchNarrationThrottle:
 @dataclass
 class PlannerContext:
     use_llm_planner: bool
-    think_mode: str
+    orchestrator_mode: str
     use_reasoning: bool
     max_tokens: int
 
@@ -116,18 +126,18 @@ class PlannerContext:
 async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
-        think_mode=await get_think_mode(),
-        use_reasoning=await get_think_use_reasoning(),
-        max_tokens=await get_think_max_tokens(),
+        orchestrator_mode=await get_orchestrator_mode(),
+        use_reasoning=await get_orchestrator_use_reasoning(),
+        max_tokens=await get_orchestrator_max_tokens(),
     )
 
 
 def should_narrate(checkpoint: str, ctx: PlannerContext) -> bool:
-    if not ctx.use_llm_planner or ctx.think_mode == "off":
+    if not ctx.use_llm_planner or ctx.orchestrator_mode == "off":
         return False
-    if ctx.think_mode == "lite":
-        return checkpoint in ("A", "C", "E")
-    return checkpoint in ("A", "B", "C", "D", "E", "F", "G")
+    if ctx.orchestrator_mode == "lite":
+        return checkpoint in ("A", "C", "E", "F2")
+    return checkpoint in ("A", "B", "C", "D", "E", "F", "F2", "G")
 
 
 def _extract_router_from_text(text: str, user_message: str) -> LiteratureRouterResult:
@@ -178,7 +188,7 @@ async def stream_understanding_and_route(
         yield ("__router_result__", {"result": result})
         return
 
-    if ctx.think_mode == "off":
+    if ctx.orchestrator_mode == "off":
         result = await route_literature(user_message)
         yield ("__router_result__", {"result": result})
         return
@@ -201,6 +211,7 @@ async def stream_understanding_and_route(
         merged = "".join(content_buf)
         result = _extract_router_from_text(merged, user_message)
     except Exception:
+        _log.exception("orchestrator understanding/route failed; fallback to rules")
         result = await route_literature(user_message)
         async for ev in emit_system_think_line(
             "规划模型暂不可用，已使用规则回退生成检索查询。",
@@ -242,6 +253,7 @@ async def narrate_phase_stream(
         ):
             yield ev
     except Exception:
+        _log.exception("orchestrator phase narration failed; skip narration")
         async for ev in emit_system_think_line(
             "本阶段解说暂不可用，请查看下方工具结果。",
             accumulator=think_acc,

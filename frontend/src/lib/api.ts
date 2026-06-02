@@ -51,10 +51,10 @@ export type AgentSettings = {
   has_jina?: boolean;
   has_llm?: boolean;
   use_llm_planner?: boolean;
-  think_mode?: "off" | "lite" | "full";
-  think_use_reasoning?: boolean;
-  think_model?: string;
-  think_max_tokens_per_phase?: number;
+  orchestrator_mode?: "off" | "lite" | "full";
+  orchestrator_use_reasoning?: boolean;
+  orchestrator_model?: string;
+  orchestrator_max_tokens_per_phase?: number;
   /** 自定义综述生成 system prompt；空字符串表示使用内置默认 */
   review_system_prompt_template?: string;
   /** 内置默认模板（含 {fmt_label}、{citation_format} 占位符） */

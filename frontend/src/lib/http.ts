@@ -4,9 +4,22 @@ export type ApiEnvelope<T> = {
   message?: string;
 };
 
+export class ApiError extends Error {
+  status: number;
+  data?: unknown;
+
+  constructor(status: number, message: string, data?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = path.startsWith("/api") ? path : `/api${path}`;
   return fetch(url, {
+    cache: "no-store",
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -17,9 +30,15 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 
 export async function apiRequestData<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, init);
-  const body = (await res.json()) as ApiEnvelope<T>;
-  if (!res.ok || body.status === "error") {
-    throw new Error(body.message || `HTTP ${res.status}`);
+  let body: ApiEnvelope<T> | null = null;
+  try {
+    body = (await res.json()) as ApiEnvelope<T>;
+  } catch {
+    body = null;
   }
-  return body.data as T;
+  if (!res.ok || body?.status === "error") {
+    const msg = body?.message || `HTTP ${res.status}`;
+    throw new ApiError(res.status, msg, body?.data);
+  }
+  return (body?.data ?? (undefined as unknown)) as T;
 }

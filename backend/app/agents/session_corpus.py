@@ -24,10 +24,11 @@ class SessionCorpus:
     )
     failed_literature: list[dict[str, str]] = field(default_factory=list)
     known_url_keys: set[str] = field(default_factory=set)
+    paper_index: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "version": 1,
+        payload: dict[str, Any] = {
+            "version": 2 if self.paper_index else 1,
             "tavily_answer": self.tavily_answer,
             "sources_md": self.sources_md,
             "fetch_hits": self.fetch_hits,
@@ -38,6 +39,9 @@ class SessionCorpus:
             "failed_literature": self.failed_literature,
             "known_url_keys": sorted(self.known_url_keys),
         }
+        if self.paper_index:
+            payload["paper_index"] = self.paper_index
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> SessionCorpus | None:
@@ -59,6 +63,9 @@ class SessionCorpus:
             ctx = str(row[1] or "")
             err = str(row[2]) if len(row) > 2 and row[2] else None
             corpus.fetch_results.append((hit, ctx, err))
+        corpus.paper_index = [
+            dict(p) for p in (data.get("paper_index") or []) if isinstance(p, dict)
+        ]
         if not corpus.known_url_keys:
             corpus.known_url_keys = corpus._keys_from_hits()
         return corpus
@@ -121,6 +128,13 @@ class SessionCorpus:
         for fail in other.failed_literature:
             if fail.get("url") not in fail_urls:
                 self.failed_literature.append(fail)
+
+        if other.paper_index:
+            from app.skills.paper_attributes import merge_paper_index
+            from app.schemas.paper_record import PaperRecord
+
+            fresh = [PaperRecord.from_dict(p) for p in other.paper_index]
+            self.paper_index = merge_paper_index(self.paper_index, fresh)
 
     def source_block_count(self) -> int:
         return len(self.sources_md)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents.tools.tavily_search import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 from app.storage.file_store import get_store
 
 
@@ -88,24 +89,89 @@ async def get_use_llm_planner() -> bool:
     return bool((await get_merged_settings()).get("use_llm_planner", True))
 
 
-async def get_think_mode() -> str:
-    raw = str((await get_merged_settings()).get("think_mode") or "lite").strip().lower()
+async def get_orchestrator_mode() -> str:
+    raw = str(
+        (await get_merged_settings()).get("orchestrator_mode") or "lite"
+    ).strip().lower()
     if raw in ("off", "lite", "full"):
         return raw
     return "lite"
 
 
-async def get_think_use_reasoning() -> bool:
-    return bool((await get_merged_settings()).get("think_use_reasoning", False))
+async def get_orchestrator_use_reasoning() -> bool:
+    return bool((await get_merged_settings()).get("orchestrator_use_reasoning", False))
 
 
-async def get_think_model() -> str:
-    return str((await get_merged_settings()).get("think_model") or "").strip()
+async def get_orchestrator_model() -> str:
+    return str((await get_merged_settings()).get("orchestrator_model") or "").strip()
 
 
-async def get_think_max_tokens() -> int:
-    n = int((await get_merged_settings()).get("think_max_tokens_per_phase") or 280)
+async def get_orchestrator_max_tokens() -> int:
+    n = int(
+        (await get_merged_settings()).get("orchestrator_max_tokens_per_phase") or 280
+    )
     return max(80, min(n, 500))
+
+
+async def get_tavily_include_domains() -> tuple[str, ...]:
+    raw = (await get_merged_settings()).get("tavily_include_domains") or ()
+    if isinstance(raw, (list, tuple)):
+        domains = tuple(str(d).strip() for d in raw if str(d).strip())
+        return domains if domains else ACADEMIC_SEARCH_DOMAINS
+    return ACADEMIC_SEARCH_DOMAINS
+
+
+async def get_tavily_exclude_domains() -> tuple[str, ...]:
+    raw = (await get_merged_settings()).get("tavily_exclude_domains") or ()
+    if isinstance(raw, (list, tuple)):
+        domains = tuple(str(d).strip() for d in raw if str(d).strip())
+        return domains if domains else DEFAULT_EXCLUDE_DOMAINS
+    return DEFAULT_EXCLUDE_DOMAINS
+
+
+async def get_tavily_search_depth() -> str:
+    raw = str((await get_merged_settings()).get("tavily_search_depth") or "advanced").strip().lower()
+    return raw if raw in ("basic", "advanced") else "advanced"
+
+
+async def get_tavily_enforce_domain_filter() -> bool:
+    return bool((await get_merged_settings()).get("tavily_enforce_domain_filter", True))
+
+
+async def get_tavily_enable_junk_filter() -> bool:
+    return bool((await get_merged_settings()).get("tavily_enable_junk_filter", True))
+
+
+async def get_max_source_chars() -> int:
+    n = int((await get_merged_settings()).get("max_source_chars") or 14_000)
+    return max(2_000, min(n, 50_000))
+
+
+async def get_enable_paper_attributes() -> bool:
+    return bool((await get_merged_settings()).get("enable_paper_attributes", True))
+
+
+async def get_enable_query_expansion() -> bool:
+    return bool((await get_merged_settings()).get("enable_query_expansion", False))
+
+
+async def get_search_expansion_count() -> int:
+    n = int((await get_merged_settings()).get("search_expansion_count") or 3)
+    return max(1, min(n, 4))
+
+
+async def get_outline_mode() -> str:
+    raw = str((await get_merged_settings()).get("outline_mode") or "lite").strip().lower()
+    if raw in ("off", "lite", "full"):
+        return raw
+    return "lite"
+
+
+async def get_post_refine_mode() -> str:
+    raw = str((await get_merged_settings()).get("post_refine_mode") or "lite").strip().lower()
+    if raw in ("off", "lite"):
+        return raw
+    return "lite"
 
 
 async def get_llm_config() -> dict[str, Any]:

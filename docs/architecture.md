@@ -22,3 +22,7 @@
 ## 工作流
 
 见 [literature-workflow.md](./literature-workflow.md)。
+
+## 设计文档
+
+见 [design/README.md](./design/README.md)（M1–M3、能力参数、多轮精化）。

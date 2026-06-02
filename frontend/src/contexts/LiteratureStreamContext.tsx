@@ -90,6 +90,44 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       if (name === "literature_intent" && data?.intent && isChat) {
         message.info(formatLiteratureIntentLabel(data.intent));
       }
+      if (name === "literature_search_plan" && isChat) {
+        const queries = (data as { queries?: string[] } | undefined)?.queries;
+        if (queries?.length) {
+          message.info(`检索扩展：${queries.length} 组 query`);
+        }
+      }
+      if (name === "literature_paper_index" && isChat) {
+        const count = (data as { count?: number; extracted?: number } | undefined)?.count;
+        const extracted = (data as { extracted?: number } | undefined)?.extracted;
+        if (typeof count === "number") {
+          message.info(`文献结构化：${count} 篇${typeof extracted === "number" ? `（本轮 +${extracted}）` : ""}`);
+        }
+      }
+      if (name === "literature_subtopic_plan" && isChat) {
+        const count = (data as { count?: number } | undefined)?.count;
+        if (typeof count === "number" && count >= 2) {
+          message.info(`已拆分为 ${count} 个子主题，将分别检索`);
+        }
+      }
+      if (name === "literature_outline" && isChat) {
+        const sectionCount = (data as { section_count?: number } | undefined)?.section_count;
+        if (typeof sectionCount === "number") {
+          message.info(`大纲已生成：${sectionCount} 个章节（见右侧「大纲」）`);
+        }
+      }
+      if (name === "literature_refine_report" && isChat) {
+        const missing = (data as { missing_sections?: string[] } | undefined)?.missing_sections;
+        if (missing?.length) {
+          message.warning(`后处理：${missing.length} 个章节标题未在正文中出现`);
+        }
+      }
+      if (name === "literature_section_refine" && isChat) {
+        const mode = (data as { mode?: string } | undefined)?.mode;
+        const titles = (data as { target_titles?: string[] } | undefined)?.target_titles;
+        if (mode === "partial" && titles?.length) {
+          message.info(`章节级修订：${titles.join("、")}`);
+        }
+      }
       if (name === "session" && data?.session_id) {
         const sid = String(data.session_id);
         setActiveSessionId(sid);

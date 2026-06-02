@@ -59,10 +59,10 @@ export const LLM_PROVIDERS: LlmProviderMeta[] = [
     slug: "minimax_cn",
     label: "MiniMax 国内版",
     default_model: "MiniMax-M2.7",
-    default_base_url: "https://api.minimax.chat/v1",
+    default_base_url: "https://api.minimaxi.com/v1",
     requires_api_key: true,
     notes:
-      "API Key 来自 api.minimax.chat；Group ID 为可选项（团队信息页可查，不填则使用账号默认）",
+      "OpenAI 兼容端点 https://api.minimaxi.com/v1（请勿填 /anthropic）；Group ID 可选（团队信息页可查，不填用账号默认）",
     extra_fields: [{ key: "group_id", label: "Group ID", required: false }],
   },
   {

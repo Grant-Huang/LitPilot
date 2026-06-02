@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import { sessionsApi, type ChatMessage, type SessionMeta } from "@/lib/api";
+import { ApiError } from "@/lib/http";
 
 type ChatSessionContextValue = {
   sessions: SessionMeta[];
@@ -33,15 +34,26 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-  const loadSessions = useCallback(async () => {
+  const fetchSessions = useCallback(async () => {
     const list = await sessionsApi.list();
     setSessions(list);
+    return list;
   }, []);
+
+  const loadSessions = useCallback(async () => {
+    await fetchSessions();
+  }, [fetchSessions]);
 
   const loadMessages = useCallback(async (id: string) => {
     const msgs = await sessionsApi.messages(id);
     setMessages(msgs);
   }, []);
+
+  const clearStoredActiveSession = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  };
 
   const handleNewSession = useCallback(async () => {
     const meta = await sessionsApi.create();
@@ -59,9 +71,35 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, id);
       }
-      await loadMessages(id);
+      try {
+        await loadMessages(id);
+      } catch (e: unknown) {
+        // Most common: localStorage points to a deleted session -> 404.
+        if (e instanceof ApiError && e.status === 404) {
+          setActiveSessionId(null);
+          setMessages([]);
+          clearStoredActiveSession();
+          const list = await fetchSessions();
+          const fallbackId = list[0]?.id;
+          if (fallbackId) {
+            setActiveSessionId(fallbackId);
+            if (typeof window !== "undefined") {
+              localStorage.setItem(STORAGE_KEY, fallbackId);
+            }
+            try {
+              await loadMessages(fallbackId);
+            } catch {
+              setActiveSessionId(null);
+              setMessages([]);
+              clearStoredActiveSession();
+            }
+          }
+          return;
+        }
+        throw e;
+      }
     },
-    [loadMessages],
+    [fetchSessions, loadMessages],
   );
 
   const handleDeleteSession = useCallback(
@@ -105,7 +143,8 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         try {
           await handleSelectSession(stored);
         } catch {
-          /* session may be deleted */
+          // session may be deleted or data incompatible
+          clearStoredActiveSession();
         }
       }
     });

@@ -13,11 +13,18 @@ async def cached_tavily_search(
     *,
     max_results: int = 8,
     search_depth: str = "advanced",
+    include_domains: list[str] | tuple[str, ...] | None = None,
+    exclude_domains: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     key = normalize_cache_key(
         "tavily",
         query,
-        {"max_results": max_results, "search_depth": search_depth},
+        {
+            "max_results": max_results,
+            "search_depth": search_depth,
+            "include_domains": list(include_domains) if include_domains else None,
+            "exclude_domains": list(exclude_domains) if exclude_domains else None,
+        },
     )
     hit = tavily_cache.get(key)
     if hit is not None:
@@ -27,6 +34,8 @@ async def cached_tavily_search(
         query,
         max_results=max_results,
         search_depth=search_depth,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
     )
     tavily_cache.set(key, data)
     return data

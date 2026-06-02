@@ -11,15 +11,17 @@ import {
   findWorkflowArtifact,
   WORKFLOW_GRAPH_LANG,
 } from "@/lib/workflowGraph";
-import { graphForDagDisplay } from "@/lib/dagDisplayGraph";
+import { graphForPipelineDisplay } from "@/lib/pipelineDisplayGraph";
 import { mergeWorkflowRunsIntoGraph } from "@/lib/workflowGraphLive";
 import { workflowRunsFromStream } from "@/lib/workflowRuns";
+import { findOutlineArtifact, LITERATURE_OUTLINE_LANG } from "@/lib/literatureOutline";
+import { LiteratureOutlineView } from "@/components/artifact/LiteratureOutlineView";
 import { LiteratureArtifactView } from "@/components/library/LiteratureArtifactView";
 import { findItemByDisplayIndex } from "@/lib/resolveLibraryItem";
 import { reviewMarkdownForDisplay } from "@/lib/reviewDisplay";
 import type { LibraryItem } from "@/lib/libraryTypes";
 
-type MainTab = "dag" | "review" | "literature";
+type MainTab = "pipeline" | "outline" | "review" | "literature";
 type ReviewMode = "render" | "source";
 
 type Props = {
@@ -62,11 +64,17 @@ export function LitPilotArtifactPane({
     streamState.artifactOrder,
   );
 
+  const outlineArtifact = useMemo(
+    () => findOutlineArtifact(streamState.artifacts, streamState.artifactOrder),
+    [streamState.artifacts, streamState.artifactOrder],
+  );
+
   const reviewArtifact = useMemo(() => {
     for (let i = streamState.artifactOrder.length - 1; i >= 0; i -= 1) {
       const id = streamState.artifactOrder[i];
       const art = streamState.artifacts[id];
       if (!art || art.lang === WORKFLOW_GRAPH_LANG) continue;
+      if (art.lang === LITERATURE_OUTLINE_LANG) continue;
       const lang = art.lang.toLowerCase();
       if (
         lang === "markdown" ||
@@ -85,29 +93,40 @@ export function LitPilotArtifactPane({
     "literature-agent";
 
   const baseGraph = workflow?.graph ?? LITERATURE_PLAN_GRAPH;
-  const liveGraph = graphForDagDisplay(
+  const liveGraph = graphForPipelineDisplay(
     mergeWorkflowRunsIntoGraph(baseGraph, runId, workflowRuns),
   );
 
-  const showDag = workflowRuns.length > 0 || Boolean(workflow);
+  const showPipeline = workflowRuns.length > 0 || Boolean(workflow);
+  const showOutline = Boolean(outlineArtifact);
   const showReview = Boolean(reviewArtifact?.art.content?.trim());
   const showLiterature = libraryItems.length > 0;
 
-  const [mainTab, setMainTab] = useState<MainTab>("dag");
+  const [mainTab, setMainTab] = useState<MainTab>("pipeline");
   const [reviewMode, setReviewMode] = useState<ReviewMode>("render");
   const reviewAutoOpenedRef = useRef(false);
   const literatureAutoOpenedRef = useRef(false);
 
+  const outlineAutoOpenedRef = useRef(false);
+
   useEffect(() => {
     reviewAutoOpenedRef.current = false;
     literatureAutoOpenedRef.current = false;
-  }, [reviewArtifact?.id]);
+    outlineAutoOpenedRef.current = false;
+  }, [reviewArtifact?.id, outlineArtifact?.id]);
 
   useEffect(() => {
-    if (showReview && !showDag && !reviewArtifact?.art.done) {
+    if (showReview && !showPipeline && !reviewArtifact?.art.done) {
       setMainTab("review");
     }
-  }, [showReview, showDag, reviewArtifact?.art.done]);
+  }, [showReview, showPipeline, reviewArtifact?.art.done]);
+
+  useEffect(() => {
+    if (showOutline && outlineArtifact?.done && !outlineAutoOpenedRef.current) {
+      setMainTab("outline");
+      outlineAutoOpenedRef.current = true;
+    }
+  }, [showOutline, outlineArtifact?.done, outlineArtifact?.id]);
 
   /** 综述完成后默认展开文献 Tab（文献库晚于 SSE 到达时也会补切一次） */
   useEffect(() => {
@@ -183,10 +202,10 @@ export function LitPilotArtifactPane({
     [reviewContent, isMatrixArtifact, showLiterature, reviewArtifact?.art.done],
   );
 
-  if (!showDag && !showReview && !showLiterature) {
+  if (!showPipeline && !showOutline && !showReview && !showLiterature) {
     return (
       <p className="litpilot-artifact-pane__empty">
-        执行文献综述后，可在此切换查看工作流 DAG 与生成的综述文件。
+        执行文献综述后，可在此查看执行流程、章节大纲与生成的综述。
       </p>
     );
   }
@@ -215,17 +234,30 @@ export function LitPilotArtifactPane({
     >
       <div className="litpilot-artifact-pane__toolbar">
         <div className="litpilot-artifact-pane__tabs" role="tablist">
-          {showDag && (
+          {showPipeline && (
             <button
               type="button"
               role="tab"
-              aria-selected={mainTab === "dag"}
+              aria-selected={mainTab === "pipeline"}
               className={`litpilot-artifact-pane__tab${
-                mainTab === "dag" ? " litpilot-artifact-pane__tab--active" : ""
+                mainTab === "pipeline" ? " litpilot-artifact-pane__tab--active" : ""
               }`}
-              onClick={() => setMainTab("dag")}
+              onClick={() => setMainTab("pipeline")}
             >
-              DAG
+              流程
+            </button>
+          )}
+          {showOutline && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainTab === "outline"}
+              className={`litpilot-artifact-pane__tab${
+                mainTab === "outline" ? " litpilot-artifact-pane__tab--active" : ""
+              }`}
+              onClick={() => setMainTab("outline")}
+            >
+              大纲
             </button>
           )}
           {showReview && (
@@ -311,10 +343,16 @@ export function LitPilotArtifactPane({
       )}
 
       <div className="litpilot-artifact-pane__body">
-        {mainTab === "dag" && showDag && (
+        {mainTab === "pipeline" && showPipeline && (
           <WorkflowArtifactPanel
             graph={liveGraph}
             workflowRuns={workflowRuns}
+          />
+        )}
+        {mainTab === "outline" && showOutline && outlineArtifact && (
+          <LiteratureOutlineView
+            outline={outlineArtifact.outline}
+            streaming={!outlineArtifact.done}
           />
         )}
         {mainTab === "review" && showReview && isMarkdownReview && (

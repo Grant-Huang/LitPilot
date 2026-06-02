@@ -121,13 +121,9 @@ async def _sync_graph_node(
 
 
 def _augment_query(user_message: str) -> str:
-    q = user_message.strip()
-    if not any(x in q.lower() for x in ("site:", "arxiv", "doi", "paper")):
-        q = (
-            f"{q} (academic paper OR survey OR systematic review "
-            "OR arXiv OR DOI)"
-        )
-    return q
+    from app.agents.tools.tavily_search import augment_literature_search_query
+
+    return augment_literature_search_query(user_message)
 
 
 from app.agents.literature_turn import stream_literature_turn  # noqa: E402

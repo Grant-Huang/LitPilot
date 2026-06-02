@@ -207,7 +207,7 @@ export function buildProcessLines(trace: ExecutionTrace): ProcessLine[] {
     trace.tools.map(toolUrl).filter(Boolean),
   );
 
-  for (const t of trace.tools) {
+  for (const [idx, t] of trace.tools.entries()) {
     const status =
       t.status === "pending" || t.status === "running"
         ? t.status
@@ -220,7 +220,8 @@ export function buildProcessLines(trace: ExecutionTrace): ProcessLine[] {
       wfMeta != null &&
       (t.output ? isWebFetchCharOnlyPreview(t.output, t.error) : false);
     lines.push({
-      key: `tool-${t.id}`,
+      // 某些历史数据可能存在重复 tool id（会触发 React duplicate key 警告）
+      key: `tool-${t.id}-${idx}`,
       kind: "tool",
       status,
       title: describeToolAction({

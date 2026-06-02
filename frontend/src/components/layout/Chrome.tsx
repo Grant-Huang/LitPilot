@@ -2,17 +2,20 @@
 
 import { ChatLayoutBridgeProvider } from "@/contexts/ChatLayoutBridgeContext";
 import { ChatSessionProvider } from "@/contexts/ChatSessionContext";
+import { HelpCenterProvider } from "@/contexts/HelpCenterContext";
 import { LiteratureStreamProvider } from "@/contexts/LiteratureStreamContext";
 import { LitPilotAppShell } from "./LitPilotAppShell";
 
 export function Chrome({ children }: { children: React.ReactNode }) {
   return (
     <ChatSessionProvider>
-      <LiteratureStreamProvider>
-        <ChatLayoutBridgeProvider>
-          <LitPilotAppShell>{children}</LitPilotAppShell>
-        </ChatLayoutBridgeProvider>
-      </LiteratureStreamProvider>
+      <HelpCenterProvider>
+        <LiteratureStreamProvider>
+          <ChatLayoutBridgeProvider>
+            <LitPilotAppShell>{children}</LitPilotAppShell>
+          </ChatLayoutBridgeProvider>
+        </LiteratureStreamProvider>
+      </HelpCenterProvider>
     </ChatSessionProvider>
   );
 }

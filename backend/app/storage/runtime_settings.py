@@ -1,0 +1,183 @@
+"""Build flat runtime settings dict from v2 system/personal config."""
+from __future__ import annotations
+
+from typing import Any
+
+from app.agents.tools.tavily_search import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
+
+WEB_SEARCH_PARAM_DEFAULTS: dict[str, Any] = {
+    "tavily_max_results": 8,
+    "tavily_retry_count": 0,
+    "include_domains": list(ACADEMIC_SEARCH_DOMAINS),
+    "exclude_domains": list(DEFAULT_EXCLUDE_DOMAINS),
+    "search_depth": "advanced",
+    "enforce_domain_filter": True,
+    "enable_junk_filter": True,
+    "enable_query_expansion": False,
+    "expansion_count": 3,
+}
+
+WEB_FETCH_PARAM_DEFAULTS: dict[str, Any] = {
+    "max_fetch_urls": 5,
+    "fetch_parallel": 3,
+    "fetch_timeout_sec": 45.0,
+    "fetch_retry_count": 0,
+    "fetch_retry_delay_ms": 500,
+    "max_source_chars": 14_000,
+}
+
+ORCHESTRATOR_PARAM_DEFAULTS: dict[str, Any] = {
+    "use_llm_planner": True,
+    "orchestrator_mode": "lite",
+    "orchestrator_use_reasoning": False,
+    "orchestrator_max_tokens_per_phase": 280,
+}
+
+PROMPTS_PARAM_DEFAULTS: dict[str, Any] = {
+    "review_system_prompt_template": "",
+    "enable_paper_attributes": True,
+    "outline_mode": "lite",
+    "post_refine_mode": "lite",
+}
+
+
+def _find_cap(caps: list[dict[str, Any]], cap_id: str) -> dict[str, Any] | None:
+    for c in caps:
+        if str(c.get("capability_id") or "") == cap_id:
+            return c
+    return None
+
+
+def _find_by_id(items: list[dict[str, Any]], id_: str) -> dict[str, Any] | None:
+    for it in items:
+        if str(it.get("id") or "") == str(id_):
+            return it
+    return None
+
+
+def _cap_params(caps: list[dict[str, Any]], cap_id: str, defaults: dict[str, Any]) -> dict[str, Any]:
+    cap = _find_cap(caps, cap_id)
+    raw = cap.get("params") if cap else None
+    params = dict(raw) if isinstance(raw, dict) else {}
+    out = dict(defaults)
+    out.update(params)
+    return out
+
+
+def _parse_domain_list(raw: Any) -> tuple[str, ...]:
+    if isinstance(raw, (list, tuple)):
+        return tuple(str(d).strip() for d in raw if str(d).strip())
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.replace(",", "\n").splitlines() if p.strip()]
+        return tuple(parts)
+    return ()
+
+
+def _resolve_instance_llm(
+    instances: list[dict[str, Any]],
+    credentials: list[dict[str, Any]],
+    inst_id: str | None,
+) -> dict[str, Any]:
+    if not inst_id:
+        return {}
+    inst = _find_by_id(instances, inst_id)
+    if not inst:
+        return {}
+    cred = _find_by_id(credentials, str(inst.get("credential_id") or ""))
+    if not cred:
+        return {}
+    ctype = str(cred.get("type") or "")
+    provider = str(inst.get("provider") or "")
+    if not provider and ctype.startswith("llm:"):
+        provider = ctype.split(":", 1)[1]
+    return {
+        "llm_provider": provider or "openai",
+        "llm_api_key": str(cred.get("secret") or ""),
+        "llm_model": str(inst.get("model_name") or "").strip(),
+        "llm_base_url": str(cred.get("base_url") or "").strip(),
+        "llm_group_id": str(cred.get("group_id") or "").strip(),
+    }
+
+
+def _credential_secret(credentials: list[dict[str, Any]], cred_id: str | None) -> str:
+    if not cred_id:
+        return ""
+    cred = _find_by_id(credentials, cred_id)
+    if not cred:
+        return ""
+    return str(cred.get("secret") or "")
+
+
+def build_runtime_settings(
+    *,
+    credentials: list[dict[str, Any]],
+    instances: list[dict[str, Any]],
+    capabilities: list[dict[str, Any]],
+    personal: dict[str, Any],
+) -> dict[str, Any]:
+    web = _cap_params(capabilities, "web_search", WEB_SEARCH_PARAM_DEFAULTS)
+    fetch = _cap_params(capabilities, "web_fetch", WEB_FETCH_PARAM_DEFAULTS)
+    orch = _cap_params(capabilities, "orchestrator", ORCHESTRATOR_PARAM_DEFAULTS)
+    source = _cap_params(capabilities, "literature_source", {"literature_source_mode": "merge"})
+    prompts = _cap_params(capabilities, "prompts", PROMPTS_PARAM_DEFAULTS)
+
+    review_cap = _find_cap(capabilities, "review_main")
+    orch_cap = _find_cap(capabilities, "orchestrator")
+    search_cap = _find_cap(capabilities, "web_search")
+    fetch_cap = _find_cap(capabilities, "web_fetch")
+
+    review_ref = (review_cap or {}).get("primary_ref") if isinstance((review_cap or {}).get("primary_ref"), dict) else {}
+    orch_ref = (orch_cap or {}).get("primary_ref") if isinstance((orch_cap or {}).get("primary_ref"), dict) else {}
+    search_ref = (search_cap or {}).get("primary_ref") if isinstance((search_cap or {}).get("primary_ref"), dict) else {}
+    fetch_ref = (fetch_cap or {}).get("primary_ref") if isinstance((fetch_cap or {}).get("primary_ref"), dict) else {}
+
+    review_inst_id = str(review_ref.get("id") or "") if review_ref.get("kind") == "instance" else ""
+    orch_inst_id = str(orch_ref.get("id") or "") if orch_ref.get("kind") == "instance" else ""
+    tavily_cred_id = str(search_ref.get("id") or "") if search_ref.get("kind") == "credential" else ""
+    jina_cred_id = str(fetch_ref.get("id") or "") if fetch_ref.get("kind") == "credential" else ""
+
+    llm = _resolve_instance_llm(instances, credentials, review_inst_id)
+    orch_llm = _resolve_instance_llm(instances, credentials, orch_inst_id)
+
+    include_domains = _parse_domain_list(web.get("include_domains")) or ACADEMIC_SEARCH_DOMAINS
+    exclude_domains = _parse_domain_list(web.get("exclude_domains")) or DEFAULT_EXCLUDE_DOMAINS
+    search_depth = str(web.get("search_depth") or "advanced").strip().lower()
+    if search_depth not in ("basic", "advanced"):
+        search_depth = "advanced"
+
+    return {
+        "tavily_api_key": _credential_secret(credentials, tavily_cred_id),
+        "jina_api_key": _credential_secret(credentials, jina_cred_id),
+        "llm_provider": llm.get("llm_provider") or "openai",
+        "llm_api_key": llm.get("llm_api_key") or "",
+        "llm_model": llm.get("llm_model") or "gpt-4o-mini",
+        "llm_base_url": llm.get("llm_base_url") or "",
+        "llm_group_id": llm.get("llm_group_id") or "",
+        "orchestrator_model": orch_llm.get("llm_model") or "",
+        "fetch_parallel": int(fetch.get("fetch_parallel") or 3),
+        "fetch_timeout_sec": float(fetch.get("fetch_timeout_sec") or 45),
+        "tavily_max_results": int(web.get("tavily_max_results") or 8),
+        "max_fetch_urls": int(fetch.get("max_fetch_urls") or 5),
+        "literature_source_mode": str(source.get("literature_source_mode") or "merge"),
+        "tavily_retry_count": int(web.get("tavily_retry_count") or 0),
+        "fetch_retry_count": int(fetch.get("fetch_retry_count") or 0),
+        "fetch_retry_delay_ms": int(fetch.get("fetch_retry_delay_ms") or 500),
+        "plan_confirm": bool(personal.get("plan_confirm", False)),
+        "citation_format": str(personal.get("citation_format") or "apa").strip().lower(),
+        "use_llm_planner": bool(orch.get("use_llm_planner", True)),
+        "orchestrator_mode": str(orch.get("orchestrator_mode") or "lite").strip().lower(),
+        "orchestrator_use_reasoning": bool(orch.get("orchestrator_use_reasoning", False)),
+        "orchestrator_max_tokens_per_phase": int(orch.get("orchestrator_max_tokens_per_phase") or 280),
+        "review_system_prompt_template": str(prompts.get("review_system_prompt_template") or ""),
+        "tavily_include_domains": list(include_domains),
+        "tavily_exclude_domains": list(exclude_domains),
+        "tavily_search_depth": search_depth,
+        "tavily_enforce_domain_filter": bool(web.get("enforce_domain_filter", True)),
+        "tavily_enable_junk_filter": bool(web.get("enable_junk_filter", True)),
+        "max_source_chars": int(fetch.get("max_source_chars") or 14_000),
+        "enable_query_expansion": bool(web.get("enable_query_expansion", False)),
+        "search_expansion_count": int(web.get("expansion_count") or 3),
+        "enable_paper_attributes": bool(prompts.get("enable_paper_attributes", True)),
+        "outline_mode": str(prompts.get("outline_mode") or "lite").strip().lower(),
+        "post_refine_mode": str(prompts.get("post_refine_mode") or "lite").strip().lower(),
+    }

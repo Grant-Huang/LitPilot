@@ -6,6 +6,8 @@ from typing import Any, AsyncIterator
 
 from app.agents.agent_settings import (
     get_citation_format,
+    get_enable_paper_attributes,
+    get_enable_query_expansion,
     get_fetch_parallel,
     get_fetch_retry_count,
     get_fetch_retry_delay_ms,
@@ -13,10 +15,19 @@ from app.agents.agent_settings import (
     get_jina_api_key,
     get_literature_source_mode,
     get_max_fetch_urls,
+    get_max_source_chars,
+    get_outline_mode,
+    get_post_refine_mode,
     get_review_system_prompt_template,
+    get_search_expansion_count,
     get_tavily_api_key,
+    get_tavily_enable_junk_filter,
+    get_tavily_enforce_domain_filter,
+    get_tavily_exclude_domains,
+    get_tavily_include_domains,
     get_tavily_max_results,
     get_tavily_retry_count,
+    get_tavily_search_depth,
 )
 from app.agents.agent_skills import skill_active_event
 from app.agents.literature_intent import (
@@ -30,11 +41,23 @@ from app.agents.literature_intent import (
 )
 from app.agents.literature_phases import (
     build_fetch_queue,
+    stream_attributes_phase,
     stream_cite_phase,
+    stream_expanded_search_phase,
     stream_fetch_phase,
+    stream_outline_phase,
     stream_search_phase,
     user_url_hits,
 )
+from app.agents.literature_outline import build_outline_from_sub_topics, prepare_outline
+from app.agents.literature_post_refine import post_refine_review
+from app.agents.section_refine import build_section_refine_plan
+from app.agents.literature_section_writer import (
+    stitch_review_sections,
+    stream_section_generate,
+)
+from app.agents.research_decompose import decompose_research_brief
+from app.agents.search_expansion import expand_search_queries
 from app.agents.literature_planner import (
     format_generate_context,
     load_planner_context,
@@ -60,13 +83,14 @@ from app.agents.synthesis_matrix_prompt import (
 )
 from app.agents.tavily_key import tavily_key_hint
 from app.agents.url_list import effective_fetch_cap, sanitize_fetch_urls
-from app.agents.workflow_graph import build_literature_graph
+from app.agents.workflow_graph import build_literature_graph, build_literature_graph_legacy
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.library.from_run import upsert_library_from_run
 from app.llm.base import LLMMessage
-from app.services.llm_service import get_llm
+from app.schemas.literature_outline import LiteratureOutline
+from app.services.llm_service import get_llm, get_planner_llm
 from app.storage.file_store import get_store
 
 MAX_SOURCE_CHARS = 14_000
@@ -86,10 +110,9 @@ def _new_id(prefix: str) -> str:
 
 
 def _augment_query(user_message: str) -> str:
-    q = user_message.strip()
-    if not any(x in q.lower() for x in ("site:", "arxiv", "dblp")):
-        q = f"{q} (academic paper survey site:arxiv.org OR site:dblp.org)"
-    return q
+    from app.agents.tools.tavily_search import augment_literature_search_query
+
+    return augment_literature_search_query(user_message)
 
 
 async def _publish_workflow_graph(graph, graph_artifact_id: str):
@@ -130,6 +153,11 @@ async def _sync_graph_node(
             node_id, "error", parent_id=parent_id, metadata=metadata
         ):
             yield ev
+    elif status == "skipped":
+        async for ev in emitter.yield_finish(
+            node_id, "skipped", parent_id=parent_id, metadata=metadata
+        ):
+            yield ev
 
 
 def _last_assistant_failed(msgs: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -154,6 +182,78 @@ def _intent_needs_tavily(intent: LiteratureIntentResult) -> bool:
         "supplement",
         "synthesis_matrix",
     )
+
+
+_OUTLINE_GEN_INTENTS = frozenset(
+    {"new_topic", "expand_search", "supplement", "refine_gen", "regen_only"}
+)
+
+
+def _should_use_outline_path(
+    outline_mode: str,
+    sub_topic_count: int,
+    intent: str,
+) -> bool:
+    if intent in ("query_corpus", "synthesis_matrix", "manage_library"):
+        return False
+    if outline_mode == "off":
+        return False
+    if outline_mode == "full":
+        return intent in _OUTLINE_GEN_INTENTS
+    return sub_topic_count >= 2 and intent in (
+        "new_topic",
+        "expand_search",
+        "supplement",
+        "regen_only",
+    )
+
+
+def _section_specs_for_graph(outline: LiteratureOutline) -> list[tuple[str, str]]:
+    return [(s.id, s.title) for s in outline.sections]
+
+
+def _resolve_outline_plan(
+    *,
+    outline_mode: str,
+    intent: str,
+    user_message: str,
+    initial_query: str,
+    search_query: str,
+    session_title: str,
+    stored_outline: LiteratureOutline | None,
+) -> tuple[bool, LiteratureOutline | None, list[Any]]:
+    from app.schemas.literature_outline import ResearchSubTopic
+
+    sub_topics: list[ResearchSubTopic] = decompose_research_brief(
+        initial_query or user_message,
+        base_query=search_query,
+    )
+    use = _should_use_outline_path(
+        outline_mode,
+        len(sub_topics) if sub_topics else 1,
+        intent,
+    )
+    if intent in ("refine_gen", "regen_only") and stored_outline and stored_outline.sections:
+        if outline_mode != "off":
+            return True, stored_outline, list(stored_outline.sub_topics)
+
+    if not use:
+        return False, None, sub_topics
+
+    topic = (session_title or search_query or user_message).strip()[:120]
+    if sub_topics:
+        outline = build_outline_from_sub_topics(
+            topic=topic,
+            sub_topics=sub_topics,
+            user_message=user_message,
+        )
+    else:
+        outline = prepare_outline(
+            user_message=initial_query or user_message,
+            search_query=search_query,
+            session_title=session_title,
+        )
+    return True, outline, list(outline.sub_topics)
 
 
 async def _finalize_turn(
@@ -268,13 +368,27 @@ async def stream_literature_turn(
     tavily_retry_count = await get_tavily_retry_count()
     fetch_retry_count = await get_fetch_retry_count()
     fetch_retry_delay_ms = await get_fetch_retry_delay_ms()
+    tavily_include_domains = await get_tavily_include_domains()
+    tavily_exclude_domains = await get_tavily_exclude_domains()
+    tavily_search_depth = await get_tavily_search_depth()
+    tavily_enforce_domain_filter = await get_tavily_enforce_domain_filter()
+    tavily_enable_junk_filter = await get_tavily_enable_junk_filter()
+    max_source_chars = await get_max_source_chars()
+    enable_paper_attributes = await get_enable_paper_attributes()
+    enable_query_expansion = await get_enable_query_expansion()
+    search_expansion_count = await get_search_expansion_count()
+    outline_mode = await get_outline_mode()
+    post_refine_mode = await get_post_refine_mode()
     upload_urls = sanitize_fetch_urls(extra_fetch_urls)
     if intent.new_urls:
         upload_urls = sanitize_fetch_urls(intent.new_urls + upload_urls)
 
     graph_artifact_id = _new_id("wf")
     emitter = WorkflowNodeEmitter(graph_artifact_id)
-    g = build_literature_graph()
+    g = build_literature_graph_legacy()
+    use_outline_path = False
+    outline_draft: LiteratureOutline | None = None
+    sub_topics_for_search: list[Any] = []
     execution_trace = new_trace()
     think_acc = ThinkAccumulator()
     planner_ctx = await load_planner_context()
@@ -289,9 +403,6 @@ async def stream_literature_turn(
             "use_existing_corpus": intent.use_existing_corpus,
         },
     )
-
-    async for ev in _publish_workflow_graph(g, graph_artifact_id):
-        yield ev
 
     yield ("stage", {"name": "理解研究问题", "state": "active"})
 
@@ -334,6 +445,43 @@ async def stream_literature_turn(
         session_meta.get("initial_query") or user_message.strip()
     )
     session_title = str(session_meta.get("title") or "")
+
+    search_query_for_plan = (
+        intent.search_query
+        or router_result.search_query.strip()
+        or user_message.strip()
+    )
+    stored_outline = LiteratureOutline.from_dict(store.load_outline(session_id))
+    use_outline_path, outline_draft, sub_topics_for_search = _resolve_outline_plan(
+        outline_mode=outline_mode,
+        intent=intent.intent,
+        user_message=user_message,
+        initial_query=initial_query,
+        search_query=search_query_for_plan,
+        session_title=session_title,
+        stored_outline=stored_outline,
+    )
+    if use_outline_path and outline_draft:
+        g = build_literature_graph(_section_specs_for_graph(outline_draft))
+    else:
+        g = build_literature_graph_legacy()
+    async for ev in _publish_workflow_graph(g, graph_artifact_id):
+        yield ev
+    if use_outline_path and sub_topics_for_search:
+        yield (
+            "literature_subtopic_plan",
+            {
+                "count": len(sub_topics_for_search),
+                "sub_topics": [
+                    {
+                        "id": st.id,
+                        "title": st.title,
+                        "search_query": st.search_query,
+                    }
+                    for st in sub_topics_for_search
+                ],
+            },
+        )
 
     if intent.intent == "manage_library":
         async for ev in emit_system_think_line(
@@ -432,24 +580,74 @@ async def stream_literature_turn(
             skip_tavily = True
         search_out: dict[str, Any] = {}
         try:
-            async for ev in stream_search_phase(
-                user_message=user_message,
-                query=query,
-                tavily_key=tavily_key or "",
-                tavily_max_results=tavily_max_results,
-                tavily_retry_count=tavily_retry_count,
-                fetch_retry_delay_ms=fetch_retry_delay_ms,
-                source_mode=source_mode,
-                upload_count=len(upload_urls),
-                skip_tavily=skip_tavily,
-                upload_urls=upload_urls,
-                think_acc=think_acc,
-                planner_ctx=planner_ctx,
-                execution_trace=execution_trace,
-                corpus=working if turn_ctx.has_corpus else None,
-                result=search_out,
+            expanded_queries = [query]
+            if (
+                use_outline_path
+                and len(sub_topics_for_search) >= 2
+                and not skip_tavily
             ):
-                yield ev
+                expanded_queries = [
+                    _augment_query(str(st.search_query or query))
+                    for st in sub_topics_for_search
+                ]
+            elif enable_query_expansion and search_expansion_count > 1:
+                planner_llm = await get_planner_llm()
+                expanded_queries = await expand_search_queries(
+                    query,
+                    count=search_expansion_count,
+                    user_message=user_message,
+                    llm=planner_llm,
+                    use_llm=True,
+                )
+
+            if len(expanded_queries) > 1:
+                async for ev in stream_expanded_search_phase(
+                    user_message=user_message,
+                    queries=expanded_queries,
+                    tavily_key=tavily_key or "",
+                    tavily_max_results=tavily_max_results,
+                    tavily_retry_count=tavily_retry_count,
+                    fetch_retry_delay_ms=fetch_retry_delay_ms,
+                    source_mode=source_mode,
+                    upload_count=len(upload_urls),
+                    skip_tavily=skip_tavily,
+                    upload_urls=upload_urls,
+                    think_acc=think_acc,
+                    planner_ctx=planner_ctx,
+                    execution_trace=execution_trace,
+                    corpus=working if turn_ctx.has_corpus else None,
+                    result=search_out,
+                    tavily_include_domains=tavily_include_domains,
+                    tavily_exclude_domains=tavily_exclude_domains,
+                    tavily_search_depth=tavily_search_depth,
+                    tavily_enforce_domain_filter=tavily_enforce_domain_filter,
+                    tavily_enable_junk_filter=tavily_enable_junk_filter,
+                ):
+                    yield ev
+            else:
+                async for ev in stream_search_phase(
+                    user_message=user_message,
+                    query=query,
+                    tavily_key=tavily_key or "",
+                    tavily_max_results=tavily_max_results,
+                    tavily_retry_count=tavily_retry_count,
+                    fetch_retry_delay_ms=fetch_retry_delay_ms,
+                    source_mode=source_mode,
+                    upload_count=len(upload_urls),
+                    skip_tavily=skip_tavily,
+                    upload_urls=upload_urls,
+                    think_acc=think_acc,
+                    planner_ctx=planner_ctx,
+                    execution_trace=execution_trace,
+                    corpus=working if turn_ctx.has_corpus else None,
+                    result=search_out,
+                    tavily_include_domains=tavily_include_domains,
+                    tavily_exclude_domains=tavily_exclude_domains,
+                    tavily_search_depth=tavily_search_depth,
+                    tavily_enforce_domain_filter=tavily_enforce_domain_filter,
+                    tavily_enable_junk_filter=tavily_enable_junk_filter,
+                ):
+                    yield ev
         except ValueError as e:
             fail_msg = str(e)
             yield ("text", {"delta": fail_msg})
@@ -563,6 +761,7 @@ async def stream_literature_turn(
                 sync_graph_node=_sync_graph_node,
                 tavily_answer=answer,
                 result=fetch_out,
+                max_source_chars=max_source_chars,
             ):
                 yield ev
             delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
@@ -655,6 +854,94 @@ async def stream_literature_turn(
         failed_literature = list(working.failed_literature)
         fetch_results = list(working.fetch_results)
 
+    if enable_paper_attributes and intent.intent not in (
+        "query_corpus",
+        "synthesis_matrix",
+        "manage_library",
+    ):
+        attr_fetch_results = list(fetch_results) or list(working.fetch_results)
+        if attr_fetch_results or working.paper_index:
+            if use_outline_path:
+                async for ev in _sync_graph_node(
+                    emitter,
+                    g,
+                    graph_artifact_id,
+                    "attributes",
+                    "active",
+                    parent_id="cite_extract",
+                ):
+                    yield ev
+            attr_out: dict[str, Any] = {}
+            async for ev in stream_attributes_phase(
+                user_message=user_message,
+                corpus=working,
+                fetch_results=attr_fetch_results,
+                cite_records=cite_records,
+                llm=llm,
+                parallel=parallel,
+                think_acc=think_acc,
+                planner_ctx=planner_ctx,
+                execution_trace=execution_trace,
+                result=attr_out,
+            ):
+                yield ev
+            if use_outline_path:
+                async for ev in _sync_graph_node(
+                    emitter,
+                    g,
+                    graph_artifact_id,
+                    "attributes",
+                    "done",
+                    parent_id="cite_extract",
+                ):
+                    yield ev
+    elif use_outline_path and intent.intent not in (
+        "query_corpus",
+        "synthesis_matrix",
+        "manage_library",
+    ):
+        async for ev in _sync_graph_node(
+            emitter,
+            g,
+            graph_artifact_id,
+            "attributes",
+            "skipped",
+            parent_id="cite_extract",
+        ):
+            yield ev
+
+    outline_obj: LiteratureOutline | None = None
+    if use_outline_path and intent.intent not in (
+        "query_corpus",
+        "synthesis_matrix",
+        "manage_library",
+    ):
+        if not working.sources_md and not working.fetch_hits:
+            pass
+        else:
+            outline_out: dict[str, Any] = {}
+            async for ev in stream_outline_phase(
+                user_message=user_message,
+                search_query=search_query_for_plan,
+                session_title=session_title,
+                session_id=session_id,
+                corpus=working,
+                store=store,
+                think_acc=think_acc,
+                planner_ctx=planner_ctx,
+                execution_trace=execution_trace,
+                emitter=emitter,
+                graph=g,
+                graph_artifact_id=graph_artifact_id,
+                sync_graph_node=_sync_graph_node,
+                outline=outline_draft,
+                result=outline_out,
+            ):
+                yield ev
+            outline_obj = outline_out.get("outline")
+            if isinstance(outline_obj, LiteratureOutline):
+                outline_draft = outline_obj
+
     if not working.sources_md and not working.fetch_hits:
         fail_msg = "没有可用的文献材料。请先提供研究问题或文献链接。"
         yield ("text", {"delta": fail_msg})
@@ -719,14 +1006,20 @@ async def stream_literature_turn(
             context_block=context_block,
         )
         main_parts: list[str] = []
-        async for chunk in llm.chat_stream(
-            [LLMMessage(role="user", content=q_prompt)],
-            system=QUERY_CORPUS_SYSTEM,
-            max_tokens=2048,
-            temperature=0.3,
-        ):
-            main_parts.append(chunk)
-            yield ("text", {"delta": chunk})
+        try:
+            async for chunk in llm.chat_stream(
+                [LLMMessage(role="user", content=q_prompt)],
+                system=QUERY_CORPUS_SYSTEM,
+                max_tokens=2048,
+                temperature=0.3,
+            ):
+                main_parts.append(chunk)
+                yield ("text", {"delta": chunk})
+        except Exception as e:
+            _log.exception("query_corpus streaming failed")
+            err_line = f"\n\n（生成失败：{e}。请检查 LLM 配置或稍后重试。）"
+            main_parts.append(err_line)
+            yield ("text", {"delta": err_line})
         main_text = "".join(main_parts) or "（未能生成回答，请换种问法。）"
         upsert_stage(execution_trace, "文献问答", "done")
         upsert_stage(execution_trace, "完成", "done")
@@ -772,14 +1065,17 @@ async def stream_literature_turn(
             gen_directives=intent.gen_directives or user_message,
         )
         matrix_parts = []
-        async for chunk in llm.chat_stream(
-            [LLMMessage(role="user", content=matrix_prompt)],
-            system=matrix_system,
-            max_tokens=4096,
-            temperature=0.25,
-        ):
-            matrix_parts.append(chunk)
-            yield ("text", {"delta": chunk})
+        try:
+            async for chunk in llm.chat_stream(
+                [LLMMessage(role="user", content=matrix_prompt)],
+                system=matrix_system,
+                max_tokens=4096,
+                temperature=0.25,
+            ):
+                matrix_parts.append(chunk)
+                yield ("text", {"delta": chunk})
+        except Exception:
+            _log.exception("synthesis matrix streaming failed")
 
         matrix_text = "".join(matrix_parts)
         if not matrix_text.strip():
@@ -872,63 +1168,263 @@ async def stream_literature_turn(
         yield ("stage", {"name": "完成", "state": "done"})
         return
 
-    async for ev in _sync_graph_node(emitter, g, graph_artifact_id, "generate", "active"):
-        yield ev
-    yield ("stage", {"name": "综述生成", "state": "active"})
+    raw_main = ""
+    last_wf_node = "outline" if use_outline_path and outline_obj else "cite_extract"
 
-    gen_ctx = format_generate_context(
-        source_blocks=len(working.sources_md),
-        cite_ok=cite_ok,
-        failed_fetch=fetch_failed,
-        fmt_label=fmt_label,
-    )
-    async for ev in narrate_phase_stream(
-        "G",
-        user_message,
-        gen_ctx,
-        think_acc=think_acc,
-        ctx=planner_ctx,
-    ):
-        yield ev
+    if use_outline_path and outline_obj:
+        yield ("stage", {"name": "综述生成", "state": "active"})
+        gen_ctx = format_generate_context(
+            source_blocks=len(working.sources_md),
+            cite_ok=cite_ok,
+            failed_fetch=fetch_failed,
+            fmt_label=fmt_label,
+        )
+        async for ev in narrate_phase_stream(
+            "G",
+            user_message,
+            gen_ctx,
+            think_acc=think_acc,
+            ctx=planner_ctx,
+        ):
+            yield ev
 
-    gen_prompt = build_review_materials_user_prompt(context_block)
-    review_template = await get_review_system_prompt_template()
-    review_system = build_review_turn_system_prompt(
-        citation_format,
-        review_template,
-        initial_query=initial_query,
-        gen_constraints=gen_constraints,
-        gen_directives=intent.gen_directives,
-        intent=intent.intent,
-    )
-    main_parts = []
-    async for chunk in llm.chat_stream(
-        [LLMMessage(role="user", content=gen_prompt)],
-        system=review_system,
-        max_tokens=4096,
-        temperature=0.35,
-    ):
-        main_parts.append(chunk)
-        yield ("text", {"delta": chunk})
+        section_parts: list[tuple[Any, str]] = []
+        prior = ""
+        prev_node = "outline"
+        gen_directives = intent.gen_directives or ""
+        prior_review = store.get_latest_review(session_id)
+        prior_review_text = str((prior_review or {}).get("content") or "")
+        refine_plan = None
+        if intent.intent in ("refine_gen", "regen_only") and prior_review_text.strip():
+            refine_plan = build_section_refine_plan(
+                user_message=user_message,
+                outline=outline_obj,
+                prior_review_text=prior_review_text,
+                gen_directives=gen_directives,
+            )
+            if refine_plan.target_section_ids is not None:
+                yield (
+                    "literature_section_refine",
+                    {
+                        "mode": "partial",
+                        "target_section_ids": refine_plan.target_section_ids,
+                        "target_titles": [
+                            s.title
+                            for s in outline_obj.sections
+                            if s.id in refine_plan.target_section_ids
+                        ],
+                        "reused_count": len(outline_obj.sections)
+                        - len(refine_plan.target_section_ids),
+                    },
+                )
+            elif intent.intent == "refine_gen":
+                yield (
+                    "literature_section_refine",
+                    {"mode": "full", "target_section_ids": [], "reused_count": 0},
+                )
 
-    raw_main = "".join(main_parts)
-    if not raw_main.strip():
+        for section in outline_obj.sections:
+            reuse_body = ""
+            if refine_plan and not refine_plan.should_regenerate(section.id):
+                reuse_body = refine_plan.prior_bodies.get(section.id, "")
+            if reuse_body:
+                async for ev in _sync_graph_node(
+                    emitter,
+                    g,
+                    graph_artifact_id,
+                    section.id,
+                    "skipped",
+                    parent_id=prev_node,
+                    metadata={"reused": True},
+                ):
+                    yield ev
+                section_parts.append((section, reuse_body))
+                prior = (prior + "\n" + reuse_body)[-1500:]
+                prev_node = section.id
+                last_wf_node = section.id
+                continue
+
+            async for ev in _sync_graph_node(
+                emitter,
+                g,
+                graph_artifact_id,
+                section.id,
+                "active",
+                parent_id=prev_node,
+            ):
+                yield ev
+            stage_label = f"撰写：{section.title[:24]}"
+            yield ("stage", {"name": stage_label, "state": "active"})
+            sec_parts: list[str] = []
+            sec_is_refine = bool(
+                refine_plan
+                and refine_plan.prior_bodies.get(section.id, "").strip()
+                and intent.intent == "refine_gen"
+            )
+            sec_directives = (
+                refine_plan.revision_directives if refine_plan else gen_directives
+            )
+            try:
+                async for chunk in stream_section_generate(
+                    llm,
+                    outline=outline_obj,
+                    section=section,
+                    paper_index=working.paper_index,
+                    prior_excerpt=prior,
+                    prior_section_body=refine_plan.prior_bodies.get(section.id, "")
+                    if refine_plan
+                    else "",
+                    gen_directives=sec_directives,
+                    is_refine=sec_is_refine,
+                ):
+                    sec_parts.append(chunk)
+                    yield ("text", {"delta": chunk})
+            except Exception:
+                _log.exception("section %s streaming failed", section.id)
+            sec_body = "".join(sec_parts)
+            if not sec_body.strip():
+                sec_body = f"（章节「{section.title}」生成为空。）\n"
+                yield ("text", {"delta": sec_body})
+            section_parts.append((section, sec_body))
+            prior = (prior + "\n" + sec_body)[-1500:]
+            async for ev in _sync_graph_node(
+                emitter,
+                g,
+                graph_artifact_id,
+                section.id,
+                "done",
+                parent_id=prev_node,
+            ):
+                yield ev
+            upsert_stage(execution_trace, stage_label, "done")
+            yield ("stage", {"name": stage_label, "state": "done"})
+            prev_node = section.id
+            last_wf_node = section.id
+
+        raw_main = stitch_review_sections(section_parts)
+        upsert_stage(execution_trace, "综述生成", "done")
+        yield ("stage", {"name": "综述生成", "state": "done"})
+    else:
+        async for ev in _sync_graph_node(
+            emitter, g, graph_artifact_id, "generate", "active"
+        ):
+            yield ev
+        yield ("stage", {"name": "综述生成", "state": "active"})
+
+        gen_ctx = format_generate_context(
+            source_blocks=len(working.sources_md),
+            cite_ok=cite_ok,
+            failed_fetch=fetch_failed,
+            fmt_label=fmt_label,
+        )
+        async for ev in narrate_phase_stream(
+            "G",
+            user_message,
+            gen_ctx,
+            think_acc=think_acc,
+            ctx=planner_ctx,
+        ):
+            yield ev
+
+        gen_prompt = build_review_materials_user_prompt(
+            context_block,
+            prior_review_excerpt=(
+                str((store.get_latest_review(session_id) or {}).get("content") or "")
+                if intent.intent in ("refine_gen", "regen_only")
+                else ""
+            ),
+        )
+        review_template = await get_review_system_prompt_template()
+        review_system = build_review_turn_system_prompt(
+            citation_format,
+            review_template,
+            initial_query=initial_query,
+            gen_constraints=gen_constraints,
+            gen_directives=intent.gen_directives,
+            intent=intent.intent,
+        )
+        main_parts: list[str] = []
         try:
-            resp = await llm.chat(
+            async for chunk in llm.chat_stream(
                 [LLMMessage(role="user", content=gen_prompt)],
                 system=review_system,
                 max_tokens=4096,
                 temperature=0.35,
-            )
-            raw_main = (resp.content or "").strip()
-            if raw_main:
-                yield ("text", {"delta": raw_main})
+            ):
+                main_parts.append(chunk)
+                yield ("text", {"delta": chunk})
         except Exception:
-            _log.exception("review non-stream fallback failed")
-            raw_main = ""
+            _log.exception("review streaming failed")
+
+        raw_main = "".join(main_parts)
         if not raw_main.strip():
-            raw_main = "（综述生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
-            yield ("text", {"delta": raw_main})
+            try:
+                resp = await llm.chat(
+                    [LLMMessage(role="user", content=gen_prompt)],
+                    system=review_system,
+                    max_tokens=4096,
+                    temperature=0.35,
+                )
+                raw_main = (resp.content or "").strip()
+                if raw_main:
+                    yield ("text", {"delta": raw_main})
+            except Exception:
+                _log.exception("review non-stream fallback failed")
+                raw_main = ""
+            if not raw_main.strip():
+                raw_main = "（综述生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
+                yield ("text", {"delta": raw_main})
+
+        async for ev in _sync_graph_node(
+            emitter, g, graph_artifact_id, "generate", "done"
+        ):
+            yield ev
+        yield ("stage", {"name": "综述生成", "state": "done"})
+        upsert_stage(execution_trace, "综述生成", "done")
+        last_wf_node = "generate"
+
+    if use_outline_path:
+        if post_refine_mode != "off":
+            async for ev in _sync_graph_node(
+                emitter,
+                g,
+                graph_artifact_id,
+                "refine",
+                "active",
+                parent_id=last_wf_node,
+            ):
+                yield ev
+            refined, report = post_refine_review(
+                raw_main,
+                outline=outline_obj,
+                cite_count=cite_ok,
+            )
+            raw_main = refined
+            yield ("literature_refine_report", report)
+            async for ev in _sync_graph_node(
+                emitter,
+                g,
+                graph_artifact_id,
+                "refine",
+                "done",
+                parent_id=last_wf_node,
+            ):
+                yield ev
+            upsert_stage(execution_trace, "后处理", "done")
+            deliver_parent = "refine"
+        else:
+            async for ev in _sync_graph_node(
+                emitter,
+                g,
+                graph_artifact_id,
+                "refine",
+                "skipped",
+                parent_id=last_wf_node,
+            ):
+                yield ev
+            deliver_parent = "refine"
+    else:
+        deliver_parent = None
 
     main_text = append_compliance_footer(raw_main)
     if main_text != raw_main:
@@ -936,12 +1432,14 @@ async def stream_literature_turn(
         if tail:
             yield ("text", {"delta": tail})
 
-    async for ev in _sync_graph_node(emitter, g, graph_artifact_id, "generate", "done"):
-        yield ev
-    yield ("stage", {"name": "综述生成", "state": "done"})
-    upsert_stage(execution_trace, "综述生成", "done")
-
-    async for ev in _sync_graph_node(emitter, g, graph_artifact_id, "deliver", "active"):
+    async for ev in _sync_graph_node(
+        emitter,
+        g,
+        graph_artifact_id,
+        "deliver",
+        "active",
+        parent_id=deliver_parent,
+    ):
         yield ev
 
     _, version_id = store.save_review_artifact(session_id, main_text)
@@ -957,7 +1455,9 @@ async def stream_literature_turn(
         },
     )
 
-    async for ev in _sync_graph_node(emitter, g, graph_artifact_id, "deliver", "done"):
+    async for ev in _sync_graph_node(
+        emitter, g, graph_artifact_id, "deliver", "done", parent_id=deliver_parent
+    ):
         yield ev
 
     upsert_stage(execution_trace, "完成", "done")

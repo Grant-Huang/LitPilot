@@ -19,9 +19,10 @@ async def _mock_understanding_stream():
     )
 
 
-def test_augment_query_adds_sites() -> None:
-    q = _augment_query("transformer survey")
-    assert "arxiv" in q.lower() or "site:" in q.lower()
+def test_augment_query_adds_academic_context() -> None:
+    q = _augment_query("transformer efficiency")
+    assert "academic" in q.lower() or "survey" in q.lower()
+    assert "site:" not in q.lower()
 
 
 def test_chunk_text() -> None:

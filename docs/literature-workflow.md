@@ -24,8 +24,79 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 | `tavily_retry_count` | Tavily 请求异常重试 |
 | `fetch_retry_count` | 单 URL 抓取异常重试 |
 | `fetch_retry_delay_ms` | 重试间隔 |
+| `enable_query_expansion` | 是否启用多 query 检索扩展（默认关） |
+| `expansion_count` | 扩展检索式数量（1–4，默认 3） |
 
-## 上下文分栏
+## 文献结构化（M1 · AttributeTree lite）
+
+cite 之后、generate 之前（`enable_paper_attributes`，默认开）：
+
+1. 对每条成功抓取的 URL 抽取结构化字段：`problem` / `method` / `datasets` / `findings` / `limitations` / `keywords`
+2. 写入会话 `corpus.json` 的 `paper_index`（v2）
+3. SSE：`stage`「文献结构化」、`tool_call` `extract_attributes`、`literature_paper_index`
+
+多轮续聊时复用语料；仅对 **尚未结构化** 的文献增量抽取，不影响 `refine_gen` / `regen_only` 流式修订。
+
+## 检索扩展（M6）
+
+启用 `enable_query_expansion` 时：
+
+1. 由编排 LLM（或规则回退）生成 2–4 条检索式
+2. 分轮 Tavily 检索，按 URL 去重合并，总量不超过 `tavily_max_results`
+3. SSE：`literature_search_plan`、`literature_search_merge`
+
+## 大纲驱动分章写作（M2）
+
+`outline_mode`（prompts 能力，默认 `lite`）：
+
+| 值 | 行为 |
+|----|------|
+| `off` | 固定 4 节点 DAG，一次性 monolithic 生成 |
+| `lite` | 检测到「其一…其二…」等多 aspect  brief 时，拆子主题分检、分章写、再拼接 |
+| `full` | 始终走大纲 + 分节流式写作（单主题也会拆导言/正文/结论） |
+
+流程（outline 路径）：
+
+```
+fetch → cite → attributes → outline → [章节×N 流式] → refine → deliver
+```
+
+1. **decompose**：规则解析用户 brief 为 `ResearchSubTopic`（子主题检索式）
+2. **分主题检索**：≥2 子主题时各跑一轮 Tavily，URL 去重合并（优先于 query expansion）
+3. **mount**：按关键词将 `paper_index` 挂载到各 `OutlineSection`
+4. **分节写作**：每章独立 LLM 流式输出，前文摘要衔接
+5. SSE：`literature_subtopic_plan`、`literature_outline`（artifact `literature-outline+json`）、按章节 `text` 增量
+
+会话持久化：`sessions/{id}/outline.json`
+
+前端 Artifact 侧栏：
+
+| Tab | 内容 |
+|-----|------|
+| **流程** | 步骤列表 + 当前进度（替代 SVG DAG；检索/理解在左侧思考区） |
+| **大纲** | `literature-outline+json`：子主题、章节、挂载文献数 |
+| **综述** | Markdown 正文 |
+| **文献** | 本回合收录条目 |
+
+设置页「综述 System Prompt」：`outline_mode`、`post_refine_mode`（带说明 tips）
+
+`refine_gen` / `regen_only` 在有大纲时：
+
+- 解析「只重写第二章 / 其二 / 第 N 章」→ **章节级 refine**（其余章从 `review-latest.md` 复用，graph 节点标记 skipped）
+- 注入【上一版本章稿】+【修订要求】到 LLM；无指定章节时仍全章重跑
+- SSE：`literature_section_refine`
+
+## 后处理（M3）
+
+`post_refine_mode`（默认 `lite`）在 deliver 前执行规则校验：
+
+- 去除套话结语（「综上所述…」等）
+- 检测大纲章节是否在正文中出现
+- 统计「待核实」标记
+
+SSE：`literature_refine_report`
+
+---
 
 - `[Tavily]` — 检索摘要
 - `[网页材料]` — Jina 正文要点（content_pipeline 压缩）
@@ -53,15 +124,17 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 
 设置页 `citation_format` 支持 `apa`（默认）与 `acm`，影响引用抽取、ref-list 与 LLM 参考文献章节。
 
-## Planner 设置（`data/config/agent.json`）
+## 编排模型设置（`data/config/agent.json`）
+
+编排模型（Orchestrator）负责理解、规划与过程解说；撰写综述用主模型 `llm_model`，两者可分开配置。
 
 | 配置项 | 默认 | 说明 |
 |--------|------|------|
 | `use_llm_planner` | `true` | 是否用 LLM 做理解与过程解说 |
-| `think_mode` | `lite` | `off` / `lite`（A+C+E）/ `full`（A–G，D 每 5 篇或 8s） |
-| `think_use_reasoning` | `false` | MiniMax 国内版：原生推理流进思考区 |
-| `think_model` | 空 | 留空=与主 LLM 相同 |
-| `think_max_tokens_per_phase` | `280` | 单检查点解说 token 上限 |
+| `orchestrator_mode` | `lite` | `off` / `lite`（A+C+E）/ `full`（A–G，D 每 5 篇或 8s） |
+| `orchestrator_use_reasoning` | `false` | MiniMax 国内版：原生推理流进思考区 |
+| `orchestrator_model` | 空 | 编排模型；留空=与主 LLM 相同（建议 MiniMax-M2.7-highspeed） |
+| `orchestrator_max_tokens_per_phase` | `280` | 单检查点解说 token 上限 |
 
 检查点 A 与 `route_literature` 合并为 **一次流式 LLM 调用**（叙述 + 末行 JSON）。
 

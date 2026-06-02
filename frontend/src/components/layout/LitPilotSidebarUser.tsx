@@ -7,9 +7,11 @@ import type { MenuProps } from "antd";
 import {
   InfoCircleOutlined,
   LogoutOutlined,
+  QuestionCircleOutlined,
   SettingOutlined,
   UserOutlined,
 } from "@ant-design/icons";
+import { useHelpCenter } from "@/contexts/HelpCenterContext";
 
 const USER_NAME_KEY = "litpilot:user-name";
 const ACTIVE_SESSION_KEY = "litpilot:active-session";
@@ -29,6 +31,8 @@ export function LitPilotSidebarUser() {
       /* ignore */
     }
   }, []);
+
+  const { openHelp } = useHelpCenter();
 
   const handleLogout = useCallback(() => {
     Modal.confirm({
@@ -55,16 +59,28 @@ export function LitPilotSidebarUser() {
 
   const menuItems: MenuProps["items"] = [
     {
+      key: "help",
+      icon: <QuestionCircleOutlined />,
+      label: "帮助中心",
+      onClick: () => openHelp(),
+    },
+    {
       key: "info",
       icon: <InfoCircleOutlined />,
       label: "用户信息",
       onClick: () => setInfoOpen(true),
     },
     {
-      key: "settings",
+      key: "settings-personal",
       icon: <SettingOutlined />,
-      label: "设置",
-      onClick: () => router.push("/settings"),
+      label: "个人设置",
+      onClick: () => router.push("/settings/personal"),
+    },
+    {
+      key: "settings-admin",
+      icon: <SettingOutlined />,
+      label: "管理员配置",
+      onClick: () => router.push("/settings/admin"),
     },
     { type: "divider" },
     {

@@ -18,8 +18,9 @@ import {
 import { cloneStreamState } from "@/lib/streamState";
 import { LitPilotArtifactSlot } from "./LitPilotArtifactSlot";
 import { stripWorkflowArtifacts } from "./stripWorkflowArtifacts";
-import { libraryApi, sessionsApi, settingsApi, type ChatMessage } from "@/lib/api";
+import { libraryApi, sessionsApi, type ChatMessage } from "@/lib/api";
 import { normalizeLibraryItem, type LibraryItem } from "@/lib/libraryTypes";
+import { settingsApiV2 } from "@/lib/settingsApiV2";
 
 function mapStoredMessages(msgs: ChatMessage[]): LitPilotMessage[] {
   return msgs.map((m, i) => {
@@ -72,17 +73,25 @@ export function LitPilotChatPage() {
   const { messages: storedMessages } = useChatSession();
 
   useEffect(() => {
-    void settingsApi.getAgent().then((cfg) => {
-      if (
-        cfg.literature_source_mode === "merge" ||
-        cfg.literature_source_mode === "user_only"
-      ) {
-        setLiteratureSourceMode(cfg.literature_source_mode);
-      }
-      if (cfg.max_fetch_urls != null) {
-        setMaxFetchUrls(Math.max(1, Math.min(cfg.max_fetch_urls, 50)));
-      }
-    });
+    void settingsApiV2
+      .getSystemCapabilities()
+      .then((res) => {
+        const caps = res.items || [];
+        const source = caps.find((c) => c.capability_id === "literature_source");
+        const mode = String(source?.params?.literature_source_mode || "");
+        if (mode === "merge" || mode === "user_only") {
+          setLiteratureSourceMode(mode);
+        }
+        const fetch = caps.find((c) => c.capability_id === "web_fetch");
+        const maxUrlsRaw = fetch?.params?.max_fetch_urls;
+        const maxUrls = Number(maxUrlsRaw);
+        if (Number.isFinite(maxUrls)) {
+          setMaxFetchUrls(Math.max(1, Math.min(maxUrls, 50)));
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
   }, []);
 
   const loadLibrary = useCallback(async () => {

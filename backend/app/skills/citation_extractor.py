@@ -200,7 +200,14 @@ async def extract_citation_from_url(
         if paras:
             rec.abstract = paras[0][:500]
 
-    rec.success = bool(rec.title and (rec.authors or rec.year))
+    has_scholarly_signal = bool(
+        rec.doi
+        or publisher in ("arxiv", "acm", "ieee", "semantic_scholar", "dblp")
+        or re.search(r"arxiv\.org/(abs|pdf)/\d", url, re.I)
+    )
+    title_ok = bool(rec.title) and len(rec.title.strip()) >= 12
+    meta_ok = bool(rec.authors or rec.year)
+    rec.success = bool(title_ok and meta_ok and has_scholarly_signal)
     if not rec.success:
         rec.error = "insufficient metadata"
     return rec
@@ -295,24 +302,17 @@ async def extract_and_persist_batch(
     enrich_iter = iter(enrich_list)
     lib = LibraryStore()
     for rec in results:
-        if rec.success:
-            ep = next(enrich_iter, {})
-            upsert_from_citation(
-                rec,
-                lib=lib,
-                citation_format=citation_format,
-                session_id=session_id,
-                session_title=session_title,
-                enrich_patch=ep,
-            )
-        else:
-            upsert_from_citation(
-                rec,
-                lib=lib,
-                citation_format=citation_format,
-                session_id=session_id,
-                session_title=session_title,
-            )
+        if not rec.success:
+            continue
+        ep = next(enrich_iter, {})
+        upsert_from_citation(
+            rec,
+            lib=lib,
+            citation_format=citation_format,
+            session_id=session_id,
+            session_title=session_title,
+            enrich_patch=ep,
+        )
 
     if success_recs:
         _sync_exports(lib)

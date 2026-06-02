@@ -154,7 +154,9 @@ export function LitPilotProcessTrace({
               aria-label="执行步骤"
             >
               {lines.map((line) => {
-                const tool = trace.tools.find((t) => `tool-${t.id}` === line.key);
+                const tool = trace.tools.find(
+                  (t, idx) => `tool-${t.id}-${idx}` === line.key,
+                );
                 if (tool) {
                   return (
                     <LitPilotToolStep

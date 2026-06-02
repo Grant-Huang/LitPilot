@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import uuid
 from typing import Any
 
 
@@ -26,6 +28,18 @@ def append_tool(
     error: str | None = None,
     duration_ms: int | None = None,
 ) -> None:
+    # 规范化 tool_id：开发阶段不考虑向前兼容，确保工具步骤在前端渲染时永不重复
+    # 期望格式：tc_<12-hex>（与 _new_id("tc") 生成一致）
+    tools: list[dict[str, Any]] = trace.setdefault("tools", [])
+    existing_ids = {str(t.get("id") or "") for t in tools}
+    want = str(tool_id or "").strip()
+    ok = bool(re.fullmatch(r"tc_[0-9a-f]{12}", want))
+    if (not ok) or (want in existing_ids):
+        new_id = f"tc_{uuid.uuid4().hex[:12]}"
+        if isinstance(args, dict):
+            args.setdefault("_raw_tool_id", want)
+        tool_id = new_id
+
     entry: dict[str, Any] = {
         "id": tool_id,
         "name": name,
@@ -38,7 +52,7 @@ def append_tool(
         entry["error"] = error
     if duration_ms is not None:
         entry["duration_ms"] = duration_ms
-    trace.setdefault("tools", []).append(entry)
+    tools.append(entry)
 
 
 def append_workflow(

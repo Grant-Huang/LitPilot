@@ -1,4 +1,4 @@
-"""MiniMax China API (api.minimax.chat) — OpenAI-compatible chat completions."""
+"""MiniMax China API (api.minimaxi.com) — OpenAI-compatible chat completions."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ import httpx
 
 from app.llm.base import BaseLLM, LLMConfig, LLMMessage, LLMResponse, StreamPartKind
 
-MINIMAX_CN_BASE = "https://api.minimax.chat/v1"
+MINIMAX_CN_BASE = "https://api.minimaxi.com/v1"
 
 
 class MinimaxCNLLM(BaseLLM):
@@ -20,6 +20,20 @@ class MinimaxCNLLM(BaseLLM):
         super().__init__(config)
         if not (config.api_key or "").strip():
             raise ValueError("MiniMax 国内版需要 API Key")
+
+    def _base_url(self) -> str:
+        """Resolve OpenAI-compatible base; honor config.base_url when set.
+
+        本客户端走 OpenAI 兼容协议（/chat/completions）。MiniMax 的
+        Anthropic 兼容端点（/anthropic）协议不同，不能在此使用。
+        """
+        base = (self.config.base_url or "").strip().rstrip("/")
+        if not base:
+            return MINIMAX_CN_BASE
+        if base.endswith("/anthropic"):
+            # Anthropic 端点与 OpenAI 协议不兼容，回退到 OpenAI 兼容根
+            return base[: -len("/anthropic")] + "/v1"
+        return base
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -74,7 +88,7 @@ class MinimaxCNLLM(BaseLLM):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        url = f"{MINIMAX_CN_BASE}/chat/completions"
+        url = f"{self._base_url()}/chat/completions"
 
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(url, json=payload, headers=self._headers())
@@ -136,7 +150,7 @@ class MinimaxCNLLM(BaseLLM):
             "temperature": temperature,
             "stream": True,
         }
-        url = f"{MINIMAX_CN_BASE}/chat/completions"
+        url = f"{self._base_url()}/chat/completions"
 
         in_think = False
         tag_buf = ""

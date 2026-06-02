@@ -31,7 +31,7 @@ PROVIDER_REGISTRY: dict[str, dict] = {
     "minimax_cn": {
         "label": "MiniMax 国内版",
         "default_model": "MiniMax-M2.7",
-        "default_base_url": "https://api.minimax.chat/v1",
+        "default_base_url": "https://api.minimaxi.com/v1",
         "requires_api_key": True,
         "optional_fields": ["group_id"],
     },

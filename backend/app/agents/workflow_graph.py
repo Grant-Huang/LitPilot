@@ -76,8 +76,8 @@ class WorkflowGraph:
         return deepcopy(self)
 
 
-def build_literature_graph() -> WorkflowGraph:
-    """Artifact DAG：仅抓取及之后阶段（检索/路由在思考区展示）。"""
+def build_literature_graph_legacy() -> WorkflowGraph:
+    """Fixed 4-node graph when outline_mode=off (compatible with pre-M2 UI)."""
     nodes = [
         WorkflowNode("fetch", "抓取全文", "fetch", description="Jina Reader / web_fetch"),
         WorkflowNode("cite_extract", "引用抽取", "cite_extract", description="引用元数据"),
@@ -89,6 +89,59 @@ def build_literature_graph() -> WorkflowGraph:
         WorkflowEdge("e2", "cite_extract", "generate"),
         WorkflowEdge("e3", "generate", "deliver"),
     ]
+    return WorkflowGraph(
+        id="literature-agent",
+        title="文献综述执行计划",
+        nodes=nodes,
+        edges=edges,
+    )
+
+
+def build_literature_graph(
+    section_specs: list[tuple[str, str]] | None = None,
+) -> WorkflowGraph:
+    """
+    Dynamic chapter graph (M2): pipeline grows with outline sections.
+
+    section_specs: [(node_id, label), ...] — one node per chapter.
+    """
+    section_specs = section_specs or []
+    nodes: list[WorkflowNode] = [
+        WorkflowNode("fetch", "抓取全文", "fetch", description="Jina Reader / web_fetch"),
+        WorkflowNode("cite_extract", "引用抽取", "cite_extract", description="引用元数据"),
+        WorkflowNode("attributes", "文献结构化", "cite_extract", description="AttributeTree lite"),
+        WorkflowNode("outline", "大纲规划", "llm", description="子主题与章节挂载"),
+    ]
+    edges: list[WorkflowEdge] = [
+        WorkflowEdge("e1", "fetch", "cite_extract"),
+        WorkflowEdge("e2", "cite_extract", "attributes"),
+        WorkflowEdge("e3", "attributes", "outline"),
+    ]
+
+    prev = "outline"
+    if section_specs:
+        for i, (sid, label) in enumerate(section_specs):
+            nodes.append(
+                WorkflowNode(
+                    sid,
+                    label[:24],
+                    "llm",
+                    description="章节写作",
+                    meta={"chapter": True},
+                )
+            )
+            edges.append(WorkflowEdge(f"es{i}", prev, sid))
+            prev = sid
+    else:
+        nodes.append(WorkflowNode("generate", "综述生成", "llm", description="LLM 综合写作"))
+        edges.append(WorkflowEdge("e4", prev, "generate"))
+        prev = "generate"
+
+    nodes.append(WorkflowNode("refine", "后处理", "llm", description="校验与去套话"))
+    nodes.append(WorkflowNode("deliver", "交付", "deliver", description="保存引用与 Artifact"))
+    edges.append(WorkflowEdge("er", prev, "refine"))
+    edges.append(WorkflowEdge("e5", "refine", "deliver"))
+
     return WorkflowGraph(
         id="literature-agent",
         title="文献综述执行计划",
