@@ -1,5 +1,12 @@
 import type { ToolCallPayload } from "@meso.ai/ui";
 
+/** Shared step labels — tools and workflow trace use the same wording. */
+export const WEB_SEARCH_LABEL = "检索学术文献";
+export const WEB_FETCH_LABEL = "抓取网页全文";
+export const WEB_FETCH_PREFIX = "抓取网页全文：";
+export const EXTRACT_CITATION_LABEL = "抽取引用元数据";
+export const EXTRACT_CITATION_PREFIX = "抽取引用元数据：";
+
 function hostFromUrl(url: string): string {
   try {
     return new URL(url).hostname;
@@ -83,17 +90,57 @@ export function formatWebFetchPlainText(
   return `${title} [url]${suffix}`;
 }
 
+export function describeWorkflowKind(name: string): string {
+  if (name === "web_fetch") return WEB_FETCH_LABEL;
+  if (name === "extract_citation" || name === "cite_extract") {
+    return EXTRACT_CITATION_LABEL;
+  }
+  return name.replace(/_/g, " ");
+}
+
+export function describeWorkflowStep(step: {
+  name: string;
+  title?: string;
+  url?: string;
+  char_count?: number;
+}): string {
+  const label = describeWorkflowKind(step.name);
+  const wf = webFetchLineMeta(
+    step.name,
+    undefined,
+    step.title,
+    step.url,
+    step.char_count,
+  );
+  if (wf) {
+    return `${WEB_FETCH_PREFIX}${formatWebFetchPlainText(
+      wf.articleTitle,
+      wf.url,
+      wf.charCount,
+    )}`;
+  }
+  if (step.title) return `${label}：${step.title}`;
+  if (step.url) {
+    try {
+      return `${label}：${new URL(step.url).hostname}`;
+    } catch {
+      return `${label}：${step.url.slice(0, 48)}`;
+    }
+  }
+  return label;
+}
+
 export function describeToolAction(call: ToolCallPayload): string {
   const args = call.args ?? {};
   switch (call.name) {
     case "web_search": {
       const q = String(args.query ?? "").trim();
-      return q ? `检索学术文献：${q}` : "检索学术文献";
+      return q ? `${WEB_SEARCH_LABEL}：${q}` : WEB_SEARCH_LABEL;
     }
     case "web_fetch": {
       const parsed = parseWebFetchArgs(args as Record<string, unknown>);
-      if (!parsed) return "抓取网页全文";
-      return `抓取网页全文：${formatWebFetchPlainText(
+      if (!parsed) return WEB_FETCH_LABEL;
+      return `${WEB_FETCH_PREFIX}${formatWebFetchPlainText(
         parsed.articleTitle,
         parsed.url,
         parsed.charCount,
@@ -102,8 +149,10 @@ export function describeToolAction(call: ToolCallPayload): string {
     case "extract_citation": {
       const url = String(args.url ?? "").trim();
       const title = String(args.title ?? "").trim();
-      if (title) return `抽取引用元数据：${title}`;
-      return url ? `抽取引用元数据：${hostFromUrl(url)}` : "抽取引用元数据";
+      if (title) return `${EXTRACT_CITATION_PREFIX}${title}`;
+      return url
+        ? `${EXTRACT_CITATION_PREFIX}${hostFromUrl(url)}`
+        : EXTRACT_CITATION_LABEL;
     }
     default:
       return call.name.replace(/_/g, " ");

@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import uuid
 
+from app.agents.literature_router import TOPIC_LABEL_MAX, clamp_search_query
 from app.schemas.literature_outline import ResearchSubTopic
 
 _CN_ENUM = re.compile(
@@ -12,6 +13,10 @@ _CN_ENUM = re.compile(
     r"[，,、:\s]*"
     r"(.+?)(?=(?:\n\s*(?:其[一二三四五六七八]|第[一二三四五六七八]|(?:\(?[1-9]\d*\)?[\.、．]))|\Z))",
     re.S,
+)
+
+_POLLUTED_MARKERS = re.compile(
+    r"其[一二三四五六七八]|文献综述.*包括|我要写|包括\d+个方面"
 )
 
 
@@ -23,6 +28,52 @@ def _clean_chunk(text: str) -> str:
     t = re.sub(r"\s+", " ", (text or "").strip())
     t = re.sub(r"[。；;]+$", "", t)
     return t.strip()
+
+
+def is_polluted_search_query(query: str) -> bool:
+    """Detect router fallback or echoed user brief — unsuitable for Tavily."""
+    q = (query or "").strip()
+    if not q:
+        return False
+    if len(q) > 120:
+        return True
+    if _POLLUTED_MARKERS.search(q):
+        return True
+    return False
+
+
+def extract_compact_base_query(base_query: str) -> str:
+    """Keep short planner/router query; drop echoed multi-aspect brief."""
+    base = (base_query or "").strip()
+    if not base or is_polluted_search_query(base):
+        return ""
+    return clamp_search_query(base, max_len=TOPIC_LABEL_MAX, fallback=base)
+
+
+def build_subtopic_search_query(
+    title: str,
+    description: str,
+    base_query: str = "",
+) -> str:
+    """Compact per-subtopic query — avoid prepending the full user brief."""
+    compact_base = extract_compact_base_query(base_query)
+    title_short = (title or "").strip()
+    desc_short = (description or "").strip()[:160]
+    core = title_short or desc_short[:100]
+
+    if compact_base:
+        if core and core.lower() not in compact_base.lower():
+            return f"{compact_base} {core}"[:200]
+        return compact_base[:200]
+    return core[:200]
+
+
+def format_pass_query_label(query: str, *, max_len: int = 80) -> str:
+    """Prefer query tail so multi-pass labels differ when prefix is shared."""
+    q = (query or "").strip()
+    if len(q) <= max_len:
+        return q
+    return "…" + q[-(max_len - 1) :]
 
 
 def decompose_research_brief(user_message: str, *, base_query: str = "") -> list[ResearchSubTopic]:
@@ -45,24 +96,24 @@ def decompose_research_brief(user_message: str, *, base_query: str = "") -> list
         title = chunk.split("，")[0].split(",")[0].strip()
         if len(title) > 48:
             title = title[:45] + "…"
-        search_q = base_query.strip()
-        if search_q and title.lower() not in search_q.lower():
-            search_q = f"{search_q} {title}"
-        else:
-            search_q = search_q or title
+        search_q = build_subtopic_search_query(title, chunk, base_query)
         topics.append(
             ResearchSubTopic(
                 id=_slug_id(f"thread{i}"),
                 title=title or f"子主题 {i}",
                 description=chunk,
-                search_query=search_q[:200],
+                search_query=search_q,
             )
         )
     return topics
 
 
 def default_single_sub_topic(user_message: str, search_query: str) -> ResearchSubTopic:
-    topic = (search_query or user_message or "文献综述").strip()[:120]
+    compact = extract_compact_base_query(search_query)
+    if compact:
+        topic = compact
+    else:
+        topic = (user_message or "文献综述").strip()[:120]
     return ResearchSubTopic(
         id=_slug_id("thread"),
         title=topic[:48],

@@ -2,17 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
-import clsx from "clsx";
-import { ApiError } from "@/lib/http";
 import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import {
+  entityFromTestError,
+  errorMessage,
+  formatVerifiedHint,
+  isLlmCredential,
+  mergeById,
+  SettingsErrorMsg,
+  SettingsLoading,
+} from "../../_shared";
 import { settingsApiV2, type SystemCredential, type SystemInstance } from "@/lib/settingsApiV2";
 
-function isLlmCredential(c: SystemCredential): boolean {
-  return String(c.type || "").startsWith("llm:");
-}
-
 function mergeInstances(items: SystemInstance[], updated: SystemInstance): SystemInstance[] {
-  return items.map((x) => (x.id === updated.id ? { ...x, ...updated } : x));
+  return mergeById(items, updated);
 }
 
 function InstanceRow({
@@ -42,11 +45,7 @@ function InstanceRow({
   }, [instance.id]);
 
   useEffect(() => {
-    setStatusHint(
-      instance.last_verified_at
-        ? `最近测试：${new Date(instance.last_verified_at).toLocaleString()}`
-        : "",
-    );
+    setStatusHint(formatVerifiedHint(instance.last_verified_at));
   }, [instance.last_verified_at, instance.status]);
 
   const dirty =
@@ -85,15 +84,12 @@ function InstanceRow({
       onUpdated(updated);
       setStatusHint(String(res.note || "已通过基础检查"));
     } catch (e: unknown) {
-      const failed =
-        e instanceof ApiError && e.data && typeof e.data === "object"
-          ? (e.data as { instance?: SystemInstance }).instance
-          : null;
+      const failed = entityFromTestError<SystemInstance>(e, "instance");
       if (failed) {
         onUpdated(failed);
-        setStatusHint(e instanceof Error ? e.message : String(e));
+        setStatusHint(errorMessage(e));
       } else {
-        setRowMsg(e instanceof Error ? e.message : String(e));
+        setRowMsg(errorMessage(e));
       }
     } finally {
       setTesting(false);
@@ -275,7 +271,7 @@ export default function AdminInstancesPage() {
       setItems(instRes.items || []);
       setCredentials(credRes.items || []);
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setMsg(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -286,11 +282,7 @@ export default function AdminInstancesPage() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="settings-admin-loading">
-        <Spin size="large" />
-      </div>
-    );
+    return <SettingsLoading />;
   }
 
   return (
@@ -301,7 +293,7 @@ export default function AdminInstancesPage() {
         </button>
       </div>
 
-      {msg ? <div className={clsx("settings-msg", "settings-msg--err")}>{msg}</div> : null}
+      <SettingsErrorMsg msg={msg} />
 
       <div className="settings-cred-list">
         {creating ? (

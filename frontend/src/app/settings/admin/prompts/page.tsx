@@ -8,6 +8,8 @@ import { Spin } from "antd";
 
 import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
 
+import { SettingsLoading, errorMessage } from "../../_shared";
+
 import { settingsApiV2, type SystemCapability } from "@/lib/settingsApiV2";
 
 
@@ -170,7 +172,7 @@ export default function AdminPromptsPage() {
 
       })
 
-      .catch((e: unknown) => setMsg(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setMsg(errorMessage(e)))
 
       .finally(() => setLoading(false));
 
@@ -233,17 +235,7 @@ export default function AdminPromptsPage() {
 
 
   if (loading) {
-
-    return (
-
-      <div className="settings-admin-loading">
-
-        <Spin size="large" />
-
-      </div>
-
-    );
-
+    return <SettingsLoading />;
   }
 
 

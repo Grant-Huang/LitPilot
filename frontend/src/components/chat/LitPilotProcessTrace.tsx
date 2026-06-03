@@ -10,7 +10,7 @@ import {
 import { LitPilotThinkFold } from "./LitPilotThinkFold";
 import { LitPilotToolStep } from "./LitPilotToolStep";
 import { WebFetchStepTitle } from "./WebFetchStepTitle";
-import { isWebFetchCharOnlyPreview } from "@/lib/toolLabels";
+import { isWebFetchCharOnlyPreview, WEB_FETCH_PREFIX } from "@/lib/toolLabels";
 import { toolStepToState, type WebFetchLineMeta } from "@/lib/executionTrace";
 
 type Props = {
@@ -59,7 +59,7 @@ function LitPilotWorkflowStep({
               <WebFetchStepTitle
                 articleTitle={webFetch.articleTitle}
                 url={webFetch.url}
-                prefix={webFetch.prefix ?? "抓取网页："}
+                prefix={webFetch.prefix ?? WEB_FETCH_PREFIX}
                 charCount={webFetch.charCount}
               />
             ) : (

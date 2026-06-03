@@ -1,6 +1,6 @@
 "use client";
 
-import { webFetchDisplayTitle } from "@/lib/toolLabels";
+import { WEB_FETCH_PREFIX, webFetchDisplayTitle } from "@/lib/toolLabels";
 
 type Props = {
   articleTitle: string;
@@ -14,7 +14,7 @@ type Props = {
 export function WebFetchStepTitle({
   articleTitle,
   url,
-  prefix = "抓取网页全文：",
+  prefix = WEB_FETCH_PREFIX,
   charCount,
 }: Props) {
   const title = webFetchDisplayTitle(articleTitle);

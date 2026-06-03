@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.agents.literature_workflow import _augment_query, _chunk_text
+from app.agents.tools.tavily_search import augment_literature_search_query
+from app.core.think_stream import chunk_text
 
 
 async def _empty_fetch_iter():
@@ -20,19 +21,19 @@ async def _mock_understanding_stream():
 
 
 def test_augment_query_adds_academic_context() -> None:
-    q = _augment_query("transformer efficiency")
+    q = augment_literature_search_query("transformer efficiency")
     assert "academic" in q.lower() or "survey" in q.lower()
     assert "site:" not in q.lower()
 
 
 def test_chunk_text() -> None:
-    chunks = _chunk_text("abcdefghij", size=3)
+    chunks = chunk_text("abcdefghij", size=3)
     assert "".join(chunks) == "abcdefghij"
 
 
 @pytest.mark.asyncio
 async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
-    from app.agents.literature_workflow import stream_literature_turn
+    from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
     store = FileStore(tmp_path)
@@ -52,7 +53,7 @@ async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
-    from app.agents.literature_workflow import stream_literature_turn
+    from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
     store = FileStore(tmp_path)

@@ -140,15 +140,12 @@ LitPilot 侧栏品牌使用 Meso `ThreeColumnLayout` 的 `sidebarLogo` / `sideba
 | `MINIMAX_GROUP_ID` | MiniMax 国内版可选 Group ID |
 | `LITPILOT_DATA_DIR` | 数据目录，默认 `./data` |
 
-### 设置页（`data/config/agent.json`）
+### 设置页（`data/config/` + 管理员 UI）
 
-在 **系统设置** 可配置：
+- **个人设置**（`/settings/personal`）：引用格式 APA/ACM、`plan_confirm` 计划确认
+- **管理员配置**（`/settings/admin`）：凭据、实例、能力、Prompts
 
-- Tavily / Jina / LLM 提供商与 Key
-- **引用与参考文献格式**：`apa` 或 `acm`
-- 并行抓取数、单 URL 超时、`plan_confirm` 等
-
-设置页保存的 Key 会脱敏显示（`***` 后缀），留空保存则保持原值不变。
+旧版 `agent.json` 仍可由 runtime 合并；推荐通过 v2 设置 API 管理。
 
 ### 前端代理（`frontend/.env.local`）
 
@@ -190,7 +187,8 @@ BACKEND_URL=http://127.0.0.1:8001
 |------|------|
 | `/chat` | 文献综述对话与流式输出 |
 | `/library` | 引用索引、`ref-list.txt`、PDF 列表 |
-| `/settings` | Agent / LLM / 引用格式配置 |
+| `/settings/personal` | 个人偏好（引用格式、计划确认） |
+| `/settings/admin` | 凭据、实例、能力、Prompts |
 
 ## API 概览
 

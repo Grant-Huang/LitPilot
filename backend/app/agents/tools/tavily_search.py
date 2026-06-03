@@ -193,6 +193,30 @@ def restrict_hits_to_domains(
     return kept
 
 
+def apply_literature_hit_filters(
+    raw_hits: list[dict[str, str]],
+    *,
+    include_domains: list[str] | tuple[str, ...] | None,
+    enable_junk_filter: bool = True,
+    enforce_domain_filter: bool = True,
+) -> tuple[list[dict[str, str]], str | None]:
+    """Apply junk + domain filters; relax domain filter when it removes all hits."""
+    pre_count = len(raw_hits)
+    hits = filter_tavily_hits(raw_hits) if enable_junk_filter else list(raw_hits)
+    if not enforce_domain_filter or not include_domains:
+        return hits, None
+    domain_hits = restrict_hits_to_domains(hits, include_domains=include_domains)
+    if domain_hits:
+        return domain_hits, None
+    if not hits:
+        return hits, None
+    warning = (
+        f"学术域名过滤后无命中（原始 {pre_count} 条，去噪后 {len(hits)} 条），"
+        "已保留去噪结果。"
+    )
+    return hits, warning
+
+
 def build_tavily_search_payload(
     api_key: str,
     query: str,

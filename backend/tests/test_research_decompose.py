@@ -1,4 +1,4 @@
-from app.agents.research_decompose import decompose_research_brief
+from app.agents.research_decompose import decompose_research_brief, is_polluted_search_query
 
 
 MOM_BRIEF = """我要写一个与AI原生MOM有关的文献综述，包括4个方面：
@@ -16,6 +16,17 @@ def test_decompose_mom_four_aspects() -> None:
     assert "多智能体" in topics[2].description
     assert "迁移" in topics[3].description
     assert all(t.search_query for t in topics)
+    assert not is_polluted_search_query(topics[0].search_query)
+    assert topics[0].search_query != topics[1].search_query
+    assert "我要写" not in topics[0].search_query
+
+
+def test_decompose_ignores_polluted_base_query() -> None:
+    polluted = MOM_BRIEF[:200]
+    topics = decompose_research_brief(MOM_BRIEF, base_query=polluted)
+    assert len(topics) == 4
+    assert all(not is_polluted_search_query(t.search_query) for t in topics)
+    assert all("其一" not in t.search_query for t in topics)
 
 
 def test_decompose_single_aspect_returns_empty() -> None:

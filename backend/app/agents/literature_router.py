@@ -1,11 +1,10 @@
 """Literature intent router — session title + search query via LLM JSON."""
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.agents.llm_json import parse_json_object
 from app.llm.base import LLMMessage
 from app.services.llm_service import get_llm
 from app.storage.file_store import is_default_session_title
@@ -21,7 +20,8 @@ search_query 规则：
 - 优先 peer-reviewed paper、survey、systematic review 等学术表述；不要复述用户整段提纲。
 仅输出 JSON。"""
 
-_JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
+SEARCH_QUERY_MAX = 200
+TOPIC_LABEL_MAX = 120
 
 
 @dataclass
@@ -30,36 +30,70 @@ class LiteratureRouterResult:
     search_query: str
 
 
-def _parse_router_json(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    m = _JSON_BLOCK.search(text)
-    if not m:
-        raise ValueError("router returned non-JSON")
-    return json.loads(m.group())
+def clamp_search_query(
+    text: str,
+    *,
+    max_len: int = SEARCH_QUERY_MAX,
+    fallback: str = "",
+) -> str:
+    q = str(text or "").strip()[:max_len]
+    if q:
+        return q
+    fb = str(fallback or "").strip()[:max_len]
+    return fb
 
 
-def _fallback_title(user_message: str) -> str:
+def parse_router_json(raw: str) -> dict[str, Any]:
+    return parse_json_object(raw)
+
+
+# Backward-compatible aliases for internal imports
+_parse_router_json = parse_router_json
+
+
+def fallback_session_title(user_message: str) -> str:
     t = user_message.strip().replace("\n", " ")
     if not t:
         return "新综述"
     return t[:40] + ("…" if len(t) > 40 else "")
 
 
-def _sanitize_session_title(title: str, user_message: str) -> str:
+_fallback_title = fallback_session_title
+
+
+def sanitize_session_title(title: str, user_message: str) -> str:
     t = (title or "").strip().strip("\"'「」『』")
     if not t or is_default_session_title(t):
-        return _fallback_title(user_message)
+        return fallback_session_title(user_message)
     return t[:80]
+
+
+_sanitize_session_title = sanitize_session_title
+
+
+def fallback_router_result(user_message: str) -> LiteratureRouterResult:
+    msg = user_message.strip()
+    return LiteratureRouterResult(
+        session_title=fallback_session_title(msg),
+        search_query=clamp_search_query(msg, fallback=msg),
+    )
+
+
+def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRouterResult:
+    msg = user_message.strip()
+    fallback_q = clamp_search_query(msg, fallback=msg)
+    title = sanitize_session_title(str(data.get("session_title") or ""), msg)
+    search_query = clamp_search_query(
+        str(data.get("search_query") or msg),
+        fallback=fallback_q,
+    )
+    return LiteratureRouterResult(session_title=title, search_query=search_query)
 
 
 async def route_literature(user_message: str) -> LiteratureRouterResult:
     """LLM router for session title and search query; rule-based fallback."""
     msg = user_message.strip()
-    fallback_q = msg[:200] if msg else ""
-    fallback = LiteratureRouterResult(
-        session_title=_fallback_title(msg),
-        search_query=fallback_q,
-    )
+    fallback = fallback_router_result(msg)
     if not msg:
         return fallback
     try:
@@ -70,13 +104,8 @@ async def route_literature(user_message: str) -> LiteratureRouterResult:
             max_tokens=200,
             temperature=0.0,
         )
-        data = _parse_router_json(resp.content or "")
-        title = _sanitize_session_title(
-            str(data.get("session_title") or ""),
-            msg,
-        )
-        search_query = str(data.get("search_query") or msg).strip()[:200] or fallback_q
-        return LiteratureRouterResult(session_title=title, search_query=search_query)
+        data = parse_router_json(resp.content or "")
+        return build_router_result(data, msg)
     except Exception:
         return fallback
 

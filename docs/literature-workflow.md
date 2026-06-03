@@ -180,5 +180,31 @@ SSE：`literature_refine_report`
 
 SSE 推送 `literature_intent` extension，字段含 `intent`、`defer_generate` 等。
 
-会话 `meta.json` 扩展：`initial_query`、`gen_constraints`、`review_versions`、`last_intent`。
+会话 `meta.json` 扩展：`initial_query`、`gen_constraints`、`review_versions`、`last_intent`、`pending_gate`、`gate_resolved`、`resume_mode`。
 语料快照：`sessions/{id}/corpus.json`。
+
+## 澄清门禁（Clarification）
+
+在以下场景暂停当轮，向用户提问并写入 `pending_gate`；用户下一条消息解析后继续或取消：
+
+| kind | 触发 | 用户可 |
+|------|------|--------|
+| `first_turn` | 首轮 brief 过短/歧义（如单独「MOM」） | 补充主题说明 |
+| `search_zero` | Tavily 零命中且无用户 URL | 放宽域名 / 换 query / 取消 |
+| `outline_confirm` | `plan_confirm=true` 且大纲已生成 | 确认撰写 / 修改大纲意图 |
+
+- SSE：`literature_clarification`（含 `kind`）
+- stage：「等待澄清」→ 助手消息为 gate 文案 → `finalize_turn` 保存状态
+- 大纲确认通过后：`resume_mode=generate_only`，跳过检索直接进入撰写
+
+实现：`app/agents/literature_clarification.py`；编排挂接于 `literature_turn.py` / `literature_turn_pipeline.py` / `literature_turn_finalize.py`。
+
+## 后端模块结构
+
+| 模块 | 职责 |
+|------|------|
+| `literature_turn.py` | 会话 setup、意图、理解路由、委托 pipeline / generate |
+| `literature_turn_pipeline.py` | 检索 → 抓取 → 引用 → 结构化 → 大纲 |
+| `literature_turn_generate.py` | 文献问答 / 矩阵 / 综述生成与交付 |
+| `literature_turn_finalize.py` | 语料、meta、文献库、assistant 消息 |
+| `literature_workflow.py` | 兼容 re-export（API 仍 `from literature_workflow import …`） |

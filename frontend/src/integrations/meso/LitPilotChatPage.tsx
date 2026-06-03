@@ -9,46 +9,23 @@ import { useChatLayoutBridge } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { useLiteratureStream } from "@/contexts/LiteratureStreamContext";
 import type { LitPilotMessage } from "@/lib/chatTypes";
-import { mergeThinkIntoTrace } from "@/lib/executionTrace";
+import { chatMessagesToLitPilot } from "@/lib/chatMessageMap";
 import {
   streamHasArtifactPane,
   streamStateWithMatrix,
   streamStateWithReview,
 } from "@/lib/buildArtifactStream";
 import { cloneStreamState } from "@/lib/streamState";
+import { loadLibraryItems } from "@/lib/loadLibraryItems";
 import { LitPilotArtifactSlot } from "./LitPilotArtifactSlot";
 import { stripWorkflowArtifacts } from "./stripWorkflowArtifacts";
-import { libraryApi, sessionsApi, type ChatMessage } from "@/lib/api";
-import { normalizeLibraryItem, type LibraryItem } from "@/lib/libraryTypes";
+import { sessionsApi, type ChatMessage } from "@/lib/api";
+import type { LibraryItem } from "@/lib/libraryTypes";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
-
-function mapStoredMessages(msgs: ChatMessage[]): LitPilotMessage[] {
-  return msgs.map((m, i) => {
-    const meta = m.meta;
-    const failed = meta?.failed_literature;
-    const think = meta?.think || meta?.thinkContent;
-    const trace = mergeThinkIntoTrace(meta?.execution_trace, think);
-    const hasExtras =
-      m.role === "assistant" &&
-      (think || failed?.length || trace);
-    return {
-      id: `hist-${i}`,
-      role: m.role as "user" | "assistant",
-      content: m.content,
-      extras: hasExtras
-        ? {
-            thinkContent: think,
-            failedLiterature: failed,
-            executionTrace: trace,
-          }
-        : undefined,
-    };
-  });
-}
 
 export function LitPilotChatPage() {
   const { setChatLayout } = useChatLayoutBridge();
-  const { activeSessionId } = useChatSession();
+  const { activeSessionId, messages: storedMessages } = useChatSession();
   const {
     streamState,
     liveMessages,
@@ -70,7 +47,6 @@ export function LitPilotChatPage() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(
     null,
   );
-  const { messages: storedMessages } = useChatSession();
 
   useEffect(() => {
     void settingsApiV2
@@ -95,21 +71,7 @@ export function LitPilotChatPage() {
   }, []);
 
   const loadLibrary = useCallback(async () => {
-    try {
-      const data = await libraryApi.items();
-      setLibraryItems(data.items || []);
-    } catch {
-      try {
-        const legacy = await libraryApi.refs();
-        const raw =
-          (legacy.items as Record<string, unknown>[]) ||
-          (legacy.index?.refs as Record<string, unknown>[]) ||
-          [];
-        setLibraryItems(raw.map((r) => normalizeLibraryItem(r)));
-      } catch {
-        /* ignore */
-      }
-    }
+    setLibraryItems(await loadLibraryItems());
   }, []);
 
   const streamDone = streamState.status === "done";
@@ -255,7 +217,7 @@ export function LitPilotChatPage() {
   }, [streamDone, streamError, loadLibrary, activeSessionId, loadSessionArtifacts]);
 
   const historyMessages: LitPilotMessage[] = useMemo(() => {
-    return [...mapStoredMessages(storedMessages), ...liveMessages];
+    return [...chatMessagesToLitPilot(storedMessages), ...liveMessages];
   }, [storedMessages, liveMessages]);
 
   const send = useCallback(async () => {

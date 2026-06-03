@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from app.agents.research_decompose import default_single_sub_topic, decompose_research_brief
+from app.agents.literature_router import TOPIC_LABEL_MAX, clamp_search_query
 from app.schemas.literature_outline import LiteratureOutline, OutlineSection, ResearchSubTopic
 from app.schemas.paper_record import PaperRecord
 
@@ -55,6 +56,19 @@ def build_outline_from_sub_topics(
     )
 
 
+def _outline_topic_label(
+    *,
+    session_title: str,
+    search_query: str,
+    user_message: str,
+) -> str:
+    return clamp_search_query(
+        session_title or search_query or user_message,
+        max_len=TOPIC_LABEL_MAX,
+        fallback=user_message,
+    )
+
+
 def prepare_outline(
     *,
     user_message: str,
@@ -62,7 +76,11 @@ def prepare_outline(
     session_title: str = "",
 ) -> LiteratureOutline:
     sub_topics = decompose_research_brief(user_message, base_query=search_query)
-    topic = (session_title or search_query or user_message).strip()[:120]
+    topic = _outline_topic_label(
+        session_title=session_title,
+        search_query=search_query,
+        user_message=user_message,
+    )
     if not sub_topics:
         sub_topics = [default_single_sub_topic(user_message, search_query)]
     return build_outline_from_sub_topics(
@@ -70,6 +88,70 @@ def prepare_outline(
         sub_topics=sub_topics,
         user_message=user_message,
     )
+
+
+_OUTLINE_GEN_INTENTS = frozenset(
+    {"new_topic", "expand_search", "supplement", "refine_gen", "regen_only"}
+)
+
+
+def should_use_outline_path(
+    outline_mode: str,
+    sub_topic_count: int,
+    intent: str,
+) -> bool:
+    if intent in ("query_corpus", "synthesis_matrix", "manage_library"):
+        return False
+    if outline_mode == "off":
+        return False
+    if outline_mode == "full":
+        return intent in _OUTLINE_GEN_INTENTS
+    return sub_topic_count >= 2 and intent in (
+        "new_topic",
+        "expand_search",
+        "supplement",
+        "regen_only",
+    )
+
+
+def resolve_outline_plan(
+    *,
+    outline_mode: str,
+    intent: str,
+    user_message: str,
+    initial_query: str,
+    search_query: str,
+    session_title: str,
+    stored_outline: LiteratureOutline | None,
+) -> tuple[bool, LiteratureOutline | None, list[ResearchSubTopic]]:
+    """Single decompose pass; build draft outline when outline path is active."""
+    brief = (initial_query or user_message).strip()
+    sub_topics = decompose_research_brief(brief, base_query=search_query)
+    use = should_use_outline_path(
+        outline_mode,
+        len(sub_topics) if sub_topics else 1,
+        intent,
+    )
+    if intent in ("refine_gen", "regen_only") and stored_outline and stored_outline.sections:
+        if outline_mode != "off":
+            return True, stored_outline, list(stored_outline.sub_topics)
+
+    if not use:
+        return False, None, sub_topics
+
+    topic = _outline_topic_label(
+        session_title=session_title,
+        search_query=search_query,
+        user_message=user_message,
+    )
+    if not sub_topics:
+        sub_topics = [default_single_sub_topic(brief, search_query)]
+    outline = build_outline_from_sub_topics(
+        topic=topic,
+        sub_topics=sub_topics,
+        user_message=user_message,
+    )
+    return True, outline, list(outline.sub_topics)
 
 
 def _tokenize(text: str) -> set[str]:

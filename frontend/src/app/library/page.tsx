@@ -5,7 +5,8 @@ import { Spin, message } from "antd";
 import { LibraryDetailPane, type LibraryDetailTab } from "@/components/library/LibraryDetailPane";
 import { LiteratureListPanel } from "@/components/library/LiteratureListPanel";
 import { libraryApi } from "@/lib/api";
-import { normalizeLibraryItem, type LibraryItem } from "@/lib/libraryTypes";
+import { loadLibraryItems } from "@/lib/loadLibraryItems";
+import type { LibraryItem } from "@/lib/libraryTypes";
 
 export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
@@ -17,29 +18,14 @@ export default function LibraryPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await libraryApi.items();
-      const next = data.items || [];
+      const next = await loadLibraryItems();
       setItems(next);
       setSelectedId((prev) => {
         if (prev && next.some((i) => i.id === prev)) return prev;
         return next[0]?.id || null;
       });
     } catch {
-      try {
-        const legacy = await libraryApi.refs();
-        const raw =
-          (legacy.items as Record<string, unknown>[]) ||
-          (legacy.index?.refs as Record<string, unknown>[]) ||
-          [];
-        const next = raw.map((r) => normalizeLibraryItem(r));
-        setItems(next);
-        setSelectedId((prev) => {
-          if (prev && next.some((i) => i.id === prev)) return prev;
-          return next[0]?.id || null;
-        });
-      } catch {
-        message.error("加载文献库失败");
-      }
+      message.error("加载文献库失败");
     } finally {
       setLoading(false);
     }

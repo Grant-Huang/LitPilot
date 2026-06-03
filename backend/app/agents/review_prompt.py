@@ -56,6 +56,10 @@ def default_review_system_prompt_template() -> str:
     return DEFAULT_REVIEW_SYSTEM_PROMPT
 
 
+def citation_format_label(citation_format: str) -> str:
+    return _fmt_label(citation_format)
+
+
 def _fmt_label(citation_format: str) -> str:
     return _CITATION_FORMAT_LABELS.get(citation_format, "APA")
 

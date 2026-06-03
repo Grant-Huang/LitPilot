@@ -2,9 +2,10 @@ import type { StreamState, ToolCallState } from "@meso.ai/ui";
 import type { WorkflowNodeState } from "@meso.ai/types";
 import {
   describeToolAction,
-  formatWebFetchPlainText,
+  describeWorkflowStep,
   isWebFetchCharOnlyPreview,
   previewToolResult,
+  WEB_FETCH_PREFIX,
   webFetchLineMeta,
 } from "@/lib/toolLabels";
 
@@ -55,7 +56,7 @@ export function mergeThinkIntoTrace(
 export type WebFetchLineMeta = {
   articleTitle: string;
   url: string;
-  /** 行首前缀，默认「抓取网页全文：」 */
+  /** 行首前缀，默认与 toolLabels.WEB_FETCH_PREFIX 一致 */
   prefix?: string;
   charCount?: number;
 };
@@ -159,33 +160,11 @@ function workflowWebFetchMeta(
     step.char_count,
   );
   if (!meta) return undefined;
-  return { ...meta, prefix: "抓取网页：" };
+  return { ...meta, prefix: WEB_FETCH_PREFIX };
 }
 
 function workflowTitle(step: SerializedWorkflowStep): string {
-  const label =
-    step.name === "web_fetch"
-      ? "抓取网页"
-      : step.name === "extract_citation" || step.name === "cite_extract"
-        ? "引用抽取"
-        : step.name.replace(/_/g, " ");
-  const wf = workflowWebFetchMeta(step);
-  if (wf) {
-    return `${wf.prefix ?? "抓取网页："}${formatWebFetchPlainText(
-      wf.articleTitle,
-      wf.url,
-      wf.charCount,
-    )}`;
-  }
-  if (step.title) return `${label}：${step.title}`;
-  if (step.url) {
-    try {
-      return `${label}：${new URL(step.url).hostname}`;
-    } catch {
-      return `${label}：${step.url.slice(0, 48)}`;
-    }
-  }
-  return label;
+  return describeWorkflowStep(step);
 }
 
 function workflowPreview(step: SerializedWorkflowStep): string {

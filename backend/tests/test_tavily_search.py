@@ -1,5 +1,6 @@
 from app.agents.tools.tavily_search import (
     ACADEMIC_SEARCH_DOMAINS,
+    apply_literature_hit_filters,
     augment_literature_search_query,
     build_tavily_search_payload,
     filter_tavily_hits,
@@ -76,3 +77,27 @@ def test_normalize_tavily_results_keeps_snippet_short() -> None:
     assert rows[0]["url"] == "https://arxiv.org/abs/2401.00001"
     assert rows[0]["title"] == "Paper"
     assert len(rows[0]["snippet"]) == 800
+
+
+def test_apply_literature_hit_filters_relaxes_empty_domain_filter() -> None:
+    raw = [
+        {
+            "url": "https://example.com/industry-mom-whitepaper",
+            "title": "AI-native MOM reference architecture",
+            "snippet": "",
+        },
+        {
+            "url": "https://research.example.org/manufacturing-knowledge-graph",
+            "title": "Manufacturing knowledge graph interoperability",
+            "snippet": "",
+        },
+    ]
+    hits, warning = apply_literature_hit_filters(
+        raw,
+        include_domains=ACADEMIC_SEARCH_DOMAINS,
+        enable_junk_filter=True,
+        enforce_domain_filter=True,
+    )
+    assert len(hits) == 2
+    assert warning is not None
+    assert "域名过滤" in warning

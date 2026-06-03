@@ -8,10 +8,11 @@ from typing import Any, Literal
 
 from app.agents.literature_router import (
     LiteratureRouterResult,
-    _fallback_title,
-    _parse_router_json,
-    _sanitize_session_title,
+    clamp_search_query,
+    fallback_session_title,
+    parse_router_json,
     route_literature,
+    sanitize_session_title,
 )
 from app.agents.session_corpus import (
     SessionCorpus,
@@ -204,7 +205,7 @@ def detect_intent_rules(
         return LiteratureIntentResult(
             intent="new_topic",
             search_query=msg[:200],
-            session_title=_fallback_title(msg),
+            session_title=fallback_session_title(msg),
             new_urls=urls,
             use_existing_corpus=False,
         )
@@ -213,7 +214,7 @@ def detect_intent_rules(
         new_only = filter_new_urls(corpus, urls)
         return LiteratureIntentResult(
             intent="supplement",
-            search_query=msg[:200] if not new_only else msg[:200],
+            search_query=msg[:200],
             session_title="",
             new_urls=new_only or urls,
             defer_generate=defer,
@@ -296,18 +297,17 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
     msg = user_message.strip()
     fallback = LiteratureIntentResult(
         intent="refine_gen" if msg else "new_topic",
-        search_query=msg[:200],
-        session_title=_fallback_title(msg),
+        search_query=clamp_search_query(msg, fallback=msg),
+        session_title=fallback_session_title(msg),
         gen_directives=msg[:500],
         use_existing_corpus=bool(msg),
     )
     text = (raw or "").strip()
-    m = _JSON_BLOCK.search(text)
-    if not m:
+    if not text:
         return fallback
     try:
-        data = json.loads(m.group())
-    except json.JSONDecodeError:
+        data = parse_router_json(text)
+    except (ValueError, json.JSONDecodeError):
         return fallback
 
     intent = str(data.get("intent") or "refine_gen").strip()
@@ -316,11 +316,14 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
 
     return LiteratureIntentResult(
         intent=intent,  # type: ignore[arg-type]
-        session_title=_sanitize_session_title(
+        session_title=sanitize_session_title(
             str(data.get("session_title") or ""),
             msg,
         ),
-        search_query=str(data.get("search_query") or msg).strip()[:200],
+        search_query=clamp_search_query(
+            str(data.get("search_query") or msg),
+            fallback=clamp_search_query(msg, fallback=msg),
+        ),
         gen_directives=str(data.get("gen_directives") or msg).strip()[:500],
         defer_generate=bool(data.get("defer_generate")),
         skip_tavily=bool(data.get("skip_tavily")),

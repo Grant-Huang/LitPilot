@@ -1,5 +1,5 @@
 import type { StreamState } from "@meso.ai/ui";
-import { describeToolAction } from "@/lib/toolLabels";
+import { describeToolAction, describeWorkflowKind } from "@/lib/toolLabels";
 
 export type FailedLiteratureItem = {
   url: string;
@@ -45,7 +45,7 @@ export function collectFailuresFromStream(
         url: url || node.name || nodeId,
         title: String(meta.title ?? "").trim() || undefined,
         reason: String(meta.error ?? "抓取或处理失败"),
-        kind: node.name === "web_fetch" ? "抓取网页" : node.name,
+        kind: describeWorkflowKind(node.name),
       });
     }
   }

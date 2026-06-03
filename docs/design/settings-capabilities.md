@@ -56,7 +56,7 @@
 ## 个人设置
 
 - `citation_format`：apa / acm
-- `plan_confirm`：大纲/计划确认（预留）
+- `plan_confirm`：开启后在大纲生成完毕时暂停，用户确认后再进入撰写（`resume_mode=generate_only`）；首轮歧义 / 检索零命中也会触发澄清（见工作流文档）
 
 ## runtime 桥接
 

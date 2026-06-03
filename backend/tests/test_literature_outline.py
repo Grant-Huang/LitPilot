@@ -1,4 +1,4 @@
-from app.agents.literature_outline import mount_papers_to_outline, prepare_outline
+from app.agents.literature_outline import mount_papers_to_outline, prepare_outline, resolve_outline_plan
 from app.schemas.paper_record import PaperRecord
 
 
@@ -42,3 +42,21 @@ def test_mount_papers_to_sections() -> None:
     body = [s for s in mounted.sections if s.sub_topic_id]
     assert any("p1" in s.mounted_paper_ids for s in body)
     assert mounted.status == "confirmed"
+
+
+def test_resolve_outline_plan_single_decompose() -> None:
+    brief = """其一，AI原生MOM系统性的定义框架与参考模型。
+其二，异构机器间信任建立的工程方案与制造知识图谱。"""
+    use, outline, sub_topics = resolve_outline_plan(
+        outline_mode="lite",
+        intent="new_topic",
+        user_message=brief,
+        initial_query=brief,
+        search_query="AI-native MOM",
+        session_title="AI MOM",
+        stored_outline=None,
+    )
+    assert use is True
+    assert outline is not None
+    assert len(sub_topics) == 2
+    assert len(outline.sub_topics) == 2

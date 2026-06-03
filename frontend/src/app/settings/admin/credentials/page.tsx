@@ -2,25 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
-import clsx from "clsx";
-import { ApiError } from "@/lib/http";
-import { InlineField, SettingToolbar } from "../_ui";
+import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import {
+  entityFromTestError,
+  errorMessage,
+  formatVerifiedHint,
+  isLlmCredential,
+  mergeById,
+  SettingsErrorMsg,
+  SettingsLoading,
+} from "../../_shared";
 import { settingsApiV2, type SystemCredential } from "@/lib/settingsApiV2";
 
 function mergeCredentialList(items: SystemCredential[], updated: SystemCredential): SystemCredential[] {
-  return items.map((x) => (x.id === updated.id ? { ...x, ...updated } : x));
+  return mergeById(items, updated);
 }
 
 function credentialFromTestError(e: unknown): SystemCredential | null {
-  if (e instanceof ApiError && e.data && typeof e.data === "object") {
-    const cred = (e.data as { credential?: SystemCredential }).credential;
-    if (cred?.id) return cred;
-  }
-  return null;
-}
-
-function isLlmCredential(c: SystemCredential): boolean {
-  return String(c.type || "").startsWith("llm:");
+  return entityFromTestError<SystemCredential>(e, "credential");
 }
 
 function CredentialRow({
@@ -53,11 +52,7 @@ function CredentialRow({
   }, [credential.id]);
 
   useEffect(() => {
-    setStatusHint(
-      credential.last_verified_at
-        ? `最近测试：${new Date(credential.last_verified_at).toLocaleString()}`
-        : "",
-    );
+    setStatusHint(formatVerifiedHint(credential.last_verified_at));
   }, [credential.last_verified_at, credential.status]);
 
   const llmDirty =
@@ -208,7 +203,7 @@ export default function AdminCredentialsPage() {
       const res = await settingsApiV2.listCredentials();
       setItems(res.items || []);
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setMsg(errorMessage(e));
     } finally {
       if (!opts?.quiet) setLoading(false);
     }
@@ -219,16 +214,12 @@ export default function AdminCredentialsPage() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="settings-admin-loading">
-        <Spin size="large" />
-      </div>
-    );
+    return <SettingsLoading />;
   }
 
   return (
     <div className="card settings-section settings-section--compact">
-      {msg ? <div className={clsx("settings-msg", "settings-msg--err")}>{msg}</div> : null}
+      <SettingsErrorMsg msg={msg} />
 
       <div className="settings-cred-list">
         {items.map((c) => (

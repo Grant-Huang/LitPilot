@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeWorkflowKind,
+  describeWorkflowStep,
   formatWebFetchPlainText,
   isWebFetchCharOnlyPreview,
   parseWebFetchCharCountFromOutput,
   resolveWebFetchCharCount,
+  WEB_FETCH_LABEL,
+  WEB_FETCH_PREFIX,
 } from "./toolLabels";
 
 describe("web_fetch char count display", () => {
@@ -31,5 +35,17 @@ describe("web_fetch char count display", () => {
       true,
     );
     expect(isWebFetchCharOnlyPreview("其他说明", undefined)).toBe(false);
+  });
+
+  it("workflow labels match tool labels", () => {
+    expect(describeWorkflowKind("web_fetch")).toBe(WEB_FETCH_LABEL);
+    expect(describeWorkflowKind("cite_extract")).toBe("抽取引用元数据");
+    const title = describeWorkflowStep({
+      name: "web_fetch",
+      title: "Paper A",
+      url: "https://arxiv.org/abs/1",
+    });
+    expect(title.startsWith(WEB_FETCH_PREFIX)).toBe(true);
+    expect(title.includes("Paper A")).toBe(true);
   });
 });

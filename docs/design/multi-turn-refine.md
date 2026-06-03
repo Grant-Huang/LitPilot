@@ -45,6 +45,7 @@
 
 ## SSE 反馈
 
+- `literature_clarification` — 首轮歧义 / 检索零命中 / 大纲确认暂停（`kind`: `first_turn` | `search_zero` | `outline_confirm`）
 - `literature_section_refine` — partial / full  
 - `literature_refine_report` — 缺节、待核实  
-- 聊天 toast — 子主题数、大纲章节数
+- 聊天 toast — 子主题数、大纲章节数、澄清提示

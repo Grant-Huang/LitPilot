@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -17,10 +16,12 @@ from app.agents.agent_settings import (
 )
 from app.agents.literature_router import (
     LiteratureRouterResult,
-    _fallback_title,
-    _parse_router_json,
-    _sanitize_session_title,
+    build_router_result,
+    fallback_router_result,
+    fallback_session_title,
+    parse_router_json,
     route_literature,
+    sanitize_session_title,
 )
 from app.core.think_stream import (
     ThinkAccumulator,
@@ -30,7 +31,6 @@ from app.core.think_stream import (
 from app.llm.base import LLMMessage
 from app.services.llm_service import get_planner_llm
 
-_JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
 _log = logging.getLogger(__name__)
 
 FETCH_NARRATE_EVERY_N = 5
@@ -142,23 +142,15 @@ def should_narrate(checkpoint: str, ctx: PlannerContext) -> bool:
 
 def _extract_router_from_text(text: str, user_message: str) -> LiteratureRouterResult:
     msg = user_message.strip()
-    fallback_q = msg[:200] if msg else ""
-    fallback = LiteratureRouterResult(
-        session_title=_fallback_title(msg),
-        search_query=fallback_q,
-    )
+    fallback = fallback_router_result(msg)
     raw = (text or "").strip()
     if not raw:
         return fallback
-    if not _JSON_BLOCK.search(raw):
-        return fallback
     try:
-        data = _parse_router_json(raw)
+        data = parse_router_json(raw)
     except (ValueError, json.JSONDecodeError):
         return fallback
-    title = _sanitize_session_title(str(data.get("session_title") or ""), msg)
-    search_query = str(data.get("search_query") or msg).strip()[:200] or fallback_q
-    return LiteratureRouterResult(session_title=title, search_query=search_query)
+    return build_router_result(data, msg)
 
 
 async def stream_understanding_and_route(
@@ -176,7 +168,7 @@ async def stream_understanding_and_route(
             "__router_result__",
             {
                 "result": LiteratureRouterResult(
-                    session_title=_fallback_title(""),
+                    session_title=fallback_session_title(""),
                     search_query="",
                 )
             },

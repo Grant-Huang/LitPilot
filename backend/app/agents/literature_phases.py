@@ -23,11 +23,11 @@ from app.agents.parallel_fetch import iter_fetch_sources_parallel
 from app.agents.retry_utils import retry_async
 from app.agents.session_corpus import SessionCorpus, hits_from_urls
 from app.agents.tools.cached_tools import cached_tavily_search
+from app.agents.research_decompose import format_pass_query_label
 from app.agents.tools.tavily_search import (
     ACADEMIC_SEARCH_DOMAINS,
     DEFAULT_EXCLUDE_DOMAINS,
-    filter_tavily_hits,
-    restrict_hits_to_domains,
+    apply_literature_hit_filters,
     normalize_tavily_results,
 )
 from app.agents.url_list import resolve_fetch_display_title
@@ -147,8 +147,9 @@ async def stream_search_phase(
         ):
             yield ev
     elif pass_total > 1:
+        label = format_pass_query_label(query)
         async for ev in emit_system_think_line(
-            f"⟦sys⟧第 {pass_index}/{pass_total} 轮检索：{query[:80]}⟦/sys⟧",
+            f"⟦sys⟧第 {pass_index}/{pass_total} 轮检索：{label}⟦/sys⟧",
             accumulator=think_acc,
         ):
             yield ev
@@ -172,11 +173,19 @@ async def stream_search_phase(
             delay_ms=fetch_retry_delay_ms,
         )
         search_ms = int((time.monotonic() - t0) * 1000)
-        hits = normalize_tavily_results(raw_search)
-        if tavily_enable_junk_filter:
-            hits = filter_tavily_hits(hits)
-        if tavily_enforce_domain_filter:
-            hits = restrict_hits_to_domains(hits, include_domains=include_domains)
+        raw_hits = normalize_tavily_results(raw_search)
+        hits, filter_warning = apply_literature_hit_filters(
+            raw_hits,
+            include_domains=include_domains,
+            enable_junk_filter=tavily_enable_junk_filter,
+            enforce_domain_filter=tavily_enforce_domain_filter,
+        )
+        if filter_warning:
+            async for ev in emit_system_think_line(
+                f"⟦sys⟧{filter_warning}⟦/sys⟧",
+                accumulator=think_acc,
+            ):
+                yield ev
         answer = str(raw_search.get("answer") or "").strip()
 
         if corpus:
@@ -790,7 +799,7 @@ async def stream_outline_phase(
     store.save_outline(session_id, outline.to_dict())
 
     async for ev in emit_system_think_line(
-        f"大纲已确认：{len(outline.sections)} 个章节，"
+        f"大纲已生成：{len(outline.sections)} 个章节，"
         f"{len(outline.sub_topics)} 个子主题。",
         accumulator=think_acc,
     ):

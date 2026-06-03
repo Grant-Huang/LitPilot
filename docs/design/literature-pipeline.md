@@ -52,8 +52,14 @@ Monolithic 路径：整篇 revise 注入上一版 excerpt（6000 字）。
 | 模块 | 路径 |
 |------|------|
 | 编排入口 | `app/agents/literature_turn.py` |
+| 检索管线 | `app/agents/literature_turn_pipeline.py` |
+| 生成与交付 | `app/agents/literature_turn_generate.py` |
+| 回合收尾 | `app/agents/literature_turn_finalize.py` + `literature_turn_context.py` |
+| 工作流图 SSE | `app/agents/literature_turn_graph.py` |
+| 澄清门禁 | `app/agents/literature_clarification.py` |
 | 子主题拆分 | `app/agents/research_decompose.py` |
 | 大纲 | `app/agents/literature_outline.py` |
 | 分章写作 | `app/agents/literature_section_writer.py` |
 | 章节 refine | `app/agents/section_refine.py` |
 | 后处理 | `app/agents/literature_post_refine.py` |
+| 兼容 import | `app/agents/literature_workflow.py`（re-export `stream_literature_turn`） |

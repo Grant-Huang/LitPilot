@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Spin } from "antd";
 import clsx from "clsx";
+import {
+  formatCapabilityParams,
+  resolveCapabilityRefLabel,
+} from "@/lib/capabilityFormat";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
+import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../_shared";
 
 type Overview = Awaited<ReturnType<typeof settingsApiV2.getSystemOverview>>;
 type Capability = Awaited<ReturnType<typeof settingsApiV2.getSystemCapabilities>>["items"][number];
@@ -31,7 +35,7 @@ export default function AdminSettingsPage() {
         setCredentials(cred as Credential[]);
         setInstances(inst as Instance[]);
       })
-      .catch((e: unknown) => setMsg(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,57 +51,29 @@ export default function AdminSettingsPage() {
     const instById = new Map(instances.map((i) => [i.id, i]));
     const capById = new Map(caps.map((c) => [c.capability_id, c]));
 
-    const fmtRef = (capId: string): string => {
-      const cap = capById.get(capId);
-      const ref = cap?.primary_ref as { kind?: string; id?: string } | null;
-      if (!ref) return "未选择";
-      if (ref.kind === "credential") {
-        const c = credById.get(String(ref.id));
-        if (!c) return "凭据不存在";
-        return c.name;
-      }
-      if (ref.kind === "instance") {
-        const i = instById.get(String(ref.id));
-        if (!i) return "实例不存在";
-        return `${i.name} · ${i.model_name}`;
-      }
-      return "未选择";
-    };
-
-    const fmtParams = (capId: string): string => {
-      const cap = capById.get(capId);
-      const p = cap?.params || {};
-      if (capId === "web_search") {
-        return `检索 ${Number(p.tavily_max_results ?? 8)} · 重试 ${Number(p.tavily_retry_count ?? 0)}`;
-      }
-      if (capId === "web_fetch") {
-        return `抓取 ${Number(p.max_fetch_urls ?? 5)} · 并行 ${Number(p.fetch_parallel ?? 3)}`;
-      }
-      if (capId === "orchestrator") {
-        return `${String(p.orchestrator_mode ?? "lite")} · ${Number(p.orchestrator_max_tokens_per_phase ?? 280)} tok`;
-      }
-      return "";
+    const row = (id: string, label: string) => {
+      const cap = capById.get(id);
+      const ref = resolveCapabilityRefLabel(cap, credById, instById);
+      const params = formatCapabilityParams(id, cap?.params);
+      const value = params ? `${ref} · ${params}` : ref;
+      return { id, label, value };
     };
 
     return [
-      { id: "review_main", label: "综述主模型", value: fmtRef("review_main") },
-      { id: "orchestrator", label: "编排模型", value: `${fmtRef("orchestrator")} · ${fmtParams("orchestrator")}` },
-      { id: "web_search", label: "Tavily", value: `${fmtRef("web_search")} · ${fmtParams("web_search")}` },
-      { id: "web_fetch", label: "Jina", value: `${fmtRef("web_fetch")} · ${fmtParams("web_fetch")}` },
+      row("review_main", "综述主模型"),
+      row("orchestrator", "编排模型"),
+      row("web_search", "Tavily"),
+      row("web_fetch", "Jina"),
     ];
   }, [caps, credentials, instances]);
 
   if (loading) {
-    return (
-      <div className="settings-admin-loading">
-        <Spin size="large" />
-      </div>
-    );
+    return <SettingsLoading />;
   }
 
   return (
     <div className="card settings-section settings-section--compact">
-      {msg ? <div className={clsx("settings-msg", "settings-msg--err")}>{msg}</div> : null}
+      <SettingsErrorMsg msg={msg} />
 
       <div className="settings-overview-list">
         {summary.map((row) => (

@@ -32,7 +32,7 @@
 ## SSE 事件（Meso v1.0）
 
 标准：`stage`、`think`、`text`、`artifact`、`tool_call`、`workflow_node`  
-扩展：`literature_intent`、`literature_subtopic_plan`、`literature_outline`、`literature_section_refine` 等
+扩展：`literature_intent`、`literature_clarification`、`literature_subtopic_plan`、`literature_outline`、`literature_section_refine` 等
 
 ## 前端 Artifact 侧栏
 

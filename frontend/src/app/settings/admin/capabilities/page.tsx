@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Spin } from "antd";
-import clsx from "clsx";
 import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import {
+  capabilityRefLabel,
+  capabilityRefOptions,
+} from "@/lib/capabilityFormat";
+import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../../_shared";
 import {
   settingsApiV2,
   type SystemCapability,
@@ -36,33 +40,15 @@ function CapabilityCard({
     setSaving(false);
   }, [cap]);
 
-  const refOptions = useMemo(() => {
-    if (cap.capability_id === "review_main" || cap.capability_id === "orchestrator") {
-      return {
-        kind: "instance",
-        items: instances.map((i) => ({ id: i.id, label: `${i.name} · ${i.provider} · ${i.model_name}` })),
-      };
-    }
-    if (cap.capability_id === "web_search" || cap.capability_id === "web_fetch") {
-      const typePrefix = cap.capability_id === "web_search" ? "tavily" : "jina";
-      return {
-        kind: "credential",
-        items: credentials
-          .filter((c) => String(c.type || "").startsWith(typePrefix))
-          .map((c) => ({ id: c.id, label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置"}` })),
-      };
-    }
-    return { kind: "", items: [] as Array<{ id: string; label: string }> };
-  }, [cap.capability_id, credentials, instances]);
+  const refOptions = useMemo(
+    () => capabilityRefOptions(cap, credentials, instances),
+    [cap, credentials, instances],
+  );
 
   const refLabel =
     refOptions.kind === "instance"
       ? "实例"
-      : cap.capability_id === "web_search"
-        ? "Tavily"
-        : cap.capability_id === "web_fetch"
-          ? "Jina"
-          : "绑定";
+      : capabilityRefLabel(cap.capability_id);
 
   const refPlaceholder =
     refOptions.kind === "instance" ? "选择模型实例…" : `选择${refLabel}凭据…`;
@@ -89,7 +75,7 @@ function CapabilityCard({
       onSaved(saved);
       setMsg("已保存");
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setMsg(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -395,21 +381,17 @@ export default function AdminCapabilitiesPage() {
         setCredentials(credRes.items || []);
         setInstances(instRes.items || []);
       })
-      .catch((e: unknown) => setMsg(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
-    return (
-      <div className="settings-admin-loading">
-        <Spin size="large" />
-      </div>
-    );
+    return <SettingsLoading />;
   }
 
   return (
     <div className="card settings-section settings-section--compact">
-      {msg ? <div className={clsx("settings-msg", "settings-msg--err")}>{msg}</div> : null}
+      <SettingsErrorMsg msg={msg} />
 
       <div className="settings-cap-list">
         {caps

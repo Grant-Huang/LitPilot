@@ -4,7 +4,7 @@
 
 - **@meso.ai/ui**（npm：`@meso.ai/ui` / `@meso.ai/types`）：三栏布局、SSE 流式消息、Artifact、WorkflowTimeline
 - **LitPilot 前端**：会话、文献库、设置页
-- **LitPilot 后端**：`literature_workflow` DAG、文件存储、无 SQL
+- **LitPilot 后端**：`literature_turn` 编排（`literature_turn_pipeline` / `_generate` / `_finalize`）、文件存储、无 SQL
 
 ## 数据目录（`data/`）
 

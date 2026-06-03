@@ -1,26 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Spin } from "antd";
-import clsx from "clsx";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
+import { InlineField } from "../admin/_ui";
+import {
+  errorMessage,
+  SettingsErrorMsg,
+  SettingsLoading,
+  SettingsSuccessMsg,
+} from "../_shared";
 
 type CitationFormat = "apa" | "acm";
-
-function MsgBox({ msg }: { msg: string }) {
-  if (!msg) return null;
-  const ok = msg.startsWith("✅");
-  return (
-    <div className={clsx("settings-msg", ok ? "settings-msg--ok" : "settings-msg--err")} role="status">
-      {msg}
-    </div>
-  );
-}
 
 export default function PersonalSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [msgOk, setMsgOk] = useState(false);
 
   const [citationFormat, setCitationFormat] = useState<CitationFormat>("apa");
   const [planConfirm, setPlanConfirm] = useState(false);
@@ -34,7 +30,10 @@ export default function PersonalSettingsPage() {
         }
         setPlanConfirm(Boolean(p.plan_confirm));
       })
-      .catch((e: unknown) => setMsg(`❌ ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e: unknown) => {
+        setMsgOk(false);
+        setMsg(errorMessage(e));
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -46,9 +45,11 @@ export default function PersonalSettingsPage() {
         citation_format: citationFormat,
         plan_confirm: planConfirm,
       });
-      setMsg("✅ 个人偏好已保存");
+      setMsgOk(true);
+      setMsg("个人偏好已保存");
     } catch (e: unknown) {
-      setMsg(`❌ ${e instanceof Error ? e.message : String(e)}`);
+      setMsgOk(false);
+      setMsg(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -56,8 +57,11 @@ export default function PersonalSettingsPage() {
 
   if (loading) {
     return (
-      <div className="functional-shell" style={{ alignItems: "center", justifyContent: "center", flex: 1 }}>
-        <Spin size="large" />
+      <div
+        className="functional-shell"
+        style={{ alignItems: "center", justifyContent: "center", flex: 1 }}
+      >
+        <SettingsLoading />
       </div>
     );
   }
@@ -72,11 +76,11 @@ export default function PersonalSettingsPage() {
           </p>
         </div>
 
-        <MsgBox msg={msg} />
+        {msgOk ? <SettingsSuccessMsg msg={msg} /> : <SettingsErrorMsg msg={msg} />}
 
-        <div className="settings-field">
-          <label className="label">参考文献格式</label>
+        <InlineField label="参考文献格式" htmlFor="citation-format">
           <select
+            id="citation-format"
             className="input settings-select"
             value={citationFormat}
             onChange={(e) => setCitationFormat(e.target.value as CitationFormat)}
@@ -84,10 +88,10 @@ export default function PersonalSettingsPage() {
             <option value="apa">APA</option>
             <option value="acm">ACM</option>
           </select>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
             影响引用抽取与综述参考文献章节格式。
           </p>
-        </div>
+        </InlineField>
 
         <label className="settings-checkbox-row">
           <input type="checkbox" checked={planConfirm} onChange={(e) => setPlanConfirm(e.target.checked)} />
@@ -96,12 +100,10 @@ export default function PersonalSettingsPage() {
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
           <button type="button" className="btn-primary" onClick={() => void onSave()} disabled={saving}>
-            {saving ? <Spin size="small" /> : null}
-            保存
+            {saving ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
     </div>
   );
 }
-
