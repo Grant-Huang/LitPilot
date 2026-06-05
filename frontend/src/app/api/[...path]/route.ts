@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  buildProxyResponseHeaders,
+  buildUpstreamHeaders,
+} from "@/lib/apiProxy";
 import { getBackendBase } from "@/lib/backendUrl";
 
 /**
@@ -9,19 +13,6 @@ import { getBackendBase } from "@/lib/backendUrl";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const HOP_BY_HOP = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailers",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-  "content-length",
-]);
-
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function proxyRequest(req: NextRequest, context: RouteContext): Promise<NextResponse> {
@@ -30,19 +21,12 @@ async function proxyRequest(req: NextRequest, context: RouteContext): Promise<Ne
   const subpath = path.join("/");
   const target = `${backendBase}/api/${subpath}${req.nextUrl.search}`;
 
-  const headers = new Headers();
-  req.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      headers.set(key, value);
-    }
-  });
-
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   let upstream: Response;
   try {
     upstream = await fetch(target, {
       method: req.method,
-      headers,
+      headers: buildUpstreamHeaders(req),
       body: hasBody ? await req.arrayBuffer() : undefined,
       cache: "no-store",
     });
@@ -54,16 +38,10 @@ async function proxyRequest(req: NextRequest, context: RouteContext): Promise<Ne
     );
   }
 
-  const responseHeaders = new Headers();
-  upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      responseHeaders.set(key, value);
-    }
-  });
-
-  return new NextResponse(upstream.body, {
+  const body = await upstream.arrayBuffer();
+  return new NextResponse(body, {
     status: upstream.status,
-    headers: responseHeaders,
+    headers: buildProxyResponseHeaders(upstream),
   });
 }
 
