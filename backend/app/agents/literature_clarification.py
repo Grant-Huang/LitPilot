@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from app.agents.literature_query_rules import is_mom_ambiguous
-from app.agents.literature_router import clamp_search_query
+from app.agents.literature_router import LiteratureRouterResult, clamp_search_query
 from app.agents.research_decompose import decompose_research_brief, is_polluted_search_query
 from app.agents.url_list import parse_urls_from_text
 
@@ -147,6 +147,19 @@ def router_understanding_sufficient(
     return False
 
 
+def _orchestrator_understanding_sufficient(
+    user_message: str,
+    orchestrator: LiteratureRouterResult,
+) -> bool:
+    msg = (user_message or "").strip()
+    q = (orchestrator.search_query or "").strip()
+    if orchestrator.needs_clarification:
+        return False
+    if router_understanding_sufficient(msg, q):
+        return True
+    return bool(q and not is_polluted_search_query(q) and len(q) >= 10)
+
+
 def detect_first_turn_ambiguity(
     user_message: str,
     *,
@@ -154,6 +167,7 @@ def detect_first_turn_ambiguity(
     user_turns: int,
     intent: str,
     gate_resolved: dict[str, bool],
+    orchestrator: LiteratureRouterResult | None = None,
 ) -> ClarificationGate | None:
     if gate_resolved.get("first_turn"):
         return None
@@ -163,7 +177,20 @@ def detect_first_turn_ambiguity(
     if not msg:
         return None
 
-    if router_understanding_sufficient(msg, search_query):
+    if orchestrator is not None:
+        if _orchestrator_understanding_sufficient(msg, orchestrator):
+            return None
+        if orchestrator.needs_clarification and orchestrator.clarification_questions:
+            return ClarificationGate(
+                kind="first_turn",
+                questions=list(orchestrator.clarification_questions),
+                context={"original_message": msg[:500], "source": "orchestrator"},
+            )
+
+    eff_query = (
+        (orchestrator.search_query if orchestrator else "") or search_query
+    ).strip()
+    if router_understanding_sufficient(msg, eff_query):
         return None
 
     questions: list[str] = []

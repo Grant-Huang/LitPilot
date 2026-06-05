@@ -25,10 +25,11 @@ async def literature_execute(body: LiteratureExecuteBody):
         raise HTTPException(status_code=400, detail="message is required")
 
     store = get_store()
-    session_id = body.session_id
-    if session_id and not store.get_session(session_id):
-        session_id = None
-    if not session_id:
+    session_id = (body.session_id or "").strip() or None
+    if session_id:
+        if not store.get_session(session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+    else:
         meta = store.create_session(title="新综述")
         session_id = meta["id"]
 

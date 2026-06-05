@@ -6,6 +6,8 @@ from app.agents.literature_clarification import (
     resolve_pending_gate,
     router_understanding_sufficient,
 )
+from app.agents.literature_router import LiteratureRouterResult
+from tests.test_research_decompose import MOM_BRIEF
 from app.schemas.literature_outline import LiteratureOutline, OutlineSection, ResearchSubTopic
 
 
@@ -41,6 +43,42 @@ def test_detect_first_turn_skips_when_router_sufficient() -> None:
         gate_resolved={},
     )
     assert gate is None
+
+
+def test_detect_first_turn_skips_mom_brief_with_orchestrator() -> None:
+    gate = detect_first_turn_ambiguity(
+        MOM_BRIEF,
+        search_query=MOM_BRIEF[:200],
+        user_turns=1,
+        intent="new_topic",
+        gate_resolved={},
+        orchestrator=LiteratureRouterResult(
+            session_title="AI原生MOM综述",
+            search_query="AI-native manufacturing operations management survey",
+            needs_clarification=False,
+        ),
+    )
+    assert gate is None
+
+
+def test_detect_first_turn_uses_orchestrator_questions() -> None:
+    gate = detect_first_turn_ambiguity(
+        "MOM",
+        search_query="MOM",
+        user_turns=1,
+        intent="new_topic",
+        gate_resolved={},
+        orchestrator=LiteratureRouterResult(
+            session_title="MOM",
+            search_query="",
+            needs_clarification=True,
+            clarification_questions=[
+                "请说明 MOM 指制造运营管理还是 ML Mixture-of-Memories？",
+            ],
+        ),
+    )
+    assert gate is not None
+    assert "制造运营管理" in gate.questions[0]
 
 
 def test_router_understanding_sufficient_compact_query() -> None:

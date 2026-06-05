@@ -356,8 +356,8 @@ async def stream_literature_turn(
         upsert_stage(execution_trace, "理解研究问题", "done")
 
         search_query_for_plan = (
-            intent.search_query
-            or router_result.search_query.strip()
+            router_result.search_query.strip()
+            or intent.search_query
             or route_message.strip()
         )
 
@@ -389,6 +389,7 @@ async def stream_literature_turn(
             user_turns=user_turns,
             intent=intent.intent,
             gate_resolved=clar_state.resolved,
+            orchestrator=router_result,
         )
         if first_gate:
             finalize_ctx.corpus = corpus

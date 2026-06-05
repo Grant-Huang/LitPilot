@@ -15,12 +15,6 @@ type ExtensionHandler = (
   ctx: HandlerContext,
 ) => void;
 
-const CLARIFICATION_LABELS: Record<string, string> = {
-  first_turn: "请补充研究主题",
-  search_zero: "检索无命中，请选择下一步",
-  outline_confirm: "请确认大纲后继续",
-};
-
 const HANDLERS: Record<string, ExtensionHandler> = {
   literature_intent: (data, ctx) => {
     if (!ctx.isChat) return;
@@ -74,12 +68,6 @@ const HANDLERS: Record<string, ExtensionHandler> = {
     if (mode === "partial" && Array.isArray(titles) && titles.length) {
       message.info(`章节级修订：${titles.join("、")}`);
     }
-  },
-  literature_clarification: (data, ctx) => {
-    if (!ctx.isChat) return;
-    const kind = typeof data?.kind === "string" ? data.kind : "";
-    const label = CLARIFICATION_LABELS[kind];
-    if (label) message.info(label);
   },
   session: (data, ctx) => {
     const sid = data?.session_id;

@@ -18,6 +18,10 @@ import type { LitPilotMessage } from "@/lib/chatTypes";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
 import { persistActiveSession } from "@/lib/sessionStorage";
 import { sessionsApi } from "@/lib/api";
+import {
+  clearClarificationUnreadTitle,
+  setClarificationUnreadTitle,
+} from "@/lib/clarificationTitle";
 
 type LiteratureStreamContextValue = {
   streamState: ReturnType<typeof useSSEStream>["state"];
@@ -49,6 +53,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
   const streamStartedRef = useRef(false);
   const turnSessionRef = useRef<string | null>(null);
+  /** 本轮 SSE 中 extension.session 下发的权威 session_id（可能与发送时不一致） */
+  const streamSessionRef = useRef<string | null>(null);
   const pendingUserTextRef = useRef<string | null>(null);
   const extensionHandledRef = useRef(0);
 
@@ -58,22 +64,21 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!streamStartedRef.current || !(streamDone || streamError)) return;
-    const sid = turnSessionRef.current || activeSessionId;
-    reset();
+    const sid =
+      streamSessionRef.current || activeSessionId || turnSessionRef.current;
     streamStartedRef.current = false;
-    turnSessionRef.current = null;
-    void loadSessions();
-    if (sid) {
-      void handleSelectSession(sid);
-    }
-  }, [
-    streamDone,
-    streamError,
-    reset,
-    loadSessions,
-    activeSessionId,
-    handleSelectSession,
-  ]);
+    void (async () => {
+      try {
+        await loadSessions();
+        if (sid) await handleSelectSession(sid);
+      } finally {
+        reset();
+        turnSessionRef.current = null;
+        streamSessionRef.current = null;
+        setLiveMessages([]);
+      }
+    })();
+  }, [streamDone, streamError, reset, loadSessions, handleSelectSession]);
 
   useEffect(() => {
     const log = streamState.extensionLog;
@@ -85,6 +90,21 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     };
     for (let i = extensionHandledRef.current; i < log.length; i += 1) {
       const ext = log[i];
+      if (ext.payload.name === "session" && streamStartedRef.current) {
+        const sid = (ext.payload.data as Record<string, unknown> | undefined)
+          ?.session_id;
+        if (typeof sid === "string" && sid) {
+          streamSessionRef.current = sid;
+          turnSessionRef.current = sid;
+        }
+      }
+      if (ext.payload.name === "literature_clarification") {
+        const kind = (ext.payload.data as Record<string, unknown> | undefined)
+          ?.kind;
+        setClarificationUnreadTitle(
+          typeof kind === "string" ? kind : undefined,
+        );
+      }
       handleLiteratureExtensionEvent(
         ext.payload.name,
         ext.payload.data as Record<string, unknown> | undefined,
@@ -107,15 +127,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   }, [storedMessages]);
 
   useEffect(() => {
-    if (streaming) return;
+    if (streaming || streamStartedRef.current) return;
     if (turnSessionRef.current && turnSessionRef.current !== activeSessionId) {
       setLiveMessages([]);
     }
   }, [activeSessionId, streaming]);
-
-  useEffect(() => {
-    if (streamDone) setLiveMessages([]);
-  }, [streamDone]);
 
   const send = useCallback(
     async (text: string, fetchUrls: string[]) => {
@@ -132,6 +148,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       }
 
       turnSessionRef.current = sessionId;
+      streamSessionRef.current = sessionId;
+      clearClarificationUnreadTitle();
       pendingUserTextRef.current = trimmed;
       setLiveMessages([
         {
@@ -166,6 +184,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         ]);
         streamStartedRef.current = false;
         turnSessionRef.current = null;
+        streamSessionRef.current = null;
         reset();
       }
     },

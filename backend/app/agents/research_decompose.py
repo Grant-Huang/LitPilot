@@ -68,6 +68,29 @@ def build_subtopic_search_query(
     return core[:200]
 
 
+def _normalize_aspect_enumeration(msg: str) -> str:
+    """Break inline 「。其二」same-line enumerations so aspect regex can split."""
+    text = (msg or "").strip()
+    if not text:
+        return text
+    text = re.sub(
+        r"([：:])\s*(其[一二三四五六七八])",
+        r"\1\n\2",
+        text,
+    )
+    text = re.sub(
+        r"([。；;])\s*(其[二三四五六七八])",
+        r"\1\n\2",
+        text,
+    )
+    text = re.sub(
+        r"([。；;])\s*(第[二三四五六七八])",
+        r"\1\n\2",
+        text,
+    )
+    return text
+
+
 def format_pass_query_label(query: str, *, max_len: int = 80) -> str:
     """Prefer query tail so multi-pass labels differ when prefix is shared."""
     q = (query or "").strip()
@@ -78,7 +101,7 @@ def format_pass_query_label(query: str, *, max_len: int = 80) -> str:
 
 def decompose_research_brief(user_message: str, *, base_query: str = "") -> list[ResearchSubTopic]:
     """Rule-based split for numbered/multi-aspect briefs (其一…其四 / 1. …)."""
-    msg = (user_message or "").strip()
+    msg = _normalize_aspect_enumeration((user_message or "").strip())
     if not msg:
         return []
 

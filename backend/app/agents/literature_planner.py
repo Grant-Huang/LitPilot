@@ -41,10 +41,13 @@ UNDERSTANDING_SYSTEM = """你是文献综述助手的过程解说员与检索路
 1. 用 2–4 句中文（或与用户同语言）说明：研究主题、拟采用的检索思路、应关注的子方向。
    不要编造具体论文标题、作者或 DOI；不要写综述正文。
 2. 最后一行单独输出 JSON（不要 markdown 代码块）：
-{"session_title":"8-24字会话标题","search_query":"≤120字学术检索查询"}
+{"session_title":"8-24字会话标题","search_query":"≤120字学术检索查询","needs_clarification":false,"clarification_questions":[]}
 search_query 须为学术检索式：突出技术主题（如 AI-native MOM、多智能体制造、知识图谱），
 避免「文献综述怎么写」类教程检索；制造 MOM/MES 须与 ML 的 Mixture-of-Memories 区分。
-禁止泛称「新综述」「文献综述」作为 session_title。"""
+禁止泛称「新综述」「文献综述」作为 session_title。
+若用户已给出多 aspect brief 或可检索主题，needs_clarification 必须为 false。
+仅当仍缺关键信息（领域/对象不明、MOM 歧义、无法写出检索式）时设 needs_clarification:true，
+并在 clarification_questions 给出 1–3 条具体追问（勿用泛泛的「请写综述」）。"""
 
 NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 2–4 句话说明：
 - 命中规模与整体相关性

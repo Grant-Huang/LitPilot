@@ -29,6 +29,18 @@ def test_decompose_ignores_polluted_base_query() -> None:
     assert all("其一" not in t.search_query for t in topics)
 
 
+def test_decompose_inline_aspect_same_line() -> None:
+    inline = (
+        "我要写一个与AI原生MOM有关的文献综述，包括4个方面："
+        "其一，AI原生MOM系统性的定义框架与参考模型。"
+        "其二，异构机器间信任建立的工程方案与制造知识图谱。"
+        "其三，多智能体协作、动态知识推理与可组合微服务架构。"
+        "其四，从传统单体MOM向AI原生MOM的渐进式迁移的工程框架。"
+    )
+    topics = decompose_research_brief(inline, base_query="AI-native MOM")
+    assert len(topics) == 4
+
+
 def test_decompose_single_aspect_returns_empty() -> None:
     topics = decompose_research_brief(
         "请综述 transformer 在 NLP 中的应用",

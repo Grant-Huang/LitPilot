@@ -1,7 +1,7 @@
 """Literature intent router — session title + search query via LLM JSON."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.llm_json import parse_json_object
@@ -28,6 +28,8 @@ TOPIC_LABEL_MAX = 120
 class LiteratureRouterResult:
     session_title: str
     search_query: str
+    needs_clarification: bool = False
+    clarification_questions: list[str] = field(default_factory=list)
 
 
 def clamp_search_query(
@@ -87,7 +89,19 @@ def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRo
         str(data.get("search_query") or msg),
         fallback=fallback_q,
     )
-    return LiteratureRouterResult(session_title=title, search_query=search_query)
+    needs_raw = data.get("needs_clarification")
+    needs_clarification = bool(needs_raw) if needs_raw is not None else False
+    questions = [
+        str(q).strip()
+        for q in (data.get("clarification_questions") or [])
+        if str(q).strip()
+    ]
+    return LiteratureRouterResult(
+        session_title=title,
+        search_query=search_query,
+        needs_clarification=needs_clarification,
+        clarification_questions=questions[:6],
+    )
 
 
 async def route_literature(user_message: str) -> LiteratureRouterResult:
