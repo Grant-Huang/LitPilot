@@ -1,0 +1,39 @@
+---
+description: LitPilot 功能页/设置页布局与交互原则（内联编辑、紧凑、少废话）
+globs: frontend/**/*.{tsx,css}
+alwaysApply: true
+---
+
+# LitPilot 页面设计原则
+
+适用于设置页、文献库等功能页（`functional-shell` / `functional-page__*`）。
+
+## 交互
+
+- **能本页完成的，不要弹窗**：编辑、新增、测试均在当前 Tab 内联完成。
+- **按类型展示字段**：只显示该场景需要的项（如 Tavily/Jina 仅 API Key；`llm:*` 才显示 Base URL / Group ID）。
+- **遮罩 Key 放在输入框内**：未编辑时只读显示 `masked_secret`，点击后再输入新 Key；勿在副标题重复一行 Key。
+- **保存 / 测试**：有未保存修改时才能保存；改 Key 后须先保存再测试。
+
+## 布局
+
+- **标签与控件同一行**：使用 `InlineField`（`settings-inline-field`），标签约 68px，控件 `flex: 1`。
+- **标题行聚合信息**：`[标题] [状态 pill] [启用等] [短反馈] … [测试] [保存]`，避免为状态/说明单独占一行。
+- **去掉废话**：Tab 已表达上下文时，不再重复大标题 + 长说明段落。
+- **状态用紧凑 pill**：`SettingStatus`（已通过 / 失败 / 未测试 / 待配置），勿用 emoji 长句占整行。
+- **反馈用短文案**：仅用于「已保存」「请先保存 Key」等操作提示；**测试结果只体现在 status pill**，详情放 pill 的 `title`（悬停），勿再并排显示「测试通过」。
+- **按钮**：操作区用 `btn-sm`；主操作在卡片右上，与标题行对齐。
+
+## 结构与滚动
+
+- **管理员子页**：`admin/layout.tsx` = 固定头（`functional-page__header`）+ 可滚动体（`functional-page__body`）；子页只渲染内容，不要套第二层 `functional-shell`。
+- **列表项**：统一 `settings-cred-row` 卡片样式；列表容器 `settings-cred-list` / `settings-cap-list`。
+- **复用**：优先 `frontend/src/app/settings/admin/_ui.tsx`（`SettingToolbar`、`InlineField`、`SettingStatus`、`feedbackOk`）。
+
+## 反例（避免）
+
+- Modal 仅改 2～3 个字段
+- 标签在上、输入框在下各占一行
+- `type · ***mask · ○ 未测试` 三行副标题
+- 启用 checkbox 紧挨「保存」易被当成「保存勾选」
+- `maxHeight: calc(100vh - …)` 内层滚动导致底部裁切
