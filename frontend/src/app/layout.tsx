@@ -1,15 +1,33 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import "@/styles/meso-platform.css";
 import { Chrome } from "@/components/layout/Chrome";
 import { AntdRegistryProvider } from "./antd-registry";
 
+const geistSans = Geist({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-geist-sans",
+  display: "swap",
+});
+
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-geist-mono",
+  display: "swap",
+});
+
+export const viewport: Viewport = {
+  themeColor: "#0E1633",
+};
+
 export const metadata: Metadata = {
   title: "LitPilot — Literature review, on autopilot",
   description: "Literature review, on autopilot.",
   manifest: "/brand/site.webmanifest",
-  themeColor: "#0E1633",
   icons: {
     icon: [
       { url: "/brand/svg/favicon.svg", type: "image/svg+xml" },
@@ -35,19 +53,11 @@ const themeInitScript = `(function(){var t=localStorage.getItem('meso-theme')||'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html
+      lang="zh"
+      className={`${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="meso-theme litpilot-branded" style={{ height: "100vh", overflow: "hidden" }}>
         <Script id="meso-theme-init" strategy="beforeInteractive">
           {themeInitScript}

@@ -23,7 +23,7 @@ export function LibraryTagEditor({
 }: Props) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const tags = item.tags || [];
+  const tags = useMemo(() => item.tags || [], [item.tags]);
 
   const suggestSet = useMemo(() => {
     const current = new Set(tags.map((t) => t.toLowerCase()));

@@ -5,7 +5,7 @@ export const quickStartPage: HelpPage = {
   title: "快速开始",
   category: "入门",
   summary: "3 分钟完成第一次文献综述",
-  related: ["research-brief", "tavily-search", "artifact-panel"],
+  related: ["research-brief", "tavily-search", "artifact-panel", "tech-stack"],
   body: `# 快速开始
 
 ## 1. 配置 API Key
@@ -211,12 +211,101 @@ export const settingsGuidePage: HelpPage = {
 - **关闭**：直接交付 LLM 原文`,
 };
 
+export const techStackPage: HelpPage = {
+  id: "tech-stack",
+  title: "技术栈说明",
+  category: "参考",
+  summary: "前后端框架、存储与外部服务一览",
+  related: ["settings-guide", "faq"],
+  body: `# 技术栈说明
+
+LitPilot 是基于 [MESO](https://github.com/Grant-Huang/MESO) 三栏交互框架构建的文献综述助手，采用前后端分离、本地文件存储、无数据库架构。
+
+## 总体分层
+
+| 层 | 技术 | 职责 |
+|----|------|------|
+| **UI 框架** | @meso.ai/ui、@meso.ai/types | 三栏布局、SSE 流式消息、Artifact 面板、WorkflowTimeline |
+| **LitPilot 前端** | Next.js 15、React 19 | 会话、文献库、设置、帮助中心 |
+| **LitPilot 后端** | FastAPI、Python 3.11+ | literature_turn 编排、引用抽取、文件存储 |
+| **外部服务** | Tavily、Jina Reader、LLM API | 学术检索、网页抓取、综述生成 |
+
+## 前端
+
+| 组件 | 版本 / 说明 |
+|------|-------------|
+| **Next.js** | 15（App Router，端口 **3002**） |
+| **React** | 19 |
+| **@meso.ai/ui** | MESO 三栏壳层与流式组件 |
+| **Ant Design** | 6.x（Modal、Dropdown 等） |
+| **Tailwind CSS** | 3.x 样式 |
+| **@dagrejs/dagre** | 工作流 DAG 布局 |
+| **Vitest** | 前端单元测试 |
+
+SSE 通过 \`frontend/src/app/api/chat/literature/execute/route.ts\` **流式透传**至后端，避免 Next.js rewrite 缓冲导致界面无输出。
+
+## 后端
+
+| 组件 | 版本 / 说明 |
+|------|-------------|
+| **FastAPI** | REST API + SSE 文献综述流 |
+| **uvicorn** | ASGI 服务（默认端口 **8001**） |
+| **httpx** | 异步 HTTP（Tavily、Jina、LLM 调用） |
+| **OpenAI SDK** | OpenAI 兼容 LLM 客户端 |
+| **BeautifulSoup + lxml** | 网页解析与引用元数据抽取 |
+| **Pydantic v2** | 配置与 Schema 校验 |
+| **filelock** | 本地文件并发写入安全 |
+| **pytest** | 后端单元测试 |
+
+核心编排模块：\`literature_turn_pipeline\` → 检索 → 抓取 → 结构化 → 大纲 → 分章写作 → 后处理 → 交付。
+
+## 存储（无数据库）
+
+所有数据落盘 \`backend/data/\`（可通过 \`LITPILOT_DATA_DIR\` 覆盖）：
+
+| 路径 | 内容 |
+|------|------|
+| \`config/\` | v2 凭据、实例、能力、个人偏好 |
+| \`sessions/{id}/\` | 会话 meta、messages.jsonl、corpus、outline |
+| \`refs/\` | 文献库 index、ref-list.txt |
+| \`artifacts/{id}/\` | 综述 Markdown、综合矩阵等 |
+
+退出菜单仅清除本机 UI 偏好（localStorage），**不删除**服务端文件。
+
+## 外部服务
+
+| 服务 | 用途 | 配置入口 |
+|------|------|----------|
+| **Tavily** | 学术检索 | 管理员配置 → 凭据 / 能力 web_search |
+| **Jina Reader** | 并行抓取论文页面全文 | 凭据 / 能力 web_fetch |
+| **LLM** | 综述生成、大纲、结构化、思考解说 | 凭据 / 实例 / 能力 review_main |
+
+支持的 LLM 提供商：OpenAI、智谱 GLM、阿里云百炼（Qwen）、MiniMax（国内/国际）、Ollama（本地）。
+
+## 通信协议
+
+- **REST**：统一 JSON 响应 \`{ status, data, message }\`
+- **SSE**：Meso v1.0 envelope（\`stage\`、\`think\`、\`text\`、\`artifact\`、\`tool_call\` 等）
+- **扩展事件**：\`literature_intent\`、\`literature_outline\`、\`literature_section_refine\` 等
+
+## 开发与部署
+
+| 项 | 要求 |
+|----|------|
+| Python | 3.11+（推荐 3.13） |
+| Node.js | 18+ |
+| 包管理 | pnpm（前端）、pip + venv（后端） |
+| 启动 | \`scripts/start-dev.sh\` 一键启动前后端 |
+
+更多配置细节见 [[settings-guide|设置导览]]；数据位置与常见问题见 [[faq|常见问题]]。`,
+};
+
 export const faqPage: HelpPage = {
   id: "faq",
   title: "常见问题",
   category: "疑难",
   summary: "检索、生成、修订",
-  related: ["tavily-search", "multi-turn"],
+  related: ["tavily-search", "multi-turn", "tech-stack"],
   body: `# 常见问题
 
 ## 检索结果很少？

@@ -49,7 +49,7 @@ function CredentialRow({
     setGroupId(String(credential.group_id || ""));
     setRowMsg("");
     setStatusHint("");
-  }, [credential.id]);
+  }, [credential.id, credential.base_url, credential.group_id]);
 
   useEffect(() => {
     setStatusHint(formatVerifiedHint(credential.last_verified_at));

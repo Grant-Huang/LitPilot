@@ -7,6 +7,7 @@ import {
   researchBriefPage,
   settingsGuidePage,
   tavilySearchPage,
+  techStackPage,
 } from "./pages";
 
 export const HELP_PAGES: HelpPage[] = [
@@ -16,6 +17,7 @@ export const HELP_PAGES: HelpPage[] = [
   multiTurnPage,
   tavilySearchPage,
   settingsGuidePage,
+  techStackPage,
   faqPage,
 ];
 
