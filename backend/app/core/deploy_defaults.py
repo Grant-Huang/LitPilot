@@ -38,5 +38,21 @@ def deploy_settings() -> dict[str, Any]:
     return dict(settings) if isinstance(settings, dict) else {}
 
 
+def deploy_credentials() -> list[dict[str, Any]]:
+    raw = load_deploy_defaults_raw()
+    items = raw.get("credentials")
+    if not isinstance(items, list):
+        return []
+    return [dict(it) for it in items if isinstance(it, dict) and it.get("id") and it.get("key")]
+
+
+def deploy_instances() -> list[dict[str, Any]]:
+    raw = load_deploy_defaults_raw()
+    items = raw.get("instances")
+    if not isinstance(items, list):
+        return []
+    return [dict(it) for it in items if isinstance(it, dict) and it.get("id") and it.get("key")]
+
+
 def defaults_path() -> Path:
     return _DEFAULTS_PATH
