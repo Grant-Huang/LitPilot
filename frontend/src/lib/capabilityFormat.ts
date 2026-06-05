@@ -49,7 +49,16 @@ export function capabilityLlmModulesTitle(capId: string): string | undefined {
 
 const PROVIDER_CAP_IDS = new Set(["web_search", "web_fetch"]);
 
+const CAPABILITY_TITLES: Partial<Record<string, string>> = {
+  web_search: "网络检索",
+  web_fetch: "网页抓取",
+  literature_source: "文献来源",
+};
+
 export function capabilityDisplayTitle(cap: SystemCapability): string {
+  const mapped = CAPABILITY_TITLES[cap.capability_id];
+  if (mapped) return mapped;
+  if (cap.label?.trim()) return cap.label.trim();
   if (PROVIDER_CAP_IDS.has(cap.capability_id)) {
     return cap.capability_id;
   }
