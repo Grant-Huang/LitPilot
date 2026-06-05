@@ -3,7 +3,7 @@ export type HelpPageId =
   | "research-brief"
   | "artifact-panel"
   | "multi-turn"
-  | "web-search"
+  | "tavily-search"
   | "settings-guide"
   | "clarification"
   | "tech-stack"
