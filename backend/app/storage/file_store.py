@@ -10,8 +10,9 @@ from typing import Any, Optional
 
 from filelock import FileLock
 
-from app.core.config import DATA_DIR
 from app.agents.tools.tavily_search import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
+from app.core.config import DATA_DIR
+from app.core.deploy_defaults import SENSITIVE_SETTING_KEYS, deploy_settings
 
 
 def _utc_now() -> str:
@@ -149,38 +150,134 @@ class FileStore:
             merged["llm_group_id"] = env_map["llm_group_id"]
         return merged
 
-    def _legacy_agent_settings_merged(self) -> dict[str, Any]:
-        """Read legacy agent.json merged with env (migration source only)."""
+    def _pick_legacy_value(
+        self,
+        cfg: dict[str, Any],
+        defaults: dict[str, Any],
+        key: str,
+        *,
+        env_var: str | None = None,
+        fallback: Any = "",
+    ) -> Any:
+        """agent.json > env (secrets only) > deploy.defaults.json > fallback."""
         import os
 
+        raw_cfg = cfg.get(key)
+        if raw_cfg not in (None, ""):
+            return raw_cfg
+        if key in SENSITIVE_SETTING_KEYS:
+            if env_var:
+                return os.getenv(env_var, "") or fallback
+            return fallback
+        raw_default = defaults.get(key)
+        if raw_default not in (None, ""):
+            return raw_default
+        if env_var:
+            env_val = os.getenv(env_var)
+            if env_val not in (None, ""):
+                return env_val
+        return fallback
+
+    def _legacy_agent_settings_merged(self) -> dict[str, Any]:
+        """Read legacy agent.json merged with env secrets and deploy.defaults.json."""
         cfg = self.load_agent_settings()
+        defaults = deploy_settings()
+
         return {
-            "tavily_api_key": cfg.get("tavily_api_key") or os.getenv("TAVILY_API_KEY", ""),
-            "jina_api_key": cfg.get("jina_api_key") or os.getenv("JINA_API_KEY", ""),
-            "llm_provider": cfg.get("llm_provider") or os.getenv("LLM_PROVIDER", "openai"),
-            "llm_api_key": cfg.get("llm_api_key") or os.getenv("OPENAI_API_KEY", ""),
-            "llm_model": cfg.get("llm_model") or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "llm_base_url": cfg.get("llm_base_url") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            "llm_group_id": cfg.get("llm_group_id") or os.getenv("MINIMAX_GROUP_ID", ""),
-            "fetch_parallel": int(cfg.get("fetch_parallel") or 3),
-            "fetch_timeout_sec": float(cfg.get("fetch_timeout_sec") or 45),
-            "tavily_max_results": int(cfg.get("tavily_max_results") or 8),
-            "max_fetch_urls": int(cfg.get("max_fetch_urls") or 5),
-            "literature_source_mode": (cfg.get("literature_source_mode") or "merge"),
-            "tavily_retry_count": int(cfg.get("tavily_retry_count") or 0),
-            "fetch_retry_count": int(cfg.get("fetch_retry_count") or 0),
-            "fetch_retry_delay_ms": int(cfg.get("fetch_retry_delay_ms") or 500),
-            "max_source_chars": int(cfg.get("max_source_chars") or 14_000),
-            "plan_confirm": bool(cfg.get("plan_confirm", False)),
-            "citation_format": (cfg.get("citation_format") or "apa").strip().lower(),
-            "use_llm_planner": bool(cfg.get("use_llm_planner", True)),
-            "orchestrator_mode": (cfg.get("orchestrator_mode") or "lite").strip().lower(),
-            "orchestrator_use_reasoning": bool(cfg.get("orchestrator_use_reasoning", False)),
-            "orchestrator_model": (cfg.get("orchestrator_model") or "").strip(),
-            "orchestrator_max_tokens_per_phase": int(
-                cfg.get("orchestrator_max_tokens_per_phase") or 280
+            "tavily_api_key": self._pick_legacy_value(
+                cfg, defaults, "tavily_api_key", env_var="TAVILY_API_KEY"
             ),
-            "review_system_prompt_template": str(cfg.get("review_system_prompt_template") or ""),
+            "jina_api_key": self._pick_legacy_value(
+                cfg, defaults, "jina_api_key", env_var="JINA_API_KEY"
+            ),
+            "llm_provider": str(
+                self._pick_legacy_value(
+                    cfg, defaults, "llm_provider", env_var="LLM_PROVIDER", fallback="openai"
+                )
+            ),
+            "llm_api_key": self._pick_legacy_value(
+                cfg, defaults, "llm_api_key", env_var="OPENAI_API_KEY"
+            ),
+            "llm_model": str(
+                self._pick_legacy_value(
+                    cfg, defaults, "llm_model", env_var="OPENAI_MODEL", fallback="gpt-4o-mini"
+                )
+            ),
+            "llm_base_url": str(
+                self._pick_legacy_value(
+                    cfg,
+                    defaults,
+                    "llm_base_url",
+                    env_var="OPENAI_BASE_URL",
+                    fallback="https://api.openai.com/v1",
+                )
+            ),
+            "llm_group_id": self._pick_legacy_value(
+                cfg, defaults, "llm_group_id", env_var="MINIMAX_GROUP_ID"
+            ),
+            "fetch_parallel": int(
+                self._pick_legacy_value(cfg, defaults, "fetch_parallel", fallback=3)
+            ),
+            "fetch_timeout_sec": float(
+                self._pick_legacy_value(cfg, defaults, "fetch_timeout_sec", fallback=45)
+            ),
+            "tavily_max_results": int(
+                self._pick_legacy_value(cfg, defaults, "tavily_max_results", fallback=8)
+            ),
+            "max_fetch_urls": int(
+                self._pick_legacy_value(cfg, defaults, "max_fetch_urls", fallback=5)
+            ),
+            "literature_source_mode": str(
+                self._pick_legacy_value(
+                    cfg, defaults, "literature_source_mode", fallback="merge"
+                )
+            ),
+            "tavily_retry_count": int(
+                self._pick_legacy_value(cfg, defaults, "tavily_retry_count", fallback=0)
+            ),
+            "fetch_retry_count": int(
+                self._pick_legacy_value(cfg, defaults, "fetch_retry_count", fallback=0)
+            ),
+            "fetch_retry_delay_ms": int(
+                self._pick_legacy_value(cfg, defaults, "fetch_retry_delay_ms", fallback=500)
+            ),
+            "max_source_chars": int(
+                self._pick_legacy_value(cfg, defaults, "max_source_chars", fallback=14_000)
+            ),
+            "plan_confirm": bool(
+                self._pick_legacy_value(cfg, defaults, "plan_confirm", fallback=False)
+            ),
+            "citation_format": str(
+                self._pick_legacy_value(cfg, defaults, "citation_format", fallback="apa")
+            )
+            .strip()
+            .lower(),
+            "use_llm_planner": bool(
+                self._pick_legacy_value(cfg, defaults, "use_llm_planner", fallback=True)
+            ),
+            "orchestrator_mode": str(
+                self._pick_legacy_value(cfg, defaults, "orchestrator_mode", fallback="lite")
+            )
+            .strip()
+            .lower(),
+            "orchestrator_use_reasoning": bool(
+                self._pick_legacy_value(
+                    cfg, defaults, "orchestrator_use_reasoning", fallback=False
+                )
+            ),
+            "orchestrator_model": str(
+                self._pick_legacy_value(cfg, defaults, "orchestrator_model", fallback="")
+            ).strip(),
+            "orchestrator_max_tokens_per_phase": int(
+                self._pick_legacy_value(
+                    cfg, defaults, "orchestrator_max_tokens_per_phase", fallback=280
+                )
+            ),
+            "review_system_prompt_template": str(
+                self._pick_legacy_value(
+                    cfg, defaults, "review_system_prompt_template", fallback=""
+                )
+            ),
         }
 
     # --- v2 settings helpers ---
@@ -416,11 +513,21 @@ class FileStore:
             primary_ref=None,
             params={"literature_source_mode": str(legacy.get("literature_source_mode") or "merge")},
         )
+        prompt_defaults = deploy_settings()
         cap(
             "prompts",
             "提示词模板",
             primary_ref=None,
-            params={"review_system_prompt_template": str(legacy.get("review_system_prompt_template") or ""), "enable_paper_attributes": True, "outline_mode": "lite", "post_refine_mode": "lite"},
+            params={
+                "review_system_prompt_template": str(
+                    legacy.get("review_system_prompt_template") or ""
+                ),
+                "enable_paper_attributes": bool(
+                    prompt_defaults.get("enable_paper_attributes", True)
+                ),
+                "outline_mode": str(prompt_defaults.get("outline_mode") or "lite"),
+                "post_refine_mode": str(prompt_defaults.get("post_refine_mode") or "lite"),
+            },
         )
 
         if not caps_exists:
@@ -474,6 +581,11 @@ class FileStore:
             if cap_id == "web_fetch" and "max_source_chars" not in merged:
                 merged["max_source_chars"] = 14_000
                 cap_changed = True
+            if cap_id == "prompts" and not str(merged.get("review_system_prompt_template") or "").strip():
+                seeded = str(deploy_settings().get("review_system_prompt_template") or "").strip()
+                if seeded:
+                    merged["review_system_prompt_template"] = seeded
+                    cap_changed = True
             if cap_changed:
                 cap["params"] = merged
                 changed = True
