@@ -5,6 +5,23 @@ export type PersonalPreferences = {
   plan_confirm: boolean;
 };
 
+export type StorageSettings = {
+  backend: string;
+  data_dir: string;
+  tenant_id: string;
+  database_url: string;
+  database_url_source: string;
+  has_auth_token: boolean;
+  masked_auth_token: string;
+  auth_token_source: string;
+  turso_ready: boolean;
+  turso_configured: boolean;
+  admin_has_url: boolean;
+  admin_has_token: boolean;
+  env_has_url: boolean;
+  env_has_token: boolean;
+};
+
 export type SystemOverview = {
   credentials: Array<Record<string, unknown>>;
   instances: Array<Record<string, unknown>>;
@@ -15,6 +32,7 @@ export type SystemOverview = {
     ok: boolean;
     primary_ref: Record<string, unknown> | null;
   }>;
+  storage: StorageSettings;
 };
 
 export type SystemCapability = {
@@ -62,6 +80,12 @@ export const settingsApiV2 = {
       body: JSON.stringify(partial),
     }),
   getSystemOverview: () => apiRequestData<SystemOverview>("/settings/system/overview"),
+  getSystemStorage: () => apiRequestData<StorageSettings>("/settings/system/storage"),
+  saveSystemStorage: (body: { database_url?: string; auth_token?: string }) =>
+    apiRequestData<StorageSettings>("/settings/system/storage", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   getSystemCapabilities: () =>
     apiRequestData<{ items: SystemCapability[] }>("/settings/system/capabilities"),
 

@@ -99,6 +99,10 @@ class FileStore:
     def personal_preferences_path(self) -> Path:
         return self.root / "config" / "personal.preferences.json"
 
+    @property
+    def system_storage_path(self) -> Path:
+        return self.root / "config" / "system.storage.json"
+
     def load_agent_settings(self) -> dict[str, Any]:
         data = _read_json(self.agent_config_path, {})
         if not isinstance(data, dict):
@@ -286,6 +290,84 @@ class FileStore:
         }
 
     # --- v2 settings helpers ---
+    def _config_path_exists(self, path: Path) -> bool:
+        return path.is_file()
+
+    def _write_config_json(self, path: Path, data: Any) -> None:
+        _write_json_atomic(path, data)
+
+    def read_library_db(self) -> dict[str, Any]:
+        path = self.root / "refs" / "library.json"
+        data = _read_json(
+            path,
+            {"version": 1, "next_display_index": 0, "items": {}, "keys": {}},
+        )
+        if not isinstance(data, dict):
+            return {"version": 1, "next_display_index": 0, "items": {}, "keys": {}}
+        return data
+
+    def write_library_db(self, data: dict[str, Any]) -> None:
+        _write_json_atomic(self.root / "refs" / "library.json", data)
+
+    def library_delete_item_files(self, item_id: str) -> None:
+        src = self.root / "sources" / f"{item_id}.md"
+        if src.is_file():
+            src.unlink()
+
+    def read_source_text(self, item_id: str) -> str:
+        path = self.root / "sources" / f"{item_id}.md"
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def write_source_text(self, item_id: str, text: str) -> None:
+        body = (text or "").strip()
+        if not body:
+            return
+        path = self.root / "sources" / f"{item_id}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body[:500_000], encoding="utf-8")
+
+    def save_pdf_bytes(self, filename: str, content: bytes) -> Path:
+        safe = Path(filename).name
+        path = self.root / "pdfs" / safe
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+
+    def tenant_id(self) -> str:
+        return "default"
+
+    def get_storage_settings(self) -> dict[str, Any]:
+        data = _read_json(self.system_storage_path, {})
+        return dict(data) if isinstance(data, dict) else {}
+
+    def save_storage_settings(self, partial: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_storage_settings()
+        for key, value in partial.items():
+            if value is None:
+                continue
+            if key == "auth_token" and str(value).startswith("***"):
+                continue
+            if key == "auth_token" and not str(value).strip():
+                current.pop("auth_token", None)
+                continue
+            current[key] = value
+        current["updated_at"] = _utc_now()
+        _write_json_atomic(self.system_storage_path, current)
+        from app.storage.turso_store import resolve_turso_credentials_merged
+        from app.storage.storage_settings import set_runtime_turso_credentials
+
+        url, token = resolve_turso_credentials_merged(current)
+        if url:
+            set_runtime_turso_credentials(url, token)
+        return self.get_storage_settings_public()
+
+    def get_storage_settings_public(self) -> dict[str, Any]:
+        from app.storage.storage_settings import build_storage_status
+
+        return build_storage_status(self)
+
     def _load_config_list(self, path: Path) -> list[dict[str, Any]]:
         data = _read_json(path, {"items": []})
         if not isinstance(data, dict):
@@ -320,10 +402,10 @@ class FileStore:
 
         Data source: merged legacy agent settings (agent.json + env).
         """
-        creds_exists = self.system_credentials_path.is_file()
-        inst_exists = self.system_instances_path.is_file()
-        caps_exists = self.system_capabilities_path.is_file()
-        prefs_exists = self.personal_preferences_path.is_file()
+        creds_exists = self._config_path_exists(self.system_credentials_path)
+        inst_exists = self._config_path_exists(self.system_instances_path)
+        caps_exists = self._config_path_exists(self.system_capabilities_path)
+        prefs_exists = self._config_path_exists(self.personal_preferences_path)
         if creds_exists and inst_exists and caps_exists and prefs_exists:
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
@@ -561,7 +643,7 @@ class FileStore:
                 "created_at": now,
                 "updated_at": now,
             }
-            _write_json_atomic(self.personal_preferences_path, prefs)
+            self._write_config_json(self.personal_preferences_path, prefs)
 
         self._ensure_capability_param_defaults()
         self._ensure_deploy_catalog()
@@ -964,7 +1046,7 @@ class FileStore:
         out = dict(current)
         out["preferences"] = prefs
         out["updated_at"] = _utc_now()
-        _write_json_atomic(self.personal_preferences_path, out)
+        self._write_config_json(self.personal_preferences_path, out)
         return self.get_personal_preferences()
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -1357,11 +1439,8 @@ class FileStore:
         return self.root / "pdfs" / safe
 
 
-_store: FileStore | None = None
-
-
 def get_store() -> FileStore:
-    global _store
-    if _store is None:
-        _store = FileStore()
-    return _store
+    """Delegate to storage factory (file / turso / hybrid)."""
+    from app.storage.backend import get_store as _factory_get_store
+
+    return _factory_get_store()

@@ -216,6 +216,17 @@ export const settingsGuidePage: HelpPage = {
 | **实例** | 主写作模型、编排模型及对应凭据 |
 | **能力** | \`web_search\`、\`web_fetch\`、\`literature_source\`、编排模式等运行时参数 |
 | **Prompts** | 综述 System Prompt、文献结构化、大纲模式、后处理模式 |
+| **概览 · 存储** | 持久化后端状态（file / turso）、Turso Database URL 与 Auth Token（敏感项，存服务端） |
+
+### Turso 存储（概览页）
+
+| 项 | 说明 |
+|----|------|
+| **持久化状态** | 显示当前 \`LITPILOT_STORAGE_BACKEND\` 与 Turso 是否已就绪 |
+| **Database URL** | \`libsql://...\`；管理员保存可覆盖 env |
+| **Auth Token** | 仅服务端保存，界面显示 \`***\` 尾号；留空提交表示不修改 |
+
+**环境变量分工**：Vercel 后端 Dashboard 配置 Turso 三项（冷启动锚点）；本地开发在项目根 <code>.env</code> 填写相同键名（已 gitignore，勿提交）。概览页用于核对状态与运行期覆盖，不能单独替代 env。
 
 ### 大纲模式（Prompts）
 
@@ -328,7 +339,10 @@ export const faqPage: HelpPage = {
 
 ## 数据存在哪？
 
-本地 \`backend/data/\`（可用 \`LITPILOT_DATA_DIR\` 覆盖）：会话、文献库、综述 artifact。侧边栏 **退出** 仅清本机 UI 偏好（localStorage），**不删除** 服务端文件。Vercel 部署需注意无持久磁盘时数据不跨实例保留。`,
+- **Vercel / 生产（推荐）**：会话、文献库、管理员配置等写入 **Turso**。在后端项目 Dashboard 配置 \`LITPILOT_STORAGE_BACKEND=turso\`、\`TURSO_DATABASE_URL\`、\`TURSO_AUTH_TOKEN\`（冷启动锚点）；概览页可核对或运行期覆盖。
+- **本地开发**：默认 \`backend/data/\`（\`file\` 模式）；或在项目根 \`.env\`（gitignore）启用 Turso，键名与 Vercel 一致。
+
+侧边栏 **退出** 仅清本机 UI 偏好（localStorage），**不删除** 服务端数据。`,
 };
 
 export const techStackPage: HelpPage = {
@@ -337,7 +351,7 @@ export const techStackPage: HelpPage = {
   category: "参考",
   summary: "前后端框架、存储、SSE 与部署",
   related: ["settings-guide", "faq"],
-  body: `LitPilot 基于 [MESO](https://github.com/Grant-Huang/MESO) 三栏交互框架，前后端分离、本地文件存储、无传统数据库。
+  body: `LitPilot 基于 [MESO](https://github.com/Grant-Huang/MESO) 三栏交互框架，前后端分离。生产环境推荐 **Turso** 持久化；本地开发可用文件目录。
 
 ## 总体分层
 
@@ -371,13 +385,29 @@ SSE 经 \`frontend/src/app/api/chat/literature/execute/route.ts\` **流式透传
 
 核心模块：\`literature_turn\` → \`literature_turn_pipeline\`（检索→抓取→引用→结构化→大纲）→ \`literature_turn_generate\`（分章写作）→ \`literature_turn_finalize\`（交付与澄清暂停）。
 
-## 存储（无数据库）
+## 存储
+
+### Turso（Vercel / 生产推荐）
+
+| 环境变量 | 说明 |
+|----------|------|
+| \`LITPILOT_STORAGE_BACKEND\` | \`turso\`（或 \`hybrid\`） |
+| \`TURSO_DATABASE_URL\` | Turso libsql URL |
+| \`TURSO_AUTH_TOKEN\` | 访问令牌（仅后端） |
+| \`LITPILOT_TENANT_ID\` | 可选，多租户 ID（默认 \`default\`） |
+
+| **配置来源** | Vercel / 本地 \`.env\` 为冷启动锚点；概览页为运行期覆盖 |
+| **本地 \`.env\`** | 项目根、已 gitignore；与 Vercel 键名相同，便于联调 |
+
+管理员 **概览** 页可保存 URL / Token 覆盖项；凭据、实例、能力等业务配置在 Turso 模式下同样写入 Turso。
+
+### 本地文件（\`LITPILOT_STORAGE_BACKEND=file\`）
 
 数据目录 \`backend/data/\`（\`LITPILOT_DATA_DIR\` 可覆盖）：
 
 | 路径 | 内容 |
 |------|------|
-| \`config/\` | v2 凭据、实例、能力、个人偏好 |
+| \`config/\` | v2 凭据、实例、能力、个人偏好、\`system.storage.json\` |
 | \`sessions/{id}/\` | meta、messages.jsonl、corpus、outline |
 | \`refs/\` | 文献库 |
 | \`artifacts/{id}/\` | 综述 Markdown、矩阵等 |

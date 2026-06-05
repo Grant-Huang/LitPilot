@@ -12,7 +12,7 @@ from app.core.deploy_defaults import (
     defaults_path,
 )
 from app.main import app
-from app.storage import file_store
+from app.storage import backend as storage_backend
 from app.storage.file_store import FileStore
 
 
@@ -51,7 +51,7 @@ def store(tmp_path: Path) -> FileStore:
 
 @pytest.fixture
 def client(store: FileStore, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(file_store, "_store", store)
+    monkeypatch.setattr(storage_backend, "_store", store)
     return TestClient(app)
 
 

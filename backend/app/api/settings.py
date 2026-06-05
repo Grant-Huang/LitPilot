@@ -248,8 +248,35 @@ async def get_system_overview():
             "credentials": [_public_credential(c) for c in creds],
             "instances": [_public_instance(i) for i in instances],
             "capabilities": cap_health,
+            "storage": store.get_storage_settings_public(),
         }
     )
+
+
+class StorageSettingsUpdateBody(BaseModel):
+    database_url: str | None = None
+    auth_token: str | None = None
+
+
+@router.get("/system/storage")
+async def get_system_storage():
+    store = get_store()
+    return ok(store.get_storage_settings_public())
+
+
+@router.put("/system/storage")
+async def update_system_storage(body: StorageSettingsUpdateBody):
+    store = get_store()
+    partial = body.model_dump(exclude_none=True)
+    if not partial:
+        return err("无有效更新字段")
+    if "database_url" in partial:
+        url = str(partial["database_url"] or "").strip()
+        if url and not url.startswith(("libsql://", "https://", "http://")):
+            return err("database_url 须以 libsql:// 或 https:// 开头")
+        partial["database_url"] = url
+    saved = store.save_storage_settings(partial)
+    return ok(saved, message="存储配置已保存")
 
 
 # -------------------- system credentials --------------------

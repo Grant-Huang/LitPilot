@@ -32,10 +32,10 @@ class LibraryStore:
         return self.root / "refs" / "library.json"
 
     def _read_db(self) -> dict[str, Any]:
-        return _read_json(self.db_path, {"version": 1, "next_display_index": 0, "items": {}, "keys": {}})
+        return self.fs.read_library_db()
 
     def _write_db(self, data: dict[str, Any]) -> None:
-        _write_json_atomic(self.db_path, data)
+        self.fs.write_library_db(data)
 
     def _with_lock(self, fn):
         lock = self.db_path.with_suffix(".library.lock")
@@ -122,8 +122,7 @@ class LibraryStore:
         body = (text or "").strip()
         if not body:
             return self.get_item(item_id)
-        path = self.root / "sources" / f"{item_id}.md"
-        path.write_text(body[:500_000], encoding="utf-8")
+        self.fs.write_source_text(item_id, body)
         patch = {
             "full_text": {
                 "kind": "markdown",
@@ -149,10 +148,7 @@ class LibraryStore:
         return self._with_lock(_op)
 
     def read_full_text(self, item_id: str) -> str:
-        path = self.root / "sources" / f"{item_id}.md"
-        if not path.is_file():
-            return ""
-        return path.read_text(encoding="utf-8")
+        return self.fs.read_source_text(item_id)
 
     def link_pdf(self, item_id: str, filename: str) -> Optional[dict[str, Any]]:
         patch = {
@@ -257,9 +253,7 @@ class LibraryStore:
             k = item.get("canonical_key")
             if k and keys.get(k) == item_id:
                 keys.pop(k, None)
-            src = self.root / "sources" / f"{item_id}.md"
-            if src.is_file():
-                src.unlink()
+            self.fs.library_delete_item_files(item_id)
             return True
 
         return self._with_lock(_op)

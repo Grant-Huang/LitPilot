@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.storage import file_store
+from app.storage import backend as storage_backend
 from app.storage.file_store import (
     DEFAULT_ORCHESTRATOR_MODEL,
     DEFAULT_REVIEW_MODEL,
@@ -21,8 +21,14 @@ def store(tmp_path: Path) -> FileStore:
 
 @pytest.fixture
 def client(store: FileStore, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from app.storage.storage_settings import clear_runtime_turso_credentials
+
     # Force API to use the temp FileStore (avoids touching real data dir).
-    monkeypatch.setattr(file_store, "_store", store)
+    monkeypatch.setattr(storage_backend, "_store", store)
+    monkeypatch.setenv("LITPILOT_STORAGE_BACKEND", "file")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    clear_runtime_turso_credentials()
     return TestClient(app)
 
 
@@ -35,6 +41,8 @@ def test_system_overview_triggers_migration(client: TestClient, store: FileStore
     assert "credentials" in data
     assert "instances" in data
     assert "capabilities" in data
+    assert "storage" in data
+    assert data["storage"]["backend"] == "file"
 
     # v2 files are created on first access
     assert store.system_credentials_path.is_file()
@@ -132,4 +140,33 @@ def test_system_capability_single_card_save(client: TestClient) -> None:
     fetch = next(x for x in items3 if x.get("capability_id") == "web_fetch")
     assert fetch["params"]["max_fetch_urls"] == 9
     assert fetch["params"]["fetch_parallel"] == 2
+
+
+def test_system_storage_get_and_save(client: TestClient, store: FileStore) -> None:
+    res = client.get("/api/settings/system/storage")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["backend"] == "file"
+    assert "turso_ready" in data
+
+    save = client.put(
+        "/api/settings/system/storage",
+        json={
+            "database_url": "libsql://test-db.turso.io",
+            "auth_token": "secret-token-value",
+        },
+    )
+    assert save.status_code == 200, save.text
+    saved = save.json()["data"]
+    assert saved["database_url"] == "libsql://test-db.turso.io"
+    assert saved["has_auth_token"] is True
+    assert saved["masked_auth_token"].endswith("alue")
+    assert store.system_storage_path.is_file()
+
+    keep = client.put(
+        "/api/settings/system/storage",
+        json={"database_url": "libsql://test-db.turso.io"},
+    )
+    assert keep.status_code == 200
+    assert keep.json()["data"]["has_auth_token"] is True
 
