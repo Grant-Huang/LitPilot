@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.storage import file_store
-from app.storage.file_store import FileStore
+from app.storage.file_store import (
+    DEFAULT_ORCHESTRATOR_MODEL,
+    DEFAULT_REVIEW_MODEL,
+    FileStore,
+)
 
 
 @pytest.fixture
@@ -37,6 +41,36 @@ def test_system_overview_triggers_migration(client: TestClient, store: FileStore
     assert store.system_instances_path.is_file()
     assert store.system_capabilities_path.is_file()
     assert store.personal_preferences_path.is_file()
+
+
+def test_migration_creates_review_and_orchestrator_instances(
+    client: TestClient,
+    store: FileStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "minimax_cn")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    client.get("/api/settings/system/overview")
+
+    by_name = {i["name"]: i for i in store.list_system_instances()}
+    assert set(by_name) == {"review-main", "orchestrator"}
+    assert by_name["review-main"]["model_name"] == DEFAULT_REVIEW_MODEL
+    assert by_name["orchestrator"]["model_name"] == DEFAULT_ORCHESTRATOR_MODEL
+
+
+def test_ensure_default_instances_backfills_orchestrator(store: FileStore) -> None:
+    store.ensure_settings_v2_migrated()
+    instances = store.list_system_instances()
+    review = next(i for i in instances if i.get("name") == "review-main")
+    review["model_name"] = "MiniMax-M2.7"
+    store.save_system_instances([review])
+
+    store.ensure_settings_v2_migrated()
+
+    by_name = {i["name"]: i for i in store.list_system_instances()}
+    assert by_name["review-main"]["model_name"] == DEFAULT_REVIEW_MODEL
+    assert by_name["orchestrator"]["model_name"] == DEFAULT_ORCHESTRATOR_MODEL
 
 
 def test_personal_preferences_roundtrip(client: TestClient) -> None:
