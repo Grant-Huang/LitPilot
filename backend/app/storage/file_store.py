@@ -12,7 +12,12 @@ from filelock import FileLock
 
 from app.agents.tools.tavily_search import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 from app.core.config import DATA_DIR
-from app.core.deploy_defaults import SENSITIVE_SETTING_KEYS, deploy_settings
+from app.core.deploy_defaults import (
+    SENSITIVE_SETTING_KEYS,
+    deploy_credentials,
+    deploy_instances,
+    deploy_settings,
+)
 
 
 def _utc_now() -> str:
@@ -322,6 +327,7 @@ class FileStore:
         if creds_exists and inst_exists and caps_exists and prefs_exists:
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
+            self._ensure_deploy_catalog()
             return
 
         legacy = self._legacy_agent_settings_merged()
@@ -331,10 +337,16 @@ class FileStore:
         credentials: list[dict[str, Any]] = []
         cred_by_key: dict[str, str] = {}
 
+        def _template_cred_id(key: str) -> str | None:
+            for tpl in deploy_credentials():
+                if str(tpl.get("key") or "") == key:
+                    return str(tpl.get("id") or "") or None
+            return None
+
         def add_cred(*, key: str, type_: str, name: str, secret: str, extra: dict[str, Any] | None = None) -> None:
             if key in cred_by_key:
                 return
-            cid = uuid.uuid4().hex
+            cid = _template_cred_id(key) or uuid.uuid4().hex
             cred_by_key[key] = cid
             item: dict[str, Any] = {
                 "id": cid,
@@ -382,10 +394,16 @@ class FileStore:
         instances: list[dict[str, Any]] = []
         inst_by_key: dict[str, str] = {}
 
+        def _template_inst_id(key: str) -> str | None:
+            for tpl in deploy_instances():
+                if str(tpl.get("key") or "") == key:
+                    return str(tpl.get("id") or "") or None
+            return None
+
         def add_instance(*, key: str, name: str, provider: str, credential_id: str, model_name: str, default_params: dict[str, Any] | None = None) -> None:
             if key in inst_by_key:
                 return
-            iid = uuid.uuid4().hex
+            iid = _template_inst_id(key) or uuid.uuid4().hex
             inst_by_key[key] = iid
             instances.append(
                 {
@@ -546,6 +564,245 @@ class FileStore:
             _write_json_atomic(self.personal_preferences_path, prefs)
 
         self._ensure_capability_param_defaults()
+        self._ensure_deploy_catalog()
+
+    def _ensure_deploy_catalog(self) -> None:
+        """Align credentials/instances/capability refs with deploy.defaults.json stable IDs."""
+        cred_templates = deploy_credentials()
+        inst_templates = deploy_instances()
+        if not cred_templates and not inst_templates:
+            return
+
+        legacy = self._legacy_agent_settings_merged()
+        llm_provider = str(
+            legacy.get("llm_provider")
+            or deploy_settings().get("llm_provider")
+            or "openai"
+        )
+        now = _utc_now()
+
+        cred_id_remap: dict[str, str] = {}
+        inst_id_remap: dict[str, str] = {}
+        cred_by_key: dict[str, str] = {}
+        inst_by_key: dict[str, str] = {}
+
+        credentials = (
+            self._load_config_list(self.system_credentials_path)
+            if self.system_credentials_path.is_file()
+            else []
+        )
+        instances = (
+            self._load_config_list(self.system_instances_path)
+            if self.system_instances_path.is_file()
+            else []
+        )
+        caps = (
+            self._load_config_list(self.system_capabilities_path)
+            if self.system_capabilities_path.is_file()
+            else []
+        )
+
+        def secret_for_key(key: str) -> str:
+            if key == "tavily":
+                return str(legacy.get("tavily_api_key") or "")
+            if key == "jina":
+                return str(legacy.get("jina_api_key") or "")
+            if key == "llm_primary":
+                return str(legacy.get("llm_api_key") or "")
+            return ""
+
+        changed_creds = False
+        for tpl in cred_templates:
+            stable_id = str(tpl["id"])
+            key = str(tpl["key"])
+            cred_by_key[key] = stable_id
+            name = str(tpl.get("name") or key)
+            type_ = str(tpl.get("type") or "")
+            if type_.startswith("llm:"):
+                type_ = f"llm:{llm_provider}"
+
+            match_idx: int | None = None
+            for idx, cred in enumerate(credentials):
+                if str(cred.get("id") or "") == stable_id:
+                    match_idx = idx
+                    break
+            if match_idx is None:
+                for idx, cred in enumerate(credentials):
+                    if str(cred.get("name") or "") == name:
+                        match_idx = idx
+                        old_id = str(credentials[idx].get("id") or "")
+                        if old_id and old_id != stable_id:
+                            cred_id_remap[old_id] = stable_id
+                        break
+            if match_idx is None and key == "llm_primary":
+                for idx, cred in enumerate(credentials):
+                    if str(cred.get("type") or "").startswith("llm:"):
+                        match_idx = idx
+                        old_id = str(credentials[idx].get("id") or "")
+                        if old_id and old_id != stable_id:
+                            cred_id_remap[old_id] = stable_id
+                        break
+
+            secret = secret_for_key(key)
+            if match_idx is not None:
+                cred = credentials[match_idx]
+                if str(cred.get("id") or "") != stable_id:
+                    cred["id"] = stable_id
+                    changed_creds = True
+                if type_ and str(cred.get("type") or "") != type_:
+                    cred["type"] = type_
+                    changed_creds = True
+                if not str(cred.get("name") or ""):
+                    cred["name"] = name
+                    changed_creds = True
+                if secret and not str(cred.get("secret") or ""):
+                    cred["secret"] = secret
+                    cred["has_secret"] = True
+                    changed_creds = True
+                if tpl.get("base_url") and not str(cred.get("base_url") or ""):
+                    cred["base_url"] = str(tpl.get("base_url") or "")
+                    changed_creds = True
+                group_id = str(tpl.get("group_id") or "") or str(legacy.get("llm_group_id") or "")
+                if group_id and not str(cred.get("group_id") or ""):
+                    cred["group_id"] = group_id
+                    changed_creds = True
+                cred.setdefault("status", "unknown")
+                cred.setdefault("created_at", now)
+                if changed_creds:
+                    cred["updated_at"] = now
+            else:
+                extra: dict[str, Any] = {}
+                if tpl.get("base_url"):
+                    extra["base_url"] = str(tpl["base_url"])
+                group_id = str(tpl.get("group_id") or "") or str(legacy.get("llm_group_id") or "")
+                if group_id:
+                    extra["group_id"] = group_id
+                credentials.append(
+                    {
+                        "id": stable_id,
+                        "type": type_,
+                        "name": name,
+                        "has_secret": bool(secret),
+                        "secret": secret,
+                        **extra,
+                        "created_at": now,
+                        "updated_at": now,
+                        "status": "unknown",
+                        "last_verified_at": None,
+                    }
+                )
+                changed_creds = True
+
+        changed_insts = False
+        for inst in instances:
+            old_cid = str(inst.get("credential_id") or "")
+            if old_cid in cred_id_remap:
+                inst["credential_id"] = cred_id_remap[old_cid]
+                inst["updated_at"] = now
+                changed_insts = True
+
+        for tpl in inst_templates:
+            stable_id = str(tpl["id"])
+            key = str(tpl["key"])
+            inst_by_key[key] = stable_id
+            name = str(tpl.get("name") or key)
+            cred_key = str(tpl.get("credential_key") or "llm_primary")
+            target_cred_id = cred_by_key.get(cred_key, "")
+            model_default = str(tpl.get("model_name") or "")
+
+            match_idx: int | None = None
+            for idx, inst in enumerate(instances):
+                if str(inst.get("id") or "") == stable_id:
+                    match_idx = idx
+                    break
+            if match_idx is None:
+                for idx, inst in enumerate(instances):
+                    if str(inst.get("name") or "") == name:
+                        match_idx = idx
+                        old_id = str(instances[idx].get("id") or "")
+                        if old_id and old_id != stable_id:
+                            inst_id_remap[old_id] = stable_id
+                        break
+
+            if match_idx is not None:
+                inst = instances[match_idx]
+                if str(inst.get("id") or "") != stable_id:
+                    inst["id"] = stable_id
+                    changed_insts = True
+                if target_cred_id and not str(inst.get("credential_id") or ""):
+                    inst["credential_id"] = target_cred_id
+                    changed_insts = True
+                elif target_cred_id and str(inst.get("credential_id") or "") in cred_id_remap:
+                    inst["credential_id"] = cred_id_remap[str(inst.get("credential_id"))]
+                    changed_insts = True
+                if model_default and not str(inst.get("model_name") or "").strip():
+                    inst["model_name"] = model_default
+                    changed_insts = True
+                if not str(inst.get("provider") or ""):
+                    inst["provider"] = llm_provider
+                    changed_insts = True
+                if changed_insts:
+                    inst["updated_at"] = now
+            else:
+                instances.append(
+                    {
+                        "id": stable_id,
+                        "name": name,
+                        "provider": llm_provider,
+                        "credential_id": target_cred_id,
+                        "model_name": model_default or DEFAULT_REVIEW_MODEL,
+                        "default_params": {},
+                        "created_at": now,
+                        "updated_at": now,
+                        "status": "unknown",
+                        "last_verified_at": None,
+                    }
+                )
+                changed_insts = True
+
+        changed_caps = False
+        cap_inst_by_capability = {
+            "review_main": inst_by_key.get("review_main"),
+            "orchestrator": inst_by_key.get("orchestrator"),
+        }
+        cap_cred_by_capability = {
+            "web_search": cred_by_key.get("tavily"),
+            "web_fetch": cred_by_key.get("jina"),
+        }
+        for cap in caps:
+            cap_id = str(cap.get("capability_id") or "")
+            ref = cap.get("primary_ref")
+            if not isinstance(ref, dict):
+                continue
+            kind = str(ref.get("kind") or "")
+            rid = str(ref.get("id") or "")
+            if kind == "instance" and rid in inst_id_remap:
+                ref["id"] = inst_id_remap[rid]
+                cap["updated_at"] = now
+                changed_caps = True
+            elif kind == "credential" and rid in cred_id_remap:
+                ref["id"] = cred_id_remap[rid]
+                cap["updated_at"] = now
+                changed_caps = True
+            elif cap_id in cap_inst_by_capability and kind == "instance":
+                want = cap_inst_by_capability[cap_id]
+                if want and rid != want:
+                    ref["id"] = want
+                    cap["updated_at"] = now
+                    changed_caps = True
+            elif cap_id in cap_cred_by_capability and kind == "credential":
+                want = cap_cred_by_capability[cap_id]
+                if want and rid != want:
+                    ref["id"] = want
+                    cap["updated_at"] = now
+                    changed_caps = True
+
+        if changed_creds:
+            self._save_config_list(self.system_credentials_path, credentials)
+        if changed_insts:
+            self._save_config_list(self.system_instances_path, instances)
+        if changed_caps:
+            self._save_config_list(self.system_capabilities_path, caps)
 
     def _ensure_capability_param_defaults(self) -> None:
         """Backfill new capability params on existing v2 installs."""
@@ -621,7 +878,11 @@ class FileStore:
 
         if "orchestrator" not in by_name and primary_cred_id:
             now = _utc_now()
-            orch_id = uuid.uuid4().hex
+            orch_tpl = next(
+                (t for t in deploy_instances() if str(t.get("key") or "") == "orchestrator"),
+                None,
+            )
+            orch_id = str(orch_tpl.get("id") or "") if orch_tpl else uuid.uuid4().hex
             orch_model = (
                 str(legacy.get("orchestrator_model") or "").strip()
                 or DEFAULT_ORCHESTRATOR_MODEL
