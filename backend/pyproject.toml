@@ -17,5 +17,11 @@ dependencies = [
     "filelock==3.16.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+]
+
 [tool.vercel]
 entrypoint = "app.main:app"

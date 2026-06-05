@@ -360,25 +360,6 @@ async def stream_literature_turn(
             or router_result.search_query.strip()
             or route_message.strip()
         )
-        first_gate = detect_first_turn_ambiguity(
-            route_message,
-            search_query=search_query_for_plan,
-            user_turns=user_turns,
-            intent=intent.intent,
-            gate_resolved=clar_state.resolved,
-        )
-        if first_gate:
-            finalize_ctx.corpus = corpus
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = []
-            async for ev in yield_clarification_pause(
-                first_gate,
-                finalize_ctx,
-                gate_resolved=clar_state.resolved,
-            ):
-                yield ev
-            return
 
         initial_query = str(
             session_meta.get("initial_query") or route_message.strip()
@@ -401,6 +382,26 @@ async def stream_literature_turn(
             g = build_literature_graph_legacy()
         async for ev in _publish_workflow_graph(g, graph_artifact_id):
             yield ev
+
+        first_gate = detect_first_turn_ambiguity(
+            route_message,
+            search_query=search_query_for_plan,
+            user_turns=user_turns,
+            intent=intent.intent,
+            gate_resolved=clar_state.resolved,
+        )
+        if first_gate:
+            finalize_ctx.corpus = corpus
+            finalize_ctx.fetch_results = []
+            finalize_ctx.cite_records = []
+            finalize_ctx.failed_literature = []
+            async for ev in yield_clarification_pause(
+                first_gate,
+                finalize_ctx,
+                gate_resolved=clar_state.resolved,
+            ):
+                yield ev
+            return
         if use_outline_path and sub_topics_for_search:
             yield (
                 "literature_subtopic_plan",

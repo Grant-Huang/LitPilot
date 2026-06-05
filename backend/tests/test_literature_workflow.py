@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,7 +16,12 @@ async def _mock_understanding_stream():
 
     yield (
         "__router_result__",
-        {"result": LiteratureRouterResult(session_title="t", search_query="q")},
+        {
+            "result": LiteratureRouterResult(
+                session_title="Survey topic",
+                search_query="survey topic academic literature review",
+            )
+        },
     )
 
 
@@ -75,7 +80,15 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
         return_value={"results": [{"url": "https://t.com/x", "title": "T", "content": "s"}], "answer": "a"}
     )
 
+    mock_llm = MagicMock()
+    mock_llm.chat = AsyncMock(return_value=MagicMock(content=""))
+
     with (
+        patch(
+            "app.agents.literature_turn.get_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
         patch(
             "app.agents.literature_turn.get_tavily_api_key",
             new_callable=AsyncMock,

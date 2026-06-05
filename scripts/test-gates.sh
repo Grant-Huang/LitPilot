@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# LitPilot 本地测试门禁：后端 pytest + 前端 vitest + 前端类型检查
+# LitPilot 本地测试门禁：后端 pytest + Vercel 部署检查 + 前端 vitest + 类型检查 + next build
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BACKEND_TEST="$ROOT/backend/scripts/test.sh"
 
-echo "==> Backend pytest"
+echo "==> Backend pytest (full)"
+"$BACKEND_TEST" tests/ -q
+
+echo "==> Vercel deploy defaults (backend seed)"
+"$BACKEND_TEST" tests/test_deploy_defaults.py -q
+
+echo "==> Vercel backend entrypoint smoke"
 cd "$ROOT/backend"
-if [[ -x .venv/bin/python ]]; then
-  .venv/bin/python -m pytest tests/ -q
-else
-  python3 -m pytest tests/ -q
-fi
+export PYTHONPATH="$(pwd)"
+"$ROOT/backend/.venv/bin/python" -c "from app.main import app; assert app is not None"
 
 echo "==> Frontend vitest"
 cd "$ROOT/frontend"
@@ -28,4 +32,7 @@ fi
 echo "==> Frontend type-check"
 pnpm run type-check
 
-echo "All gates passed."
+echo "==> Frontend Vercel build (next build)"
+BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8001}" pnpm run build
+
+echo "All gates passed (including Vercel-oriented checks)."

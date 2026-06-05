@@ -108,12 +108,22 @@ export function LitPilotArtifactPane({
   const literatureAutoOpenedRef = useRef(false);
 
   const outlineAutoOpenedRef = useRef(false);
+  const pipelineAutoOpenedRef = useRef(false);
 
   useEffect(() => {
     reviewAutoOpenedRef.current = false;
     literatureAutoOpenedRef.current = false;
     outlineAutoOpenedRef.current = false;
-  }, [reviewArtifact?.id, outlineArtifact?.id]);
+    pipelineAutoOpenedRef.current = false;
+  }, [reviewArtifact?.id, outlineArtifact?.id, workflow?.id]);
+
+  /** 编排完成后 workflow-graph 到达时默认展示流程 Tab */
+  useEffect(() => {
+    if (showPipeline && workflow && !pipelineAutoOpenedRef.current) {
+      setMainTab("pipeline");
+      pipelineAutoOpenedRef.current = true;
+    }
+  }, [showPipeline, workflow]);
 
   useEffect(() => {
     if (showReview && !showPipeline && !reviewArtifact?.art.done) {

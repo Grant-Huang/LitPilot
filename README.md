@@ -229,11 +229,11 @@ SSE 请求体示例：
 ## 开发与测试
 
 ```bash
-# 后端测试
-cd backend
-source .venv/bin/activate
-export PYTHONPATH=$(pwd)
-pytest -q
+# 完整门禁（含 Vercel：deploy 种子、后端入口、next build）
+./scripts/test-gates.sh
+
+# 仅后端
+./backend/scripts/test.sh -q
 
 # 前端类型检查 / Lint
 cd frontend

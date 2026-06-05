@@ -1,0 +1,33 @@
+---
+description: 编码完成后运行含 Vercel 部署检查的测试门禁
+alwaysApply: true
+---
+
+# 编码完成后的测试门禁
+
+每次完成代码修改（功能、修复、重构）后，**必须**在回复用户前运行：
+
+```bash
+./scripts/test-gates.sh
+```
+
+不要改用系统 `python3 -m pytest`；后端测试统一走 `./backend/scripts/test.sh`。
+
+## 门禁内容（含 Vercel）
+
+1. **后端 pytest** — 全量单元测试
+2. **Vercel 部署种子** — `tests/test_deploy_defaults.py`（`deploy.defaults.json` 无密钥、实例 ID 稳定）
+3. **后端入口冒烟** — `from app.main import app`（与 `pyproject.toml` `[tool.vercel] entrypoint` 一致）
+4. **前端 vitest** — 单元测试
+5. **前端 type-check** — `tsc --noEmit`
+6. **前端 next build** — 模拟 Vercel 前端构建
+
+## 失败时
+
+- 先修复失败项，再重新跑 `./scripts/test-gates.sh`
+- 在回复中简要说明失败原因与修复内容
+- 若某步因环境缺失（如未 `pnpm install`）失败，先安装依赖再重试
+
+## 仅文档/注释改动
+
+可只跑相关子集，例如 `./backend/scripts/test.sh tests/test_deploy_defaults.py -q`；有疑虑时仍跑完整门禁。

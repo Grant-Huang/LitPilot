@@ -133,6 +133,20 @@ def _looks_like_topic_stub(msg: str) -> bool:
     return False
 
 
+def router_understanding_sufficient(
+    user_message: str,
+    search_query: str,
+) -> bool:
+    """编排/router 已提炼出可检索的研究焦点时，无需首轮澄清。"""
+    msg = (user_message or "").strip()
+    q = (search_query or "").strip()
+    if decompose_research_brief(msg, base_query=q):
+        return True
+    if q and not is_polluted_search_query(q) and len(q) >= 10:
+        return True
+    return False
+
+
 def detect_first_turn_ambiguity(
     user_message: str,
     *,
@@ -149,6 +163,9 @@ def detect_first_turn_ambiguity(
     if not msg:
         return None
 
+    if router_understanding_sufficient(msg, search_query):
+        return None
+
     questions: list[str] = []
     if (len(msg) < 20 and not _looks_like_topic_stub(msg)) or _VAGUE_BRIEF_RE.match(msg):
         questions = [
@@ -162,14 +179,12 @@ def detect_first_turn_ambiguity(
             "还是机器学习中的 Mixture-of-Memories？",
             "请补充具体应用场景（如 MES/MOM 迁移、 shop-floor 等）。",
         ]
-    elif is_polluted_search_query(search_query) and not decompose_research_brief(msg):
+    else:
         questions = [
             "请用 1–2 句话概括核心研究问题（避免只写「写一篇综述」）。",
             "可补充 2–4 个希望覆盖的子方向或英文关键词，便于学术检索。",
         ]
 
-    if not questions:
-        return None
     return ClarificationGate(
         kind="first_turn",
         questions=questions,
