@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const backendBase =
   process.env.BACKEND_URL ||

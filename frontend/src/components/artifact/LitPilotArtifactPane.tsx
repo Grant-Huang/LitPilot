@@ -168,12 +168,14 @@ export function LitPilotArtifactPane({
   }, [
     showReview,
     reviewArtifact?.art.done,
+    reviewArtifact?.art.content,
     reviewArtifact?.art.lang,
     reviewArtifact?.id,
     showLiterature,
     libraryItems,
     selectedLibraryId,
     onSelectLibraryId,
+    onLiteratureDetailOpen,
   ]);
 
   const reviewLang = reviewArtifact?.art.lang.toLowerCase() ?? "markdown";

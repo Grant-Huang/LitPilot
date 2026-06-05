@@ -42,7 +42,7 @@ function InstanceRow({
     setModelName(instance.model_name || "");
     setRowMsg("");
     setStatusHint("");
-  }, [instance.id]);
+  }, [instance.id, instance.name, instance.credential_id, instance.model_name]);
 
   useEffect(() => {
     setStatusHint(formatVerifiedHint(instance.last_verified_at));
