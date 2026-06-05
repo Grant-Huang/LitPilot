@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.llm_json import parse_json_object
+from app.agents.prompt_registry import DEFAULT_ASSESSOR_SYSTEM as ASSESSOR_SYSTEM
+from app.agents.prompt_settings import get_assessor_system_prompt
 from app.agents.literature_router import SEARCH_QUERY_MAX, clamp_search_query
 from app.agents.search_query_refiner import apply_academic_search_suffix
 from app.llm.base import LLMMessage
@@ -17,34 +19,6 @@ _VAGUE_BRIEF_RE = re.compile(
     r"^(?:请|帮我|帮忙)?(?:写|做|来)?(?:一个|一篇)?(?:文献)?综述(?:吧|。?)?$",
     re.I,
 )
-
-ASSESSOR_SYSTEM = """你是学术文献综述助手。阅读用户首轮研究说明，提炼核心研究问题（RQ）与检索关键词，并判断是否需要向用户澄清。
-
-输出唯一 JSON（无 markdown 代码块）：
-{
-  "sufficient": true,
-  "confidence": "high",
-  "core_research_questions": ["1-2 条核心研究问题，中文或英文"],
-  "keywords": ["英/中检索关键词，2-8 个"],
-  "search_query_hint": "≤120 字符英文学术检索式",
-  "clarification": [
-    {
-      "prompt": "向用户提问的简短句子",
-      "options": ["选项 A", "选项 B", "其他（请说明）"]
-    }
-  ]
-}
-
-规则：
-- sufficient=true 且 confidence=high：用户 brief 已足够（含多 aspect 提纲如「其一…其二…」、明确领域与子方向、英文关键词等），clarification 必须为空 []，不要追问
-- 从用户原文提炼 core_research_questions 与 keywords，不要复述整段提纲
-- clarification 仅当：术语多义无法推断、领域不明、brief 过短无实质主题、或 confidence 为 low 且确实无法安全检索时使用
-- 澄清优先用 2-4 个选项的选择题；可含「其他（请说明）」
-- search_query_hint 适合 web_search 英文学术检索，须含 survey / systematic review / peer-reviewed 之一
-- 禁止 how to write literature review 等教程类检索
-- options 每条 ≤80 字，prompt ≤200 字
-仅输出 JSON。"""
-
 
 @dataclass
 class ClarificationChoice:
@@ -221,9 +195,10 @@ async def assess_first_turn_brief(
             "请输出 JSON。"
         )
         try:
+            assessor_system = await get_assessor_system_prompt()
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
-                system=ASSESSOR_SYSTEM,
+                system=assessor_system,
                 max_tokens=720,
                 temperature=0.15,
             )

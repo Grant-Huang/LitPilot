@@ -6,6 +6,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from app.agents.prompt_registry import (
+    DEFAULT_INTENT_ROUTER_SYSTEM as INTENT_ROUTER_SYSTEM,
+    DEFAULT_QUERY_CORPUS_SYSTEM as QUERY_CORPUS_SYSTEM,
+)
+from app.agents.review_prompt import MULTI_SOURCE_MATERIALS_HEADER
+from app.agents.prompt_settings import get_intent_router_system_prompt
 from app.agents.literature_router import (
     LiteratureRouterResult,
     clamp_search_query,
@@ -70,31 +76,6 @@ _MATRIX_RE = re.compile(
     re.I,
 )
 _JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
-
-INTENT_ROUTER_SYSTEM = """你是文献综述助手的续聊意图路由器。
-根据【会话状态】与【用户消息】判断本轮意图，输出唯一 JSON（无 markdown 代码块）：
-{
-  "intent": "new_topic|supplement|refine_gen|regen_only|expand_search|retry_failed|query_corpus|manage_library|synthesis_matrix",
-  "session_title": "可选，8-24字",
-  "search_query": "expand_search/supplement/new_topic 时的检索词，≤120字",
-  "gen_directives": "refine_gen 时的写作要求摘要，≤200字",
-  "defer_generate": false,
-  "skip_web_search": false,
-  "skip_fetch": false,
-  "use_existing_corpus": true
-}
-规则：
-- 首轮无 corpus 时用 new_topic
-- 用户提供 URL 或上传链接 → supplement
-- 调整写作要求/结构/语言 → refine_gen
-- 仅重写、无新约束 → regen_only
-- 要求再检索、找更多 → expand_search
-- 重试失败链接 → retry_failed
-- 针对已有文献提问、不需完整综述 → query_corpus
-- 删除/导出/去重文献 → manage_library
-- 要求生成“文献综述矩阵 / Synthesis Matrix” → synthesis_matrix
-仅输出 JSON。"""
-
 
 @dataclass
 class SessionTurnContext:
@@ -380,9 +361,10 @@ async def route_literature_intent(
         )
         if extra_urls:
             body += f"\n\n【上传链接数】{len(extra_urls)}"
+        intent_system = await get_intent_router_system_prompt()
         resp = await llm.chat(
             [LLMMessage(role="user", content=body)],
-            system=INTENT_ROUTER_SYSTEM,
+            system=intent_system,
             max_tokens=300,
             temperature=0.0,
         )
@@ -549,14 +531,6 @@ def build_generation_prompt(
     return f"请基于下列多源材料撰写结构化综述。\n\n【多源材料】\n{block}"
 
 
-QUERY_CORPUS_SYSTEM = """你是学术文献助手。仅根据提供的材料回答用户问题。
-要求：
-- 简洁准确，可引用材料中的论文标题
-- 不编造未在材料中出现的观点
-- 不需要撰写完整综述结构
-- 使用与用户相同的语言"""
-
-
 def build_query_prompt(
     *,
     initial_query: str,
@@ -567,5 +541,5 @@ def build_query_prompt(
     if initial_query:
         parts.append(f"研究背景：{initial_query[:300]}")
     parts.append(f"用户问题：{user_message.strip()}")
-    parts.append(f"【材料】\n{context_block[:60_000]}")
+    parts.append(f"{MULTI_SOURCE_MATERIALS_HEADER}\n{context_block[:60_000]}")
     return "\n\n".join(parts)

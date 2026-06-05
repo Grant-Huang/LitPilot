@@ -190,3 +190,15 @@ def test_system_storage_get_and_save(client: TestClient, store: FileStore) -> No
     assert keep.status_code == 200
     assert keep.json()["data"]["has_auth_token"] is True
 
+
+def test_prompt_template_defaults_endpoint(client: TestClient) -> None:
+    res = client.get("/api/settings/system/prompts/defaults")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "success"
+    defaults = body["data"]["defaults"]
+    meta = body["data"]["meta"]
+    assert "understanding_system_template" in defaults
+    assert "narration_focus" in defaults["understanding_system_template"]
+    assert any(m.get("key") == "review_system_prompt_template" for m in meta)
+

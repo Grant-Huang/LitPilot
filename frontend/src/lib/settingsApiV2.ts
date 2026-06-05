@@ -44,6 +44,20 @@ export type SystemCapability = {
   params: Record<string, unknown>;
 };
 
+export type PromptTemplateMeta = {
+  key: string;
+  label: string;
+  group: string;
+  group_label: string;
+  max_len: number;
+  hint: string;
+};
+
+export type PromptTemplateDefaults = {
+  defaults: Record<string, string>;
+  meta: PromptTemplateMeta[];
+};
+
 export type SystemCredential = {
   id: string;
   type: string;
@@ -88,6 +102,8 @@ export const settingsApiV2 = {
     }),
   getSystemCapabilities: () =>
     apiRequestData<{ items: SystemCapability[] }>("/settings/system/capabilities"),
+  getPromptDefaults: () =>
+    apiRequestData<PromptTemplateDefaults>("/settings/system/prompts/defaults"),
 
   listCredentials: () =>
     apiRequestData<{ items: SystemCredential[] }>("/settings/system/credentials"),

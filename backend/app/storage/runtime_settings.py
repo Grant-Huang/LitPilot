@@ -8,6 +8,7 @@ from typing import Any
 
 
 
+from app.agents.prompt_registry import PROMPT_TEMPLATE_PARAM_DEFAULTS
 from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 
 
@@ -75,15 +76,10 @@ ORCHESTRATOR_PARAM_DEFAULTS: dict[str, Any] = {
 
 
 PROMPTS_PARAM_DEFAULTS: dict[str, Any] = {
-
-    "review_system_prompt_template": "",
-
+    **PROMPT_TEMPLATE_PARAM_DEFAULTS,
     "enable_paper_attributes": True,
-
     "outline_mode": "lite",
-
     "post_refine_mode": "lite",
-
 }
 
 
@@ -446,6 +442,11 @@ def build_runtime_settings(
         "orchestrator_max_tokens_per_phase": int(orch.get("orchestrator_max_tokens_per_phase") or 280),
 
         "review_system_prompt_template": str(prompts.get("review_system_prompt_template") or ""),
+        **{
+            key: str(prompts.get(key) or "")
+            for key in PROMPT_TEMPLATE_PARAM_DEFAULTS
+            if key != "review_system_prompt_template"
+        },
 
         "search_include_domains": list(include_domains),
 

@@ -8,8 +8,29 @@ _CITATION_FORMAT_LABELS = {
 
 MAX_REVIEW_SYSTEM_PROMPT_LEN = 12_000
 
-DEFAULT_REVIEW_SYSTEM_PROMPT = """你是学术文献综述助手。基于提供的多源材料撰写结构化综述。
-材料分栏：[web_search] 为检索摘要；[网页材料] 为正文摘录；[Citations] 为已抽取的 {fmt_label} 条目。
+MULTI_SOURCE_MATERIALS_HEADER = "【多源材料】"
+
+MATERIAL_SECTIONS_GUIDE = """【材料分栏说明】分栏标签与检索/抓取后端无关（可能是 native、OpenAlex、Brave、Tavily 等）；只使用材料里实际出现的栏目：
+- [web_search]：学术检索引擎返回的摘要与命中概况（本轮未做 web 检索时可能缺失）
+- [网页材料]：对已选 URL/PDF 抓取并清洗后的正文摘录（标题为文献标识；标注抓取失败者仅能谨慎引用其检索摘要）
+- [Citations]：从正文抽取、字段较完整的 {fmt_label} 参考文献条目
+
+证据优先级：以 [网页材料] 与 [Citations] 为主要依据；[web_search] 仅作背景与线索，不得仅凭检索摘要下定论。材料不足处须明示局限，勿臆测。"""
+
+SECTION_MOUNTED_MATERIALS_GUIDE = """【材料说明】用户消息中的【挂载文献】为本章大纲挂载论文的结构化摘要（问题/方法/结论），来源于流水线对 [网页材料] 的抓取与抽取，与检索后端无关。若无挂载文献，表示本章材料不足，只能谨慎归纳并标注「待核实」。不得超出所列字段编造事实。"""
+
+
+def material_sections_guide(fmt_label: str = "参考文献") -> str:
+    """Shared corpus label guide for review / matrix / Q&A prompts."""
+    return MATERIAL_SECTIONS_GUIDE.format(fmt_label=fmt_label)
+
+
+DEFAULT_REVIEW_SYSTEM_PROMPT = (
+    "你是学术文献综述助手。仅依据用户消息中"
+    + MULTI_SOURCE_MATERIALS_HEADER
+    + "撰写结构化综述，不得用训练知识填补材料未出现的事实。\n\n"
+    + MATERIAL_SECTIONS_GUIDE
+    + """
 
 【综述结构与各节内容标准】
 
@@ -21,7 +42,7 @@ DEFAULT_REVIEW_SYSTEM_PROMPT = """你是学术文献综述助手。基于提供�
 二、理论/概念框架（如材料支撑）
 - 若材料中存在可抽象的分析框架，须先建立框架再展开综述，而非堆砌文献
 - 框架应说明关键变量之间的逻辑关系（如因果链、调节/中介关系、层级结构），并指明该框架如何指导后续文献的分类与对比
-- 若材料不足以支撑独立框架，则在“三、主要研究工作对比”节中内嵌分析维度
+- 若材料不足以支撑独立框架，则在「三、主要研究工作对比」节中内嵌分析维度
 
 三、主要研究工作对比
 - 按分析维度（而非按文献逐一罗列）组织内容；维度应从研究问题中自然导出
@@ -42,10 +63,28 @@ DEFAULT_REVIEW_SYSTEM_PROMPT = """你是学术文献综述助手。基于提供�
 【通用写作标准】
 - 综述的论证主线须始终与开篇研究问题保持对应
 - 优先使用表格或维度对比呈现多文献的横向比较，避免流水式逐篇叙述
-- 仅引用材料中出现的事实；不得编造作者观点或数据
+- 仅引用材料中出现的事实；不得编造作者、数据、方法细节或结论
 - 使用与用户相同的语言（中文或英文）
 - 正文不得复述、引用或逐字粘贴用户的原始提问与写作指令；直接从「一、研究背景与问题定位」起笔
-- 明确注明本文由 AI 辅助生成，需用户自行核实所有事实与引用，不构成代写建议"""
+- 文末注明本文由 AI 辅助生成，需用户自行核实所有事实与引用，不构成代写建议"""
+)
+
+
+def build_multi_source_user_prompt(
+    intro: str,
+    context_block: str,
+    *,
+    prior_excerpt: str = "",
+    prior_header: str = "",
+) -> str:
+    """User message wrapper with unified 【多源材料】 block."""
+    block = (context_block or "").strip()
+    parts = [intro.strip()]
+    if prior_excerpt.strip():
+        header = (prior_header or "【参考上下文】").strip()
+        parts.append(f"{header}\n" + prior_excerpt.strip()[-6000:])
+    parts.append(f"{MULTI_SOURCE_MATERIALS_HEADER}\n{block}")
+    return "\n\n".join(parts)
 
 
 _TURN_DIRECTIVE_HEADER = """【本轮生成指令（仅供理解，不得写入正文）】"""
@@ -91,6 +130,7 @@ def build_review_turn_system_prompt(
     initial_query: str = "",
     gen_constraints: list[str] | None = None,
     gen_directives: str = "",
+    writing_emphasis: str = "",
     intent: str = "new_topic",
 ) -> str:
     """System prompt for one review generation turn (constraints stay out of user message)."""
@@ -103,6 +143,8 @@ def build_review_turn_system_prompt(
         c = (c or "").strip()
         if c:
             directive_lines.append(f"写作要求：{c}")
+    if writing_emphasis.strip():
+        directive_lines.append(f"写作侧重：{writing_emphasis.strip()}")
     if gen_directives.strip() and intent == "refine_gen":
         directive_lines.append(f"本轮新增要求：{gen_directives.strip()}")
     if intent == "regen_only":
@@ -122,13 +164,12 @@ def build_review_materials_user_prompt(
     prior_review_excerpt: str = "",
 ) -> str:
     """User message for review LLM — materials only, no echoed user question."""
-    block = (context_block or "").strip()
-    parts = ["请基于下列多源材料撰写结构化综述。"]
-    if prior_review_excerpt.strip():
-        parts.append(
+    return build_multi_source_user_prompt(
+        "请基于下列【多源材料】撰写结构化综述。",
+        context_block,
+        prior_excerpt=prior_review_excerpt,
+        prior_header=(
             "【上一版综述（修订参考：保留仍有效的论述，按系统指令中的本轮要求调整；"
-            "勿整段复制无关部分）】\n"
-            + prior_review_excerpt.strip()[-6000:]
-        )
-    parts.append(f"【多源材料】\n{block}")
-    return "\n\n".join(parts)
+            "勿整段复制无关部分）】"
+        ),
+    )

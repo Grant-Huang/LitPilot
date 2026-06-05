@@ -7,11 +7,8 @@ from typing import Any, AsyncIterator
 
 from app.agents.agent_settings import get_review_system_prompt_template
 from app.agents.execution_trace import upsert_stage
-from app.agents.literature_intent import (
-    QUERY_CORPUS_SYSTEM,
-    LiteratureIntentResult,
-    build_query_prompt,
-)
+from app.agents.literature_intent import LiteratureIntentResult, build_query_prompt
+from app.agents.prompt_settings import get_matrix_system_prompt, get_query_corpus_system_prompt
 from app.agents.literature_planner import (
     PlannerContext,
     format_generate_context,
@@ -113,10 +110,11 @@ async def _stream_query_corpus(
         context_block=context_block,
     )
     main_parts: list[str] = []
+    query_system = await get_query_corpus_system_prompt()
     try:
         async for chunk in ctx.llm.chat_stream(
             [LLMMessage(role="user", content=q_prompt)],
-            system=QUERY_CORPUS_SYSTEM,
+            system=query_system,
             max_tokens=2048,
             temperature=0.3,
         ):
@@ -159,9 +157,11 @@ async def _stream_synthesis_matrix(
         yield ev
 
     matrix_prompt = build_synthesis_matrix_user_prompt(context_block)
+    matrix_template = await get_matrix_system_prompt()
     matrix_system = build_synthesis_matrix_system_prompt(
         initial_query=ctx.initial_query,
         gen_directives=ctx.intent.gen_directives or ctx.user_message,
+        base_template=matrix_template,
     )
     matrix_parts: list[str] = []
     try:
@@ -369,6 +369,7 @@ async def _stream_review(
                     if refine_plan
                     else "",
                     gen_directives=sec_directives,
+                    writing_emphasis=ctx.planner_ctx.writing_emphasis,
                     is_refine=sec_is_refine,
                 ):
                     sec_parts.append(chunk)
@@ -435,6 +436,7 @@ async def _stream_review(
             initial_query=ctx.initial_query,
             gen_constraints=ctx.gen_constraints,
             gen_directives=ctx.intent.gen_directives,
+            writing_emphasis=ctx.planner_ctx.writing_emphasis,
             intent=ctx.intent.intent,
         )
         main_parts: list[str] = []

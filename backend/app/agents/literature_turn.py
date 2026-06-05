@@ -363,6 +363,9 @@ async def stream_literature_turn(
             else:
                 yield ev
 
+        planner_ctx.narration_focus = router_result.narration_focus
+        planner_ctx.writing_emphasis = router_result.writing_emphasis
+
         if should_auto_rename_session(
             session_meta,
             route_message,

@@ -14,6 +14,21 @@ from app.agents.agent_settings import (
     get_orchestrator_use_reasoning,
     get_use_llm_planner,
 )
+from app.agents.prompt_registry import (
+    DEFAULT_NARRATE_ATTRIBUTES_AFTER as NARRATE_ATTRIBUTES_AFTER,
+    DEFAULT_NARRATE_CITE_AFTER as NARRATE_CITE_AFTER,
+    DEFAULT_NARRATE_FETCH_AFTER as NARRATE_FETCH_AFTER,
+    DEFAULT_NARRATE_FETCH_PROGRESS as NARRATE_FETCH_PROGRESS,
+    DEFAULT_NARRATE_GENERATE_BEFORE as NARRATE_GENERATE_BEFORE,
+    DEFAULT_NARRATE_SEARCH_AFTER as NARRATE_SEARCH_AFTER,
+    DEFAULT_NARRATE_SEARCH_BEFORE as NARRATE_SEARCH_BEFORE,
+    DEFAULT_UNDERSTANDING_SYSTEM as UNDERSTANDING_SYSTEM,
+
+)
+from app.agents.prompt_settings import (
+    get_narrate_checkpoint_system_prompt,
+    get_understanding_system_prompt,
+)
 from app.agents.literature_router import (
     LiteratureRouterResult,
     build_router_result,
@@ -38,65 +53,6 @@ FETCH_NARRATE_EVERY_N = 5
 FETCH_NARRATE_INTERVAL_SEC = 8.0
 # Checkpoint A merges narration + router JSON; needs more budget than later checkpoints.
 UNDERSTANDING_MIN_TOKENS = 420
-
-UNDERSTANDING_SYSTEM = """你是文献综述助手的过程解说员与检索路由器。
-任务：
-1. 用 2–4 句中文（或与用户同语言）说明：研究主题、拟采用的检索思路、应关注的子方向。
-   不要编造具体论文标题、作者或 DOI；不要写综述正文。
-2. 最后一行单独输出 JSON（不要 markdown 代码块）：
-{"session_title":"8-24字会话标题","search_query":"≤120字学术检索查询","needs_clarification":false,"clarification_questions":[]}
-search_query 须为学术检索式：突出技术主题（如 AI-native MOM、多智能体制造、知识图谱），
-避免「文献综述怎么写」类教程检索；制造 MOM/MES 须与 ML 的 Mixture-of-Memories 区分。
-禁止泛称「新综述」「文献综述」作为 session_title。
-若用户已给出多 aspect brief 或可检索主题，needs_clarification 必须为 false。
-仅当仍缺关键信息（领域/对象不明、MOM 歧义、无法写出检索式）时设 needs_clarification:true，
-并在 clarification_questions 给出 1–3 条具体追问（勿用泛泛的「请写综述」）。"""
-
-NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 2–4 句话说明：
-- 命中规模与整体相关性
-- 接下来抓取时的优先级（1–2 条原则）
-不要编造未在列表中出现的论文细节。不要输出 JSON。"""
-
-NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取结果】用 2–4 句话说明：
-- 成功/失败概况
-- 对后续引用抽取与综述撰写的含义
-不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
-
-NARRATE_SEARCH_BEFORE = """你是文献综述的过程解说员。根据【即将执行的检索】用 2–3 句话说明：
-- 将采用何种检索策略、为何这样查
-- 对用户上传链接与 web_search 检索结果如何取舍（若有）
-不要编造文献。不要输出 JSON。"""
-
-NARRATE_FETCH_PROGRESS = """你是文献综述的过程解说员。根据【抓取进度】用 1–3 句话简要更新：
-- 当前完成比例与成功/失败趋势
-- 若某类站点频繁失败，一句话提示
-不要编造数字。不要输出 JSON。"""
-
-NARRATE_CITE_AFTER = """你是文献综述的过程解说员。根据【引用抽取结果】用 2–3 句话说明：
-- 可核实引用条数是否充足
-- 对综述参考文献章节的预期
-不要编造条目。不要输出 JSON。"""
-
-NARRATE_GENERATE_BEFORE = """你是文献综述的过程解说员。根据【生成前材料概况】用 2–3 句话说明：
-- 将采用的综述结构侧重
-- 材料覆盖上的主要限制（若有）
-不要写综述正文。不要输出 JSON。"""
-
-NARRATE_ATTRIBUTES_AFTER = """你是文献综述的过程解说员。根据【结构化文献】用 2–3 句话说明：
-- 已完成多少篇文献的结构化提取
-- 对后续大纲与分节写作的意义
-不要编造条目。不要输出 JSON。"""
-
-CHECKPOINT_SYSTEM = {
-    "B": NARRATE_SEARCH_BEFORE,
-    "C": NARRATE_SEARCH_AFTER,
-    "D": NARRATE_FETCH_PROGRESS,
-    "E": NARRATE_FETCH_AFTER,
-    "F": NARRATE_CITE_AFTER,
-    "F2": NARRATE_ATTRIBUTES_AFTER,
-    "G": NARRATE_GENERATE_BEFORE,
-}
-
 
 @dataclass
 class FetchNarrationThrottle:
@@ -127,6 +83,8 @@ class PlannerContext:
     orchestrator_mode: str
     use_reasoning: bool
     max_tokens: int
+    narration_focus: str = ""
+    writing_emphasis: str = ""
 
 
 async def load_planner_context() -> PlannerContext:
@@ -195,10 +153,11 @@ async def stream_understanding_and_route(
     understand_tokens = max(ctx.max_tokens, UNDERSTANDING_MIN_TOKENS)
     try:
         llm = await get_planner_llm()
+        understanding_system = await get_understanding_system_prompt()
         async for ev in stream_llm_to_think(
             llm,
             [LLMMessage(role="user", content=msg[:800])],
-            system=UNDERSTANDING_SYSTEM,
+            system=understanding_system,
             accumulator=think_acc,
             max_tokens=understand_tokens,
             temperature=0.2,
@@ -235,11 +194,22 @@ async def narrate_phase_stream(
     if not should_narrate(checkpoint, ctx):
         return
 
-    system = CHECKPOINT_SYSTEM.get(checkpoint)
+    system = await get_narrate_checkpoint_system_prompt(checkpoint)
     if not system:
         return
 
-    body = f"【用户问题】\n{user_message.strip()[:500]}\n\n{context_text.strip()[:6000]}"
+    focus_parts: list[str] = []
+    if ctx.narration_focus.strip():
+        focus_parts.append(
+            f"【本轮解说重点（由规划模型生成）】\n{ctx.narration_focus.strip()}"
+        )
+    if ctx.writing_emphasis.strip() and checkpoint == "G":
+        focus_parts.append(f"【写作侧重】\n{ctx.writing_emphasis.strip()}")
+    focus_block = ("\n\n".join(focus_parts) + "\n\n") if focus_parts else ""
+    body = (
+        f"【用户问题】\n{user_message.strip()[:500]}\n\n"
+        f"{focus_block}{context_text.strip()[:6000]}"
+    )
     try:
         llm = await get_planner_llm()
         async for ev in stream_llm_to_think(

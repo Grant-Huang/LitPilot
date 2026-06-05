@@ -6,23 +6,12 @@ from typing import Any
 
 from app.schemas.literature_outline import LiteratureOutline, OutlineSection
 from app.schemas.paper_record import PaperRecord
+from app.agents.prompt_registry import (
+    DEFAULT_SECTION_REFINE_SYSTEM as SECTION_REFINE_SYSTEM,
+    DEFAULT_SECTION_SYSTEM as SECTION_SYSTEM,
+)
+from app.agents.prompt_settings import get_section_system_prompt
 from app.llm.base import LLMMessage
-
-SECTION_SYSTEM = """你是学术文献综述助手。仅撰写指定章节正文（Markdown）。
-要求：
-- 只写当前章节，不要写其他章节标题
-- 以维度对比组织内容，避免逐篇流水账
-- 仅引用【挂载文献】中的事实；无法核实的标注「待核实」
-- 语言与用户材料一致（中文或英文）
-- 不要复述用户原始提问"""
-
-SECTION_REFINE_SYSTEM = """你是学术文献综述助手。正在修订既有章节的某一版草稿。
-要求：
-- 只输出修订后的本章正文（Markdown），不要输出其他章节
-- 在【上一版本章稿】基础上按【修订要求】修改；保留仍准确且符合要求的段落
-- 未要求修改的部分尽量保留结构与论据；要求重写时则重新组织
-- 以维度对比组织内容；仅引用【挂载文献】中的事实
-- 不要复述用户原始提问"""
 
 
 def _papers_by_id(paper_index: list[dict[str, Any]]) -> dict[str, PaperRecord]:
@@ -66,6 +55,7 @@ def build_section_user_prompt(
     prior_excerpt: str = "",
     prior_section_body: str = "",
     gen_directives: str = "",
+    writing_emphasis: str = "",
     is_refine: bool = False,
 ) -> str:
     rq = "；".join(outline.research_questions[:4])
@@ -79,12 +69,17 @@ def build_section_user_prompt(
         parts.append(
             f"【上一版本章稿（在此基础上修订）】\n{prior_section_body.strip()[-4000:]}"
         )
+    if writing_emphasis.strip() and not is_refine:
+        parts.append(f"【本节侧重（规划生成）】{writing_emphasis.strip()}")
     if gen_directives.strip():
         label = "【修订要求】" if is_refine else "【写作指令】"
         parts.append(f"{label}{gen_directives.strip()}")
     if prior_excerpt.strip():
         parts.append(f"【前文摘要（保持衔接，勿重复）】\n{prior_excerpt[-800:]}")
-    parts.append(f"【挂载文献】\n{materials}")
+    parts.append(
+        "【挂载文献】（结构化摘要，源于 [网页材料] 流水线；与检索后端无关）\n"
+        + materials
+    )
     verb = "修订" if is_refine else "撰写"
     parts.append(f"请{verb}本章 Markdown 正文（以 ### 小节标题 开头，不要输出一级 # 标题）。")
     return "\n\n".join(parts)
@@ -99,6 +94,7 @@ async def stream_section_generate(
     prior_excerpt: str = "",
     prior_section_body: str = "",
     gen_directives: str = "",
+    writing_emphasis: str = "",
     is_refine: bool = False,
     max_tokens: int = 1200,
 ) -> AsyncIterator[str]:
@@ -111,9 +107,12 @@ async def stream_section_generate(
         prior_excerpt=prior_excerpt,
         prior_section_body=prior_section_body,
         gen_directives=gen_directives,
+        writing_emphasis=writing_emphasis,
         is_refine=is_refine,
     )
-    system = SECTION_REFINE_SYSTEM if is_refine and prior_section_body.strip() else SECTION_SYSTEM
+    system = await get_section_system_prompt(
+        is_refine=is_refine and bool(prior_section_body.strip())
+    )
     async for chunk in llm.chat_stream(
         [LLMMessage(role="user", content=prompt)],
         system=system,

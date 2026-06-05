@@ -5,26 +5,12 @@ import logging
 from dataclasses import dataclass, field
 
 from app.agents.llm_json import parse_json_object
+from app.agents.prompt_registry import DEFAULT_REFINER_SYSTEM as REFINER_SYSTEM
+from app.agents.prompt_settings import get_search_refiner_system_prompt
 from app.agents.literature_router import SEARCH_QUERY_MAX, clamp_search_query
 from app.llm.base import LLMMessage
 
 _log = logging.getLogger(__name__)
-
-REFINER_SYSTEM = """你是学术文献检索专家。根据用户研究说明与待检索式草案，输出唯一 JSON（无 markdown 代码块）：
-{
-  "queries": ["检索式1", "检索式2", ...],
-  "exclude_title_substrings": ["应从命中标题中排除的歧义短语"],
-  "clarification_questions": ["若关键术语领域仍无法从用户说明推断，则 1-3 个问题；否则 []"]
-}
-规则：
-- queries 条数与输入草案相同、顺序一一对应；每条 ≤120 字符，适合 web_search 英文学术检索（必要时可含中文关键词）
-- 依据用户全文消歧缩写/多义术语，展开为可检索的技术词（不要复述整段提纲）
-- 每条须含 survey / systematic review / peer-reviewed 之一（若草案缺失则补上）
-- 禁止教程类检索（如 how to write literature review、文献综述怎么写）
-- 禁止 site: 等搜索引擎操作符
-- exclude_title_substrings：列出与已确定研究域明显冲突的结果标题短语（小写英文或中文均可）
-- clarification_questions：用户 brief 已足够具体（如多 aspect 提纲）时留空；仅在意图含糊时提问
-仅输出 JSON。"""
 
 _ACADEMIC_MARKERS = (
     "survey",
@@ -166,9 +152,10 @@ async def refine_literature_search_queries(
             f"请输出 JSON，queries 数组长度必须为 {len(draft)}。"
         )
         try:
+            refiner_system = await get_search_refiner_system_prompt()
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
-                system=REFINER_SYSTEM,
+                system=refiner_system,
                 max_tokens=640,
                 temperature=0.1,
             )

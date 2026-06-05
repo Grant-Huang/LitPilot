@@ -5,14 +5,11 @@ import json
 import logging
 import re
 
+from app.agents.prompt_registry import DEFAULT_EXPANSION_SYSTEM as _EXPANSION_SYSTEM
+from app.agents.prompt_settings import get_search_expansion_system_prompt
 from app.llm.base import LLMMessage
 
 _log = logging.getLogger(__name__)
-
-_EXPANSION_SYSTEM = """你是学术检索助手。根据用户研究主题，输出 2-4 个不同的英文学术检索式（JSON 数组，不要 markdown）。
-每个检索式 ≤120 字符，突出技术主题，避免「how to write survey」类教程检索。
-示例：["transformer efficiency survey", "efficient attention mechanisms arxiv", "model compression NLP"]"""
-
 
 def _dedupe_queries(queries: list[str]) -> list[str]:
     seen: set[str] = set()
@@ -80,9 +77,10 @@ async def expand_search_queries(
     if use_llm and llm is not None:
         prompt = f"研究主题：{user_message or base}\n基准检索式：{base}\n请输出 {cap} 个检索式 JSON 数组。"
         try:
+            expansion_system = await get_search_expansion_system_prompt()
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
-                system=_EXPANSION_SYSTEM,
+                system=expansion_system,
                 max_tokens=280,
                 temperature=0.3,
             )

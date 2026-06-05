@@ -5,22 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.llm_json import parse_json_object
+from app.agents.prompt_registry import DEFAULT_ROUTER_SYSTEM as ROUTER_SYSTEM
+from app.agents.prompt_settings import get_router_system_prompt
 from app.llm.base import LLMMessage
 from app.services.llm_service import get_planner_llm
 from app.storage.file_store import is_default_session_title
 
-ROUTER_SYSTEM = """你是文献综述助手的路由器。根据用户首条研究问题，输出唯一 JSON（无 markdown 代码块）：
-{
-  "session_title": "简短会话标题，8-24 字，概括研究主题，不用引号，禁止「新综述」「文献综述」等泛称",
-  "search_query": "用于学术检索的精炼查询（≤120 字，可中英）"
-}
-search_query 规则：
-- 聚焦研究对象与领域（方法、系统、架构），不要写成「如何写综述」「AI 写文献」等教程类检索。
-- 若用户指制造领域的 MOM/MES，必须写清 manufacturing operations management / 制造运营 / MES，禁止与 ML 领域的 Mixture-of-Memories 混淆。
-- 优先 peer-reviewed paper、survey、systematic review 等学术表述；不要复述用户整段提纲。
-仅输出 JSON。"""
-
 SEARCH_QUERY_MAX = 200
+FOCUS_MAX = 300
 TOPIC_LABEL_MAX = 120
 
 
@@ -30,6 +22,8 @@ class LiteratureRouterResult:
     search_query: str
     needs_clarification: bool = False
     clarification_questions: list[str] = field(default_factory=list)
+    narration_focus: str = ""
+    writing_emphasis: str = ""
 
 
 def clamp_search_query(
@@ -114,6 +108,8 @@ def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRo
         search_query=search_query,
         needs_clarification=needs_clarification,
         clarification_questions=questions[:6],
+        narration_focus=str(data.get("narration_focus") or "").strip()[:FOCUS_MAX],
+        writing_emphasis=str(data.get("writing_emphasis") or "").strip()[:FOCUS_MAX],
     )
 
 
@@ -125,9 +121,10 @@ async def route_literature(user_message: str) -> LiteratureRouterResult:
         return fallback
     try:
         llm = await get_planner_llm()
+        router_system = await get_router_system_prompt()
         resp = await llm.chat(
             [LLMMessage(role="user", content=msg[:800])],
-            system=ROUTER_SYSTEM,
+            system=router_system,
             max_tokens=200,
             temperature=0.0,
         )
@@ -151,6 +148,10 @@ async def refine_router_session_title(
     return LiteratureRouterResult(
         session_title=routed.session_title,
         search_query=routed.search_query or result.search_query,
+        needs_clarification=result.needs_clarification,
+        clarification_questions=list(result.clarification_questions),
+        narration_focus=result.narration_focus or routed.narration_focus,
+        writing_emphasis=result.writing_emphasis or routed.writing_emphasis,
     )
 
 

@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 
 from app.agents.agent_settings import MAX_FETCH_URLS_CAP, SEARCH_MAX_RESULTS_CAP
 from app.agents.literature_source import normalize_literature_source_mode
+from app.agents.prompt_registry import (
+    all_prompt_defaults,
+    clamp_prompt_params,
+    prompt_registry_metadata,
+)
 from app.agents.review_prompt import (
     MAX_REVIEW_SYSTEM_PROMPT_LEN,
     default_review_system_prompt_template,
@@ -637,6 +642,16 @@ async def list_capabilities():
     return ok({"items": [_public_capability(c) for c in items]})
 
 
+@router.get("/system/prompts/defaults")
+async def get_prompt_template_defaults():
+    return ok(
+        {
+            "defaults": all_prompt_defaults(),
+            "meta": prompt_registry_metadata(),
+        }
+    )
+
+
 class CapabilityUpdateBody(BaseModel):
     enabled: bool | None = None
     primary_ref: dict | None = None
@@ -656,6 +671,8 @@ async def update_capability(capability_id: str, body: CapabilityUpdateBody):
     if not cap:
         raise HTTPException(status_code=404, detail="capability not found")
     partial = body.model_dump(exclude_none=True)
+    if str(capability_id) == "prompts" and isinstance(partial.get("params"), dict):
+        partial["params"] = clamp_prompt_params(partial["params"])
     for k, v in partial.items():
         cap[k] = v
     from datetime import datetime, timezone as _tz
