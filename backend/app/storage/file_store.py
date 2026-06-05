@@ -19,6 +19,9 @@ def _utc_now() -> str:
 
 
 _DEFAULT_SESSION_TITLES = frozenset({"新综述", "新对话", "未命名"})
+DEFAULT_REVIEW_MODEL = "MiniMax-M3"
+DEFAULT_ORCHESTRATOR_MODEL = "MiniMax-M2.7-highspeed"
+_MINIMAX_PROVIDERS = frozenset({"minimax_cn", "minimax_intl"})
 
 
 def is_default_session_title(title: str) -> bool:
@@ -221,6 +224,7 @@ class FileStore:
         prefs_exists = self.personal_preferences_path.is_file()
         if creds_exists and inst_exists and caps_exists and prefs_exists:
             self._ensure_capability_param_defaults()
+            self._ensure_default_instances()
             return
 
         legacy = self._legacy_agent_settings_merged()
@@ -302,7 +306,15 @@ class FileStore:
             )
 
         primary_cred_id = cred_by_key.get("llm_primary") or ""
-        primary_model = str(legacy.get("llm_model") or "").strip() or "gpt-4o-mini"
+        raw_review_model = str(legacy.get("llm_model") or "").strip()
+        if llm_provider in _MINIMAX_PROVIDERS and (
+            not raw_review_model or raw_review_model == "gpt-4o-mini"
+        ):
+            primary_model = DEFAULT_REVIEW_MODEL
+        elif raw_review_model:
+            primary_model = raw_review_model
+        else:
+            primary_model = "gpt-4o-mini"
         add_instance(
             key="review_main",
             name="review-main",
@@ -310,15 +322,17 @@ class FileStore:
             credential_id=primary_cred_id,
             model_name=primary_model,
         )
-        orch_model = str(legacy.get("orchestrator_model") or "").strip()
-        if orch_model:
-            add_instance(
-                key="orchestrator",
-                name="orchestrator",
-                provider=llm_provider,
-                credential_id=primary_cred_id,
-                model_name=orch_model,
-            )
+        orch_model = (
+            str(legacy.get("orchestrator_model") or "").strip()
+            or DEFAULT_ORCHESTRATOR_MODEL
+        )
+        add_instance(
+            key="orchestrator",
+            name="orchestrator",
+            provider=llm_provider,
+            credential_id=primary_cred_id,
+            model_name=orch_model,
+        )
 
         if not inst_exists:
             self._save_config_list(self.system_instances_path, instances)
@@ -465,6 +479,71 @@ class FileStore:
                 changed = True
         if changed:
             self._save_config_list(self.system_capabilities_path, caps)
+
+    def _ensure_default_instances(self) -> None:
+        """Backfill orchestrator instance and align review-main model on existing v2 installs."""
+        if not self.system_instances_path.is_file():
+            return
+
+        instances = self._load_config_list(self.system_instances_path)
+        if not instances:
+            return
+
+        legacy = self._legacy_agent_settings_merged()
+        llm_provider = str(legacy.get("llm_provider") or "openai")
+        creds = self._load_config_list(self.system_credentials_path)
+        primary_cred = next(
+            (c for c in creds if str(c.get("type") or "").startswith("llm:")),
+            None,
+        )
+        primary_cred_id = str(primary_cred.get("id") or "") if primary_cred else ""
+
+        changed = False
+        by_name = {str(i.get("name") or ""): i for i in instances if isinstance(i, dict)}
+
+        review = by_name.get("review-main")
+        if review and review.get("model_name") == "MiniMax-M2.7":
+            review["model_name"] = DEFAULT_REVIEW_MODEL
+            review["updated_at"] = _utc_now()
+            changed = True
+
+        if "orchestrator" not in by_name and primary_cred_id:
+            now = _utc_now()
+            orch_id = uuid.uuid4().hex
+            orch_model = (
+                str(legacy.get("orchestrator_model") or "").strip()
+                or DEFAULT_ORCHESTRATOR_MODEL
+            )
+            instances.append(
+                {
+                    "id": orch_id,
+                    "name": "orchestrator",
+                    "provider": llm_provider,
+                    "credential_id": primary_cred_id,
+                    "model_name": orch_model,
+                    "default_params": {},
+                    "created_at": now,
+                    "updated_at": now,
+                    "status": "unknown",
+                    "last_verified_at": None,
+                }
+            )
+            changed = True
+            if self.system_capabilities_path.is_file():
+                caps = self._load_config_list(self.system_capabilities_path)
+                for cap in caps:
+                    if cap.get("capability_id") != "orchestrator":
+                        continue
+                    ref = cap.get("primary_ref")
+                    review_id = str((review or {}).get("id") or "")
+                    if isinstance(ref, dict) and str(ref.get("id") or "") == review_id:
+                        cap["primary_ref"] = {"kind": "instance", "id": orch_id}
+                        cap["updated_at"] = now
+                        self._save_config_list(self.system_capabilities_path, caps)
+                    break
+
+        if changed:
+            self._save_config_list(self.system_instances_path, instances)
 
     def list_system_credentials(self) -> list[dict[str, Any]]:
         self.ensure_settings_v2_migrated()
