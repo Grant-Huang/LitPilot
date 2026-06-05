@@ -256,7 +256,14 @@ async def run_retrieval_pipeline(
                 ):
                     yield ev
         except ValueError as e:
-            fail_msg = str(e)
+            raw = str(e)
+            if "allowed_domains and blocked_domains" in raw:
+                fail_msg = (
+                    "检索配置错误：不能同时启用 include_domains 与 exclude_domains。"
+                    "请在 设置 → 管理员配置 → 能力 → web_search 中保留其一，或切换为 Tavily 检索。"
+                )
+            else:
+                fail_msg = raw
             yield ("text", {"delta": fail_msg})
             ctx.finalize_ctx.corpus = working
             ctx.finalize_ctx.fetch_results = []

@@ -18,7 +18,7 @@
 | `query`（≥2 字符） | 检索 query / `search_query_refiner` 输出 |
 | `allowed_domains` | `web_search.params.include_domains` |
 | `blocked_domains` | `web_search.params.exclude_domains` |
-| 二者不可同时指定 | `web_search_domains.validate_search_domains` |
+| 二者不可同时指定（Anthropic API） | native 检索在 **后过滤** 阶段同时支持白名单+黑名单；Tavily 亦支持双列表 |
 | `max_uses: 8`（Anthropic 硬编码） | `search_max_results`（1–80，能力页可配） |
 | 结果 `{ title, url }[]` | `normalize_search_results` → `{ url, title, snippet }` |
 

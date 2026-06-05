@@ -279,7 +279,7 @@ class FileStore:
             ).strip(),
             "orchestrator_max_tokens_per_phase": int(
                 self._pick_legacy_value(
-                    cfg, defaults, "orchestrator_max_tokens_per_phase", fallback=280
+                    cfg, defaults, "orchestrator_max_tokens_per_phase", fallback=420
                 )
             ),
             "review_system_prompt_template": str(
@@ -583,7 +583,7 @@ class FileStore:
                 "orchestrator_mode": str(legacy.get("orchestrator_mode") or "lite"),
                 "orchestrator_use_reasoning": bool(legacy.get("orchestrator_use_reasoning", False)),
                 "orchestrator_max_tokens_per_phase": int(
-                    legacy.get("orchestrator_max_tokens_per_phase") or 280
+                    legacy.get("orchestrator_max_tokens_per_phase") or 420
                 ),
             },
         )
@@ -728,7 +728,7 @@ class FileStore:
                         legacy.get("orchestrator_use_reasoning", False)
                     ),
                     "orchestrator_max_tokens_per_phase": int(
-                        legacy.get("orchestrator_max_tokens_per_phase") or 280
+                        legacy.get("orchestrator_max_tokens_per_phase") or 420
                     ),
                 },
             },

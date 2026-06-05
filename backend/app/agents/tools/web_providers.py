@@ -19,8 +19,6 @@ from app.agents.tools.providers import native_fetch as native_fetch_provider
 from app.agents.tools.providers import native_search as native_search_provider
 from app.agents.tools.providers import openalex as openalex_provider
 from app.agents.tools.providers import tavily as tavily_provider
-from app.agents.tools.web_search_domains import validate_search_domains
-
 FETCH_PROVIDERS = frozenset({"jina", "native"})
 SEARCH_PROVIDERS = frozenset({"tavily", "brave", "openalex", "native"})
 
@@ -146,9 +144,6 @@ async def web_search_query(
     exclude_domains: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     p = normalize_search_provider(provider)
-    domain_err = validate_search_domains(include_domains, exclude_domains)
-    if domain_err:
-        raise ValueError(domain_err)
     if p == "openalex":
         return await openalex_provider.search(
             query,
@@ -159,8 +154,8 @@ async def web_search_query(
         return await native_search_provider.search(
             query,
             max_results=max_results,
-            allowed_domains=include_domains,
-            blocked_domains=exclude_domains,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
         )
     if p == "brave":
         return await brave_provider.search(

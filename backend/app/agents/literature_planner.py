@@ -36,6 +36,8 @@ _log = logging.getLogger(__name__)
 
 FETCH_NARRATE_EVERY_N = 5
 FETCH_NARRATE_INTERVAL_SEC = 8.0
+# Checkpoint A merges narration + router JSON; needs more budget than later checkpoints.
+UNDERSTANDING_MIN_TOKENS = 420
 
 UNDERSTANDING_SYSTEM = """你是文献综述助手的过程解说员与检索路由器。
 任务：
@@ -190,6 +192,7 @@ async def stream_understanding_and_route(
         return
 
     content_buf: list[str] = []
+    understand_tokens = max(ctx.max_tokens, UNDERSTANDING_MIN_TOKENS)
     try:
         llm = await get_planner_llm()
         async for ev in stream_llm_to_think(
@@ -197,7 +200,7 @@ async def stream_understanding_and_route(
             [LLMMessage(role="user", content=msg[:800])],
             system=UNDERSTANDING_SYSTEM,
             accumulator=think_acc,
-            max_tokens=ctx.max_tokens,
+            max_tokens=understand_tokens,
             temperature=0.2,
             use_reasoning=ctx.use_reasoning,
             hide_json_in_stream=True,

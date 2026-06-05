@@ -6,10 +6,7 @@ from typing import Any
 
 import httpx
 
-from app.agents.tools.web_search_domains import (
-    filter_hits_by_domains,
-    validate_search_domains,
-)
+from app.agents.tools.web_search_domains import filter_hits_by_domains
 
 _USER_AGENT = (
     "LitPilot/1.0 (+https://github.com/litpilot; academic literature search)"
@@ -31,15 +28,16 @@ async def search(
     max_results: int = 8,
     allowed_domains: list[str] | tuple[str, ...] | None = None,
     blocked_domains: list[str] | tuple[str, ...] | None = None,
+    include_domains: list[str] | tuple[str, ...] | None = None,
+    exclude_domains: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Return standard web_search payload: {results: [{url, title, snippet}], answer}."""
     q = (query or "").strip()
     if len(q) < 2:
         return {"results": [], "answer": ""}
 
-    domain_err = validate_search_domains(allowed_domains, blocked_domains)
-    if domain_err:
-        raise ValueError(domain_err)
+    allow = allowed_domains if allowed_domains is not None else include_domains
+    block = blocked_domains if blocked_domains is not None else exclude_domains
 
     headers = {
         "User-Agent": _USER_AGENT,
@@ -69,8 +67,8 @@ async def search(
 
     rows = filter_hits_by_domains(
         rows,
-        allowed_domains=allowed_domains,
-        blocked_domains=blocked_domains,
+        allowed_domains=allow,
+        blocked_domains=block,
     )
     cap = max(1, min(max_results, 25))
     return {"results": rows[:cap], "answer": ""}

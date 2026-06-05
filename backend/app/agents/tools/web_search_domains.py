@@ -8,7 +8,11 @@ def validate_search_domains(
     allowed_domains: list[str] | tuple[str, ...] | None,
     blocked_domains: list[str] | tuple[str, ...] | None,
 ) -> str | None:
-    """Return error message if both lists set (WebSearchTool rule), else None."""
+    """Return error message if both lists set (Anthropic WebSearchTool rule).
+
+    LitPilot native search applies allow+block in post-filter only; callers must not
+    use this to reject default academic include+exclude configuration.
+    """
     allow = [str(d).strip() for d in (allowed_domains or ()) if str(d).strip()]
     block = [str(d).strip() for d in (blocked_domains or ()) if str(d).strip()]
     if allow and block:

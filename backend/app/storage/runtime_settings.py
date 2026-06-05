@@ -68,7 +68,7 @@ ORCHESTRATOR_PARAM_DEFAULTS: dict[str, Any] = {
 
     "orchestrator_use_reasoning": False,
 
-    "orchestrator_max_tokens_per_phase": 280,
+    "orchestrator_max_tokens_per_phase": 420,
 
 }
 

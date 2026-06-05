@@ -18,9 +18,11 @@ from app.agents.tools.source_resolve import (
     resolve_semantic_scholar_fetch_url,
     semantic_scholar_paper_id,
 )
+from app.agents.tools.providers import native_search as native_search_provider
 from app.agents.tools.web_providers import (
     normalize_fetch_provider,
     normalize_search_provider,
+    web_search_query,
 )
 from app.agents.tools.web_search_domains import (
     filter_hits_by_domains,
@@ -255,6 +257,28 @@ async def test_native_fetch_s2_resolves_doi_ojs_pdf(monkeypatch) -> None:
     assert result.is_pdf
     assert len(result.text) >= 500
     assert result.resolved_pdf_url and "article/download" in result.resolved_pdf_url
+
+
+@pytest.mark.asyncio
+async def test_web_search_query_native_accepts_include_and_exclude_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_native_search(*_args, **kwargs):
+        captured.update(kwargs)
+        return {"results": [], "answer": ""}
+
+    monkeypatch.setattr(native_search_provider, "search", fake_native_search)
+    out = await web_search_query(
+        "AI-native MOM",
+        provider="native",
+        include_domains=["arxiv.org"],
+        exclude_domains=["reddit.com"],
+    )
+    assert out["results"] == []
+    assert captured.get("include_domains") == ["arxiv.org"]
+    assert captured.get("exclude_domains") == ["reddit.com"]
 
 
 @pytest.mark.asyncio
