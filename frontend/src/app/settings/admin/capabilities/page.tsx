@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Spin } from "antd";
-import { FieldTip, InlineCheck, InlineField, SettingToolbar } from "../_ui";
+import { FieldTip, InlineCheck, InlineField, SettingToolbar, SettingsListPanel, useUnsavedGuard } from "../_ui";
 import {
   capabilityDisplayTitle,
   capabilityNeedsCredentialRef,
@@ -11,7 +11,6 @@ import {
 } from "@/lib/capabilityFormat";
 import {
   CAP_TIPS,
-  CAPABILITY_SUBTITLE,
   capabilityModuleTip,
   sortCapabilities,
 } from "@/lib/capabilityTips";
@@ -22,13 +21,17 @@ import {
   searchProviderOptions,
 } from "@/lib/webProviderOptions";
 import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../../_shared";
-import { toastError, toastSuccess } from "@/lib/toastFeedback";
+import { toastError } from "@/lib/toastFeedback";
 import {
   settingsApiV2,
   type SystemCapability,
   type SystemCredential,
   type SystemInstance,
 } from "@/lib/settingsApiV2";
+
+function paramsEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 function CapabilityCard({
   cap,
@@ -42,13 +45,17 @@ function CapabilityCard({
   onSaved: (cap: SystemCapability) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [rowMsg, setRowMsg] = useState("");
+  const [enabled, setEnabled] = useState(Boolean(cap.enabled));
   const [refId, setRefId] = useState(String(cap.primary_ref?.id || ""));
   const [params, setParams] = useState<Record<string, unknown>>({ ...(cap.params || {}) });
 
   useEffect(() => {
+    setEnabled(Boolean(cap.enabled));
     setRefId(String(cap.primary_ref?.id || ""));
     setParams({ ...(cap.params || {}) });
     setSaving(false);
+    setRowMsg("");
   }, [cap]);
 
   const refOptions = useMemo(
@@ -73,8 +80,16 @@ function CapabilityCard({
         ? CAP_TIPS.review_instance
         : undefined;
 
+  const dirty =
+    enabled !== Boolean(cap.enabled) ||
+    refId !== String(cap.primary_ref?.id || "") ||
+    !paramsEqual(params, { ...(cap.params || {}) });
+
+  useUnsavedGuard(dirty);
+
   const save = async () => {
     setSaving(true);
+    setRowMsg("");
     try {
       const needsCred = capabilityNeedsCredentialRef(cap, params);
       const primary_ref =
@@ -82,13 +97,14 @@ function CapabilityCard({
           ? ({ kind: refOptions.kind, id: refId } as Record<string, unknown>)
           : null;
       const saved = await settingsApiV2.updateCapability(cap.capability_id, {
-        enabled: true,
+        enabled,
         primary_ref,
         params,
       });
       onSaved(saved);
-      toastSuccess(`${capabilityDisplayTitle(cap)} 已保存`);
+      setRowMsg("已保存");
     } catch (e: unknown) {
+      setRowMsg(errorMessage(e));
       toastError(errorMessage(e));
     } finally {
       setSaving(false);
@@ -486,30 +502,36 @@ function CapabilityCard({
   };
 
   const paramsEl = renderParams();
-  const subtitle = CAPABILITY_SUBTITLE[cap.capability_id];
   const moduleTip = capabilityModuleTip(cap.capability_id);
 
   return (
-    <div className="card settings-cred-row">
+    <div className="settings-cred-row settings-list-row">
       <SettingToolbar
         title={
-          <span className="settings-cap-card__title-block">
-            <span className="settings-cap-card__title-row">
-              {capabilityDisplayTitle(cap)}
-              {moduleTip ? <FieldTip title={moduleTip} /> : null}
-            </span>
-            {subtitle ? (
-              <span className="settings-cap-card__subtitle">{subtitle}</span>
-            ) : null}
+          <span className="settings-cap-card__title-row">
+            {capabilityDisplayTitle(cap)}
+            {moduleTip ? <FieldTip title={moduleTip} /> : null}
           </span>
         }
+        titleMuted={!enabled}
+        feedback={rowMsg}
+        feedbackOk={rowMsg === "已保存"}
         actions={
-          <button type="button" className="btn-primary btn-sm" onClick={() => void save()} disabled={saving}>
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            onClick={() => void save()}
+            disabled={saving || !dirty}
+          >
             {saving ? <Spin size="small" /> : null}
             保存
           </button>
         }
       />
+
+      <div className="settings-cap-card__enable-row">
+        <InlineCheck label="启用此能力" checked={enabled} onChange={setEnabled} />
+      </div>
 
       {needsRef ? (
         <InlineField
@@ -571,10 +593,10 @@ export default function AdminCapabilitiesPage() {
   }
 
   return (
-    <div className="card settings-section settings-section--compact">
+    <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
 
-      <div className="settings-cap-list">
+      <div className="settings-cap-list settings-cred-list--flat">
         {orderedCaps.map((c) => (
           <CapabilityCard
             key={c.capability_id}
@@ -589,6 +611,6 @@ export default function AdminCapabilitiesPage() {
           />
         ))}
       </div>
-    </div>
+    </SettingsListPanel>
   );
 }

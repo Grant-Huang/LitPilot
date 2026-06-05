@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
-import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import { feedbackOk, InlineField, SettingToolbar, SettingsListPanel, useUnsavedGuard } from "../_ui";
 import {
   entityFromTestError,
   errorMessage,
@@ -53,6 +53,8 @@ function InstanceRow({
     credentialId !== (instance.credential_id || "") ||
     modelName !== (instance.model_name || "");
 
+  useUnsavedGuard(dirty);
+
   const onSave = async () => {
     setSaving(true);
     setRowMsg("");
@@ -82,7 +84,7 @@ function InstanceRow({
       const res = await settingsApiV2.testInstance(instance.id);
       const updated = res.instance || { ...instance, status: "ok" as const };
       onUpdated(updated);
-      setStatusHint(String(res.note || "已通过基础检查"));
+      setStatusHint(String(res.note || "连接测试已通过"));
     } catch (e: unknown) {
       const failed = entityFromTestError<SystemInstance>(e, "instance");
       if (failed) {
@@ -97,13 +99,13 @@ function InstanceRow({
   };
 
   return (
-    <div className="card settings-cred-row">
+    <div className="settings-cred-row settings-list-row">
       <SettingToolbar
-        title={name.trim() || instance.name}
+        title={instance.name}
         status={instance.status}
         statusHint={statusHint || undefined}
         feedback={rowMsg}
-        feedbackOk={rowMsg === "已保存"}
+        feedbackOk={feedbackOk(rowMsg)}
         actions={
           <>
             <button type="button" className="btn-secondary btn-sm" disabled={testing || dirty} onClick={() => void onTest()}>
@@ -201,7 +203,7 @@ function CreateInstancePanel({
   };
 
   return (
-    <div className="card settings-cred-row settings-inst-create">
+    <div className="settings-cred-row settings-list-row settings-inst-create">
       <SettingToolbar
         title="新增实例"
         feedback={rowMsg}
@@ -286,16 +288,21 @@ export default function AdminInstancesPage() {
   }
 
   return (
-    <div className="card settings-section settings-section--compact">
-      <div className="settings-page-toolbar">
-        <button type="button" className="btn-primary btn-sm" onClick={() => setCreating((v) => !v)}>
-          {creating ? "收起" : "新增实例"}
-        </button>
+    <SettingsListPanel>
+      <div className="settings-cred-row settings-list-row settings-page-head">
+        <SettingToolbar
+          title="实例库"
+          actions={
+            <button type="button" className="btn-primary btn-sm" onClick={() => setCreating((v) => !v)}>
+              {creating ? "取消新增" : "新增实例"}
+            </button>
+          }
+        />
       </div>
 
       <SettingsErrorMsg msg={msg} />
 
-      <div className="settings-cred-list">
+      <div className="settings-cred-list settings-cred-list--flat">
         {creating ? (
           <CreateInstancePanel
             credentials={credentials}
@@ -315,6 +322,6 @@ export default function AdminInstancesPage() {
           />
         ))}
       </div>
-    </div>
+    </SettingsListPanel>
   );
 }
