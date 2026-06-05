@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
-import { toastError, toastSuccess, toastWarning } from "@/lib/toastFeedback";
-import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import { feedbackOk, InlineField, SettingToolbar, SettingsListPanel, useUnsavedGuard } from "../_ui";
 import {
   entityFromTestError,
   errorMessage,
@@ -62,6 +61,8 @@ function CredentialRow({
     (baseUrl !== String(credential.base_url || "") || groupId !== String(credential.group_id || ""));
   const dirty = keyEditing || llmDirty;
 
+  useUnsavedGuard(dirty);
+
   const onSave = async () => {
     setSaving(true);
     setRowMsg("");
@@ -75,9 +76,9 @@ function CredentialRow({
       const saved = await settingsApiV2.updateCredential(credential.id, body);
       onUpdated(saved);
       setKeyDraft(null);
-      toastSuccess("已保存");
+      setRowMsg("已保存");
     } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : String(e));
+      setRowMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -85,11 +86,11 @@ function CredentialRow({
 
   const onTest = async () => {
     if (!credential.has_secret && !keyEditing) {
-      toastWarning("请先填写并保存 Key");
+      setRowMsg("请先填写并保存 Key");
       return;
     }
     if (keyEditing) {
-      toastWarning("请先保存 Key");
+      setRowMsg("请先保存 Key");
       return;
     }
     setTesting(true);
@@ -100,22 +101,15 @@ function CredentialRow({
       const latest = res.credential || { ...credential, status: "ok" as const };
       onUpdated(latest);
       setStatusHint(
-        hits !== null
-          ? `连接测试已通过，命中 ${hits} 条`
-          : "连接测试已通过",
-      );
-      toastSuccess(
         hits !== null ? `连接测试已通过，命中 ${hits} 条` : "连接测试已通过",
       );
     } catch (e: unknown) {
       const failed = credentialFromTestError(e);
       if (failed) {
         onUpdated(failed);
-        const errText = e instanceof Error ? e.message : String(e);
-        setStatusHint(errText);
-        toastError(errText);
+        setStatusHint(e instanceof Error ? e.message : String(e));
       } else {
-        toastError(e instanceof Error ? e.message : String(e));
+        setRowMsg(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setTesting(false);
@@ -123,13 +117,13 @@ function CredentialRow({
   };
 
   return (
-    <div className="card settings-cred-row">
+    <div className="settings-cred-row settings-list-row">
       <SettingToolbar
         title={credential.name}
         status={credential.status}
         statusHint={statusHint || undefined}
         feedback={rowMsg}
-        feedbackOk={rowMsg === "已保存"}
+        feedbackOk={feedbackOk(rowMsg)}
         actions={
           <>
             <button
@@ -237,10 +231,10 @@ export default function AdminCredentialsPage() {
   const fetchTimeoutSec = Number(webFetchCap?.params?.fetch_timeout_sec ?? 45);
 
   return (
-    <div className="card settings-section settings-section--compact">
+    <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
 
-      <div className="settings-cred-list">
+      <div className="settings-cred-list settings-cred-list--flat">
         {items.map((c) => (
           <CredentialRow
             key={c.id}
@@ -258,6 +252,6 @@ export default function AdminCredentialsPage() {
           searchProvider={searchProvider}
         />
       </div>
-    </div>
+    </SettingsListPanel>
   );
 }
