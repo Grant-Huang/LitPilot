@@ -407,6 +407,7 @@ class FileStore:
         caps_exists = self._config_path_exists(self.system_capabilities_path)
         prefs_exists = self._config_path_exists(self.personal_preferences_path)
         if creds_exists and inst_exists and caps_exists and prefs_exists:
+            self._ensure_default_capabilities()
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
             self._ensure_deploy_catalog()
@@ -651,8 +652,169 @@ class FileStore:
             }
             self._write_config_json(self.personal_preferences_path, prefs)
 
+        self._ensure_default_capabilities()
         self._ensure_capability_param_defaults()
         self._ensure_deploy_catalog()
+
+    _REQUIRED_CAPABILITY_IDS: tuple[str, ...] = (
+        "review_main",
+        "orchestrator",
+        "web_search",
+        "web_fetch",
+        "literature_source",
+        "prompts",
+    )
+
+    def _credential_id_by_type(self, cred_type: str) -> str | None:
+        for item in self._load_config_list(self.system_credentials_path):
+            typ = str(item.get("type") or "")
+            if typ == cred_type:
+                cid = str(item.get("id") or "").strip()
+                return cid or None
+        return None
+
+    def _instance_id_by_name(self, name: str) -> str | None:
+        for item in self._load_config_list(self.system_instances_path):
+            if str(item.get("name") or "") == name:
+                iid = str(item.get("id") or "").strip()
+                return iid or None
+        return None
+
+    def _ensure_default_capabilities(self) -> None:
+        """Append missing v2 capability cards (e.g. web_search after partial Turso seed)."""
+        if not self._config_path_exists(self.system_capabilities_path):
+            return
+        caps = self._load_config_list(self.system_capabilities_path)
+        present = {str(c.get("capability_id") or "") for c in caps}
+        missing = [cid for cid in self._REQUIRED_CAPABILITY_IDS if cid not in present]
+        if not missing:
+            return
+
+        from app.storage.runtime_settings import (
+            ORCHESTRATOR_PARAM_DEFAULTS,
+            PROMPTS_PARAM_DEFAULTS,
+            WEB_FETCH_PARAM_DEFAULTS,
+            WEB_SEARCH_PARAM_DEFAULTS,
+        )
+
+        legacy = self._legacy_agent_settings_merged()
+        now = _utc_now()
+        review_id = self._instance_id_by_name("review-main")
+        orch_id = self._instance_id_by_name("orchestrator") or review_id
+        tavily_id = self._credential_id_by_type("tavily")
+        jina_id = self._credential_id_by_type("jina")
+        prompt_defaults = deploy_settings()
+
+        templates: dict[str, dict[str, Any]] = {
+            "review_main": {
+                "capability_id": "review_main",
+                "label": "文献综述生成",
+                "enabled": True,
+                "primary_ref": {"kind": "instance", "id": review_id} if review_id else None,
+                "override_params": {},
+                "params": {},
+            },
+            "orchestrator": {
+                "capability_id": "orchestrator",
+                "label": "编排与解说",
+                "enabled": True,
+                "primary_ref": {"kind": "instance", "id": orch_id} if orch_id else None,
+                "override_params": {},
+                "params": {
+                    **ORCHESTRATOR_PARAM_DEFAULTS,
+                    "use_llm_planner": bool(legacy.get("use_llm_planner", True)),
+                    "orchestrator_mode": str(legacy.get("orchestrator_mode") or "lite"),
+                    "orchestrator_use_reasoning": bool(
+                        legacy.get("orchestrator_use_reasoning", False)
+                    ),
+                    "orchestrator_max_tokens_per_phase": int(
+                        legacy.get("orchestrator_max_tokens_per_phase") or 280
+                    ),
+                },
+            },
+            "web_search": {
+                "capability_id": "web_search",
+                "label": "web_search",
+                "enabled": True,
+                "primary_ref": {"kind": "credential", "id": tavily_id} if tavily_id else None,
+                "override_params": {},
+                "params": {
+                    **WEB_SEARCH_PARAM_DEFAULTS,
+                    "search_max_results": int(
+                        legacy.get("search_max_results")
+                        or legacy.get("tavily_max_results")
+                        or 8
+                    ),
+                    "search_retry_count": int(
+                        legacy.get("search_retry_count")
+                        or legacy.get("tavily_retry_count")
+                        or 0
+                    ),
+                },
+            },
+            "web_fetch": {
+                "capability_id": "web_fetch",
+                "label": "web_fetch",
+                "enabled": True,
+                "primary_ref": {"kind": "credential", "id": jina_id} if jina_id else None,
+                "override_params": {},
+                "params": {
+                    **WEB_FETCH_PARAM_DEFAULTS,
+                    "max_fetch_urls": int(legacy.get("max_fetch_urls") or 5),
+                    "fetch_parallel": int(legacy.get("fetch_parallel") or 3),
+                    "fetch_timeout_sec": float(legacy.get("fetch_timeout_sec") or 45),
+                    "fetch_retry_count": int(legacy.get("fetch_retry_count") or 0),
+                    "fetch_retry_delay_ms": int(legacy.get("fetch_retry_delay_ms") or 500),
+                    "max_source_chars": int(legacy.get("max_source_chars") or 14_000),
+                },
+            },
+            "literature_source": {
+                "capability_id": "literature_source",
+                "label": "文献来源策略",
+                "enabled": True,
+                "primary_ref": None,
+                "override_params": {},
+                "params": {
+                    "literature_source_mode": str(
+                        legacy.get("literature_source_mode") or "merge"
+                    ),
+                },
+            },
+            "prompts": {
+                "capability_id": "prompts",
+                "label": "提示词模板",
+                "enabled": True,
+                "primary_ref": None,
+                "override_params": {},
+                "params": {
+                    **PROMPTS_PARAM_DEFAULTS,
+                    "review_system_prompt_template": str(
+                        legacy.get("review_system_prompt_template") or ""
+                    )
+                    or str(prompt_defaults.get("review_system_prompt_template") or ""),
+                    "enable_paper_attributes": bool(
+                        prompt_defaults.get("enable_paper_attributes", True)
+                    ),
+                    "outline_mode": str(prompt_defaults.get("outline_mode") or "lite"),
+                    "post_refine_mode": str(
+                        prompt_defaults.get("post_refine_mode") or "lite"
+                    ),
+                },
+            },
+        }
+
+        changed = False
+        for cap_id in missing:
+            tpl = templates.get(cap_id)
+            if not tpl:
+                continue
+            item = dict(tpl)
+            item["created_at"] = now
+            item["updated_at"] = now
+            caps.append(item)
+            changed = True
+        if changed:
+            self._save_config_list(self.system_capabilities_path, caps)
 
     def _ensure_deploy_catalog(self) -> None:
         """Align credentials/instances/capability refs with deploy.defaults.json stable IDs."""
@@ -901,7 +1063,7 @@ class FileStore:
             WEB_SEARCH_PARAM_DEFAULTS,
         )
 
-        if not self.system_capabilities_path.is_file():
+        if not self._config_path_exists(self.system_capabilities_path):
             return
         caps = self._load_config_list(self.system_capabilities_path)
         defaults_by_cap = {

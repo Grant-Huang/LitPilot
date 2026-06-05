@@ -183,3 +183,111 @@ def test_deploy_catalog_remaps_legacy_random_instance_ids(
     assert str(llm_cred["id"]) == str(stable_cred["id"])
     review_cap = next(c for c in caps if c.get("capability_id") == "review_main")
     assert review_cap["primary_ref"]["id"] == str(stable_inst["id"])
+
+
+def test_ensure_default_capabilities_backfills_web_search_and_fetch(
+    store: FileStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    now = "2020-01-01T00:00:00+00:00"
+    legacy_cred_id = "deadbeef" * 4
+    legacy_inst_id = "cafebabe" * 4
+    store._save_config_list(
+        store.system_credentials_path,
+        [
+            {
+                "id": legacy_cred_id,
+                "type": "llm:minimax_cn",
+                "name": "LLM · minimax_cn · primary",
+                "has_secret": True,
+                "secret": "sk-test-key",
+                "created_at": now,
+                "updated_at": now,
+                "status": "unknown",
+                "last_verified_at": None,
+            },
+            {
+                "id": "tavily-1",
+                "type": "tavily",
+                "name": "Tavily · default",
+                "has_secret": False,
+                "secret": "",
+                "created_at": now,
+                "updated_at": now,
+                "status": "unknown",
+                "last_verified_at": None,
+            },
+            {
+                "id": "jina-1",
+                "type": "jina",
+                "name": "Jina · default",
+                "has_secret": False,
+                "secret": "",
+                "created_at": now,
+                "updated_at": now,
+                "status": "unknown",
+                "last_verified_at": None,
+            },
+        ],
+    )
+    store._save_config_list(
+        store.system_instances_path,
+        [
+            {
+                "id": legacy_inst_id,
+                "name": "review-main",
+                "provider": "minimax_cn",
+                "credential_id": legacy_cred_id,
+                "model_name": "MiniMax-M3",
+                "default_params": {},
+                "created_at": now,
+                "updated_at": now,
+                "status": "unknown",
+                "last_verified_at": None,
+            }
+        ],
+    )
+    store._save_config_list(
+        store.system_capabilities_path,
+        [
+            {
+                "capability_id": "review_main",
+                "label": "文献综述生成",
+                "enabled": True,
+                "primary_ref": {"kind": "instance", "id": legacy_inst_id},
+                "override_params": {},
+                "params": {},
+                "created_at": now,
+                "updated_at": now,
+            }
+        ],
+    )
+    prefs_path = store.personal_preferences_path
+    prefs_path.parent.mkdir(parents=True, exist_ok=True)
+    prefs_path.write_text(
+        '{"preferences": {"citation_format": "apa"}, "created_at": "'
+        + now
+        + '", "updated_at": "'
+        + now
+        + '"}',
+        encoding="utf-8",
+    )
+
+    store.ensure_settings_v2_migrated()
+
+    cap_ids = {str(c.get("capability_id") or "") for c in store.list_system_capabilities()}
+    assert "web_search" in cap_ids
+    assert "web_fetch" in cap_ids
+    assert "orchestrator" in cap_ids
+    assert "literature_source" in cap_ids
+    assert "prompts" in cap_ids
+    cred_templates = {str(t["key"]): str(t["id"]) for t in deploy_credentials()}
+    web_search = next(
+        c for c in store.list_system_capabilities() if c["capability_id"] == "web_search"
+    )
+    web_fetch = next(
+        c for c in store.list_system_capabilities() if c["capability_id"] == "web_fetch"
+    )
+    assert web_search["primary_ref"]["id"] == cred_templates["tavily"]
+    assert web_fetch["primary_ref"]["id"] == cred_templates["jina"]

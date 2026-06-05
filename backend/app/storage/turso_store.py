@@ -77,6 +77,7 @@ class TursoStore(FileStore):
         caps_exists = self._config_path_exists(self.system_capabilities_path)
         prefs_exists = self._config_path_exists(self.personal_preferences_path)
         if creds_exists and inst_exists and caps_exists and prefs_exists:
+            self._ensure_default_capabilities()
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
             self._ensure_deploy_catalog()

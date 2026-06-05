@@ -23,6 +23,11 @@ type ChatSessionContextValue = {
   handleRenameSession: (id: string, title: string) => Promise<void>;
   handleTogglePinSession: (id: string, pinned: boolean) => Promise<void>;
   setActiveSessionId: (id: string | null) => void;
+  clearMessages: () => void;
+  reloadSessionMessages: (
+    id: string,
+    opts?: { pendingUserText?: string | null; maxAttempts?: number },
+  ) => Promise<void>;
 };
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -48,6 +53,39 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     const msgs = await sessionsApi.messages(id);
     setMessages(msgs);
   }, []);
+
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  const reloadSessionMessages = useCallback(
+    async (
+      id: string,
+      opts?: { pendingUserText?: string | null; maxAttempts?: number },
+    ) => {
+      const maxAttempts = opts?.maxAttempts ?? 5;
+      const pending = opts?.pendingUserText?.trim() || null;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const msgs = await sessionsApi.messages(id);
+        const hasAssistant = msgs.some((m) => m.role === "assistant");
+        const userOk =
+          !pending ||
+          msgs.some((m) => m.role === "user" && m.content === pending);
+        if (hasAssistant && userOk) {
+          setMessages(msgs);
+          return;
+        }
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, 150 * (attempt + 1)),
+          );
+        }
+      }
+      const msgs = await sessionsApi.messages(id);
+      setMessages(msgs);
+    },
+    [],
+  );
 
   const clearStoredActiveSession = () => {
     if (typeof window !== "undefined") {
@@ -162,6 +200,8 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       handleRenameSession,
       handleTogglePinSession,
       setActiveSessionId,
+      clearMessages,
+      reloadSessionMessages,
     }),
     [
       sessions,
@@ -173,6 +213,8 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       handleDeleteSession,
       handleRenameSession,
       handleTogglePinSession,
+      clearMessages,
+      reloadSessionMessages,
     ],
   );
 

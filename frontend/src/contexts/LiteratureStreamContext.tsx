@@ -24,6 +24,7 @@ import {
   sessionHasAssistantReply,
 } from "@/lib/streamTurnFinalize";
 import { sessionsApi } from "@/lib/api";
+import { clearClarificationUnreadTitle } from "@/lib/clarificationTitle";
 
 type LiteratureStreamContextValue = {
   streamState: ReturnType<typeof useSSEStream>["state"];
@@ -48,6 +49,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     loadSessions,
     handleSelectSession,
     setActiveSessionId,
+    clearMessages,
   } = useChatSession();
 
   const { state: streamState, start, abort, reset } = useSSEStream(
@@ -58,7 +60,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   const [streamSettling, setStreamSettling] = useState(false);
   const streamStartedRef = useRef(false);
   const streamFinalizeRef = useRef(false);
+  const turnGenerationRef = useRef(0);
   const turnSessionRef = useRef<string | null>(null);
+  /** SSE extension.session 下发的权威 session_id */
+  const streamSessionRef = useRef<string | null>(null);
   const pendingUserTextRef = useRef<string | null>(null);
   const extensionHandledRef = useRef(0);
 
@@ -72,7 +77,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     streamFinalizeRef.current = true;
     setStreamSettling(true);
 
-    const sid = turnSessionRef.current || activeSessionId;
+    const turnGen = turnGenerationRef.current;
+    const sid =
+      streamSessionRef.current || turnSessionRef.current || activeSessionId;
     const pendingUser = pendingUserTextRef.current;
     const snapshotText = streamState.textContent?.trim() ?? "";
     const trace = collectExecutionTraceFromStream(streamState);
@@ -124,17 +131,16 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
             const msgs = await sessionsApi.messages(sid);
             if (sessionHasAssistantReply(msgs, pendingUser)) break;
             await new Promise((resolve) => {
-              setTimeout(
-                resolve,
-                ASSISTANT_RELOAD_BASE_MS + attempt * 80,
-              );
+              setTimeout(resolve, ASSISTANT_RELOAD_BASE_MS + attempt * 80);
             });
           }
         }
       } finally {
+        if (turnGenerationRef.current !== turnGen) return;
         reset();
         streamStartedRef.current = false;
         turnSessionRef.current = null;
+        streamSessionRef.current = null;
         pendingUserTextRef.current = null;
         streamFinalizeRef.current = false;
         setStreamSettling(false);
@@ -161,6 +167,14 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     };
     for (let i = extensionHandledRef.current; i < log.length; i += 1) {
       const ext = log[i];
+      if (ext.payload.name === "session" && streamStartedRef.current) {
+        const sid = (ext.payload.data as Record<string, unknown> | undefined)
+          ?.session_id;
+        if (typeof sid === "string" && sid) {
+          streamSessionRef.current = sid;
+          turnSessionRef.current = sid;
+        }
+      }
       handleLiteratureExtensionEvent(
         ext.payload.name,
         ext.payload.data as Record<string, unknown> | undefined,
@@ -172,7 +186,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     const pending = pendingUserTextRef.current;
-    if (!pending) return;
+    if (!pending || streamSettling) return;
     const persisted = storedMessages.some(
       (m) => m.role === "user" && m.content === pending,
     );
@@ -185,7 +199,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     setLiveMessages((prev) =>
       prev.filter((m) => !(m.role === "user" && m.content === pending)),
     );
-  }, [storedMessages]);
+  }, [storedMessages, streamSettling]);
 
   useEffect(() => {
     if (streaming || streamSettling) return;
@@ -205,11 +219,15 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         sessionId = meta.id;
         setActiveSessionId(sessionId);
         persistActiveSession(sessionId);
+        clearMessages();
         await loadSessions();
       }
 
+      turnGenerationRef.current += 1;
       streamFinalizeRef.current = false;
       turnSessionRef.current = sessionId;
+      streamSessionRef.current = sessionId;
+      clearClarificationUnreadTitle();
       pendingUserTextRef.current = trimmed;
       setLiveMessages([
         {
@@ -244,6 +262,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         ]);
         streamStartedRef.current = false;
         turnSessionRef.current = null;
+        streamSessionRef.current = null;
         streamFinalizeRef.current = false;
         setStreamSettling(false);
         reset();
@@ -255,6 +274,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       streamSettling,
       setActiveSessionId,
       loadSessions,
+      clearMessages,
       reset,
       start,
     ],
@@ -264,6 +284,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     if (!streaming && !streamSettling) {
       setLiveMessages([]);
       turnSessionRef.current = null;
+      streamSessionRef.current = null;
     }
   }, [streaming, streamSettling]);
 
