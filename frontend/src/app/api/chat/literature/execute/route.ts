@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { getBackendBase } from "@/lib/backendUrl";
 
 /**
  * 流式透传 SSE — Next rewrites 会缓冲 event-stream，导致前端长时间无输出。
@@ -8,12 +9,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const backendBase =
-  process.env.BACKEND_URL ||
-  process.env.API_PROXY_TARGET ||
-  "http://127.0.0.1:8001";
-
 export async function POST(req: NextRequest) {
+  const backendBase = getBackendBase();
   const body = await req.text();
 
   let upstream: Response;
