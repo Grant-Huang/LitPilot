@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import clsx from "clsx";
 import { Tooltip } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
@@ -133,4 +134,25 @@ export function SettingToolbar({
 
 export function feedbackOk(msg: string): boolean {
   return msg.includes("通过") || msg === "已保存" || msg === "已创建" || msg === "测试完成";
+}
+
+export function useUnsavedGuard(dirty: boolean) {
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+}
+
+export function SettingsListPanel({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={clsx("card settings-panel", className)}>{children}</div>;
 }
