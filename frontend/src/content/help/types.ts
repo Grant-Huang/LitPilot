@@ -5,10 +5,11 @@ export type HelpPageId =
   | "multi-turn"
   | "tavily-search"
   | "settings-guide"
+  | "clarification"
   | "tech-stack"
   | "faq";
 
-export type HelpCategory = "入门" | "写作" | "配置" | "参考" | "疑难";
+export type HelpCategory = "入门" | "写作" | "配置" | "疑难" | "参考";
 
 export type HelpPage = {
   id: HelpPageId;
@@ -23,8 +24,8 @@ export const HELP_CATEGORIES: HelpCategory[] = [
   "入门",
   "写作",
   "配置",
-  "参考",
   "疑难",
+  "参考",
 ];
 
 /** [[page-id|label]] internal help links */

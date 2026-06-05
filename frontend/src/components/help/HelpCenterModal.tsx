@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Modal } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import {
@@ -10,7 +10,7 @@ import {
   HELP_PAGES,
   type HelpPageId,
 } from "@/content/help";
-import { renderHelpMarkdownChunk, splitHelpBody } from "@/content/help/renderHelpBody";
+import { renderHelpBodyHtml } from "@/content/help/renderHelpBody";
 import { HELP_PAGE_MAP } from "@/content/help/index";
 
 type Props = {
@@ -27,42 +27,41 @@ function HelpBody({
   body: string;
   onNavigate: (id: HelpPageId) => void;
 }) {
-  const parts = useMemo(() => splitHelpBody(body), [body]);
+  const html = useMemo(() => renderHelpBodyHtml(body), [body]);
+
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const target = (event.target as HTMLElement).closest(
+        "[data-help-page]",
+      ) as HTMLElement | null;
+      if (!target) return;
+      const id = target.getAttribute("data-help-page");
+      if (id && HELP_PAGE_MAP[id as HelpPageId]) {
+        event.preventDefault();
+        onNavigate(id as HelpPageId);
+      }
+    },
+    [onNavigate],
+  );
+
+  if (!html) return null;
 
   return (
-    <div className="help-center__body">
-      {parts.map((part, idx) => {
-        if (part.kind === "link") {
-          if (!HELP_PAGE_MAP[part.id]) {
-            return <span key={idx}>{part.label}</span>;
-          }
-          return (
-            <button
-              key={idx}
-              type="button"
-              className="help-center__inline-link"
-              onClick={() => onNavigate(part.id)}
-            >
-              {part.label}
-            </button>
-          );
-        }
-        const html = renderHelpMarkdownChunk(part.text);
-        if (!html) return null;
-        return (
-          <div
-            key={idx}
-            className="help-center__md"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        );
-      })}
-    </div>
+    <div
+      className="help-center__body help-center__prose"
+      onClick={handleClick}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 
 export function HelpCenterModal({ open, pageId, onClose, onPageChange }: Props) {
   const page = getHelpPage(pageId);
+  const mainRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [pageId]);
 
   const handleNavigate = useCallback(
     (id: HelpPageId) => {
@@ -120,7 +119,7 @@ export function HelpCenterModal({ open, pageId, onClose, onPageChange }: Props) 
             );
           })}
         </nav>
-        <div className="help-center__main">
+        <div className="help-center__main" ref={mainRef}>
           <header className="help-center__page-header">
             <h2 className="help-center__page-title">{page.title}</h2>
             <p className="help-center__page-summary">{page.summary}</p>

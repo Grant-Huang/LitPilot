@@ -1866,14 +1866,21 @@
 }
 
 .help-center__body {
-  flex: 1;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--color-text-secondary);
 }
 
-.help-center__md .litpilot-md-inline,
-.help-center__md code {
+.help-center__prose {
+  max-width: 100%;
+}
+
+.help-center__prose > :first-child {
+  margin-top: 0;
+}
+
+.help-center__prose .litpilot-md-inline,
+.help-center__prose code {
   font-size: 0.92em;
   padding: 1px 5px;
   border-radius: 4px;
@@ -1882,50 +1889,62 @@
   border: 1px solid var(--color-border-light);
 }
 
-.help-center__md h1,
-.help-center__md h2,
-.help-center__md h3 {
+.help-center__prose h2,
+.help-center__prose h3,
+.help-center__prose .help-center__body-title {
   color: var(--color-text);
   margin: 16px 0 8px;
 }
 
-.help-center__md h1 {
-  font-size: 16px;
-}
-
-.help-center__md h2 {
+.help-center__prose h2,
+.help-center__prose .help-center__body-title {
   font-size: 15px;
+  font-weight: 600;
 }
 
-.help-center__md h3 {
+.help-center__prose h3 {
   font-size: 14px;
+  font-weight: 600;
 }
 
-.help-center__md p {
+.help-center__prose p {
   margin: 0 0 10px;
 }
 
-.help-center__md ul {
+.help-center__prose ul {
   margin: 0 0 10px;
   padding-left: 1.2rem;
 }
 
-.help-center__md table {
-  width: 100%;
-  border-collapse: collapse;
+.help-center__prose li {
+  margin-bottom: 4px;
+}
+
+.help-center__table-wrap {
+  overflow-x: auto;
   margin: 0 0 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.help-center__table-wrap table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
   font-size: 12px;
 }
 
-.help-center__md th,
-.help-center__md td {
+.help-center__table-wrap th,
+.help-center__table-wrap td {
   border: 1px solid var(--color-border-light);
   padding: 6px 8px;
   text-align: left;
+  vertical-align: top;
+  word-break: break-word;
 }
 
-.help-center__md th {
+.help-center__table-wrap th {
   background: color-mix(in srgb, var(--color-text) 4%, var(--color-bg));
+  white-space: nowrap;
 }
 
 .help-center__inline-link {
@@ -1933,11 +1952,14 @@
   border: none;
   background: none;
   padding: 0;
-  margin: 0 2px;
+  margin: 0;
   color: var(--color-accent);
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
+  line-height: inherit;
+  white-space: normal;
+  vertical-align: baseline;
 }
 
 .help-center__pre {

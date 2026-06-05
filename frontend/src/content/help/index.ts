@@ -1,6 +1,7 @@
 import type { HelpPage, HelpPageId } from "./types";
 import {
   artifactPanelPage,
+  clarificationPage,
   faqPage,
   multiTurnPage,
   quickStartPage,
@@ -12,13 +13,14 @@ import {
 
 export const HELP_PAGES: HelpPage[] = [
   quickStartPage,
-  researchBriefPage,
   artifactPanelPage,
+  researchBriefPage,
   multiTurnPage,
   tavilySearchPage,
   settingsGuidePage,
-  techStackPage,
+  clarificationPage,
   faqPage,
+  techStackPage,
 ];
 
 export const HELP_PAGE_MAP: Record<HelpPageId, HelpPage> = Object.fromEntries(
