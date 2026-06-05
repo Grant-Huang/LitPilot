@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Spin } from "antd";
-import { FieldTip, InlineCheck, InlineField, SettingToolbar, SettingsListPanel, useUnsavedGuard } from "../_ui";
+import { FieldTip, InlineCheck, InlineField, SettingToolbar, SettingsListPanel, feedbackOk, useUnsavedGuard } from "../_ui";
 import {
   capabilityDisplayTitle,
   capabilityNeedsCredentialRef,
@@ -515,7 +515,7 @@ function CapabilityCard({
         }
         titleMuted={!enabled}
         feedback={rowMsg}
-        feedbackOk={rowMsg === "已保存"}
+        feedbackOk={feedbackOk(rowMsg)}
         actions={
           <button
             type="button"

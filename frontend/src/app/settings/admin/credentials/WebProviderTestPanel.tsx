@@ -105,17 +105,14 @@ export function WebProviderTestPanel({
   };
 
   return (
-    <div className="card settings-cred-row settings-web-provider-test">
+    <div className="settings-cred-row settings-list-row settings-web-provider-test">
       <SettingToolbar
         title={
-          <span className="settings-cap-card__title-block">
-            <span>
-              Web 后端连通测试
-              <FieldTip title="使用能力绑定页当前保存的后端配置进行探测；改后端后请先在能力绑定页保存。" />
-            </span>
-            <span className="settings-cap-card__subtitle">
-              fetch · {fetchProvider} · search · {searchProvider}
-            </span>
+          <span className="settings-cap-card__title-row">
+            Web 后端连通测试
+            <FieldTip
+              title={`使用能力绑定页当前保存的后端配置进行探测。当前 fetch · ${fetchProvider} · search · ${searchProvider}。改后端后请先在能力绑定页保存。`}
+            />
           </span>
         }
         actions={<span />}

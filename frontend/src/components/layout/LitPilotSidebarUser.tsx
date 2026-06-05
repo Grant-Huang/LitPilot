@@ -80,7 +80,7 @@ export function LitPilotSidebarUser() {
       key: "settings-admin",
       icon: <SettingOutlined />,
       label: "管理员配置",
-      onClick: () => router.push("/settings/admin/credentials"),
+      onClick: () => router.push("/settings/admin"),
     },
     { type: "divider" },
     {

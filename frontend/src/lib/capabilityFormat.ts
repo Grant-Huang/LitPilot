@@ -174,7 +174,7 @@ export function capabilityRefLabel(
 ): string {
   if (capId === "web_search") {
     const p = String(params?.search_provider ?? "native");
-    if (p in ("brave", "tavily")) return "web_search 凭据";
+    if (p === "brave" || p === "tavily") return "web_search 凭据";
     return "凭据";
   }
   if (capId === "web_fetch") {

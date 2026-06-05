@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Spin } from "antd";
 
-import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
+import { FieldTip, InlineCheck, InlineField, SettingToolbar, feedbackOk, SettingsListPanel, useUnsavedGuard } from "../_ui";
 
 import { SettingsLoading, errorMessage } from "../../_shared";
 
@@ -39,6 +39,12 @@ const POST_REFINE_TIPS: Record<PostRefineMode, string> = {
   lite: "拼接后去除套话结语、检测缺失章节、统计「待核实」标记，并推送 refine 报告 SSE。",
 };
 
+const PAPER_ATTR_TIP =
+  "抓取后为每篇文献抽取 problem / method / findings 等字段，写入 paper_index，供大纲挂载与各章写作引用。";
+
+const PROMPTS_HINT =
+  "留空表示使用内置默认。自定义 JSON 类提示词若缺少输出契约字段，保存后运行时会自动追加契约段。";
+
 function parseOutlineMode(raw: unknown): OutlineMode {
   const v = String(raw || "lite").toLowerCase();
   return v === "off" || v === "full" ? v : "lite";
@@ -46,10 +52,6 @@ function parseOutlineMode(raw: unknown): OutlineMode {
 
 function parsePostRefineMode(raw: unknown): PostRefineMode {
   return String(raw || "lite").toLowerCase() === "off" ? "off" : "lite";
-}
-
-function SettingTip({ children }: { children: React.ReactNode }) {
-  return <p className="settings-field-tip">{children}</p>;
 }
 
 function groupMeta(meta: PromptTemplateMeta[]): { id: string; label: string; items: PromptTemplateMeta[] }[] {
@@ -105,6 +107,8 @@ export default function AdminPromptsPage() {
     enablePaperAttributes !== savedEnablePaperAttributes ||
     outlineMode !== savedOutlineMode ||
     postRefineMode !== savedPostRefineMode;
+
+  useUnsavedGuard(dirty);
 
   useEffect(() => {
     void Promise.all([settingsApiV2.getSystemCapabilities(), settingsApiV2.getPromptDefaults()])
@@ -175,43 +179,40 @@ export default function AdminPromptsPage() {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const saveButton = (
+    <button
+      type="button"
+      className="btn-primary btn-sm"
+      disabled={saving || !dirty || !promptsCap}
+      onClick={() => void onSave()}
+    >
+      {saving ? <Spin size="small" /> : null}
+      保存
+    </button>
+  );
+
   if (loading) {
     return <SettingsLoading />;
   }
 
   return (
-    <div className="card settings-section settings-section--compact settings-prompts">
+    <SettingsListPanel className="settings-prompts">
       <SettingToolbar
         title="提示词与生成策略"
         feedback={msg}
         feedbackOk={feedbackOk(msg)}
-        actions={
-          <button
-            type="button"
-            className="btn-primary btn-sm"
-            disabled={saving || !dirty || !promptsCap}
-            onClick={() => void onSave()}
-          >
-            {saving ? <Spin size="small" /> : null}
-            保存
-          </button>
-        }
+        actions={saveButton}
       />
 
       <div className="settings-prompts__toggles">
-        <label className="settings-cap-inline-check settings-prompts__toggle">
-          <input
-            type="checkbox"
-            checked={enablePaperAttributes}
-            onChange={(e) => setEnablePaperAttributes(e.target.checked)}
-          />
-          启用文献结构化（AttributeTree lite）
-        </label>
-        <SettingTip>
-          抓取后为每篇文献抽取 problem / method / findings 等字段，写入 paper_index，供大纲挂载与各章写作引用。
-        </SettingTip>
+        <InlineCheck
+          label="启用文献结构化（AttributeTree lite）"
+          checked={enablePaperAttributes}
+          onChange={setEnablePaperAttributes}
+          tip={PAPER_ATTR_TIP}
+        />
 
-        <InlineField label="大纲驱动分章" htmlFor="outline-mode">
+        <InlineField label="大纲驱动分章" htmlFor="outline-mode" tip={OUTLINE_MODE_TIPS[outlineMode]}>
           <select
             id="outline-mode"
             className="input settings-prompts__select"
@@ -225,9 +226,8 @@ export default function AdminPromptsPage() {
             ))}
           </select>
         </InlineField>
-        <SettingTip>{OUTLINE_MODE_TIPS[outlineMode]}</SettingTip>
 
-        <InlineField label="综述后处理" htmlFor="post-refine-mode">
+        <InlineField label="综述后处理" htmlFor="post-refine-mode" tip={POST_REFINE_TIPS[postRefineMode]}>
           <select
             id="post-refine-mode"
             className="input settings-prompts__select"
@@ -241,13 +241,14 @@ export default function AdminPromptsPage() {
             ))}
           </select>
         </InlineField>
-        <SettingTip>{POST_REFINE_TIPS[postRefineMode]}</SettingTip>
       </div>
 
-      <p className="settings-prompts__hint settings-prompts__hint--top">
-        留空表示使用内置默认。自定义 JSON 类提示词若缺少输出契约字段，保存后运行时会自动追加契约段。
-        动态字段 <code>narration_focus</code> / <code>writing_emphasis</code> 由 Checkpoint A 规划模型生成，无需在此配置。
-      </p>
+      <details className="settings-advanced settings-prompts__advanced">
+        <summary className="settings-advanced__summary">编辑说明</summary>
+        <div className="settings-advanced__body">
+          <p className="settings-field-note">{PROMPTS_HINT}</p>
+        </div>
+      </details>
 
       {groups.map((group) => (
         <section key={group.id} className="settings-prompts__group">
@@ -264,7 +265,10 @@ export default function AdminPromptsPage() {
             ? group.items.map((item) => (
                 <div key={item.key} className="settings-prompts__field">
                   <div className="settings-prompts__field-head">
-                    <label htmlFor={`prompt-${item.key}`}>{item.label}</label>
+                    <label htmlFor={`prompt-${item.key}`}>
+                      {item.label}
+                      {item.hint ? <FieldTip title={item.hint} /> : null}
+                    </label>
                     <button
                       type="button"
                       className="btn-ghost btn-sm"
@@ -273,11 +277,6 @@ export default function AdminPromptsPage() {
                       恢复默认
                     </button>
                   </div>
-                  {item.hint ? (
-                    <p className="settings-field-tip">
-                      {item.hint}
-                    </p>
-                  ) : null}
                   <textarea
                     id={`prompt-${item.key}`}
                     className="input settings-textarea font-mono settings-prompts__editor"
@@ -297,6 +296,13 @@ export default function AdminPromptsPage() {
             : null}
         </section>
       ))}
-    </div>
+
+      {dirty ? (
+        <div className="settings-prompts__save-bar">
+          <span className="settings-prompts__save-bar-note">有未保存的修改</span>
+          {saveButton}
+        </div>
+      ) : null}
+    </SettingsListPanel>
   );
 }

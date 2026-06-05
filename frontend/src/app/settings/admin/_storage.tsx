@@ -71,25 +71,33 @@ export function StorageSettingsPanel({
   }, [url, tokenDraft, storage.database_url, onSaved]);
 
   const statusLabel = storage.turso_ready ? "已通过" : "待配置";
-  const statusValue = storage.turso_ready ? "ok" : "pending";
 
   return (
     <div className="settings-cred-row settings-list-row">
       <SettingToolbar
         title="持久化存储"
-        status={statusValue}
-        statusHint={
-          storage.turso_ready
-            ? `${storageBackendLabel(storage.backend)} · 连接正常`
-            : "请配置 Turso Database URL 与 Auth Token"
-        }
         extra={
-          <span className="settings-storage-meta">
-            {storageBackendLabel(storage.backend)}
-            {storage.tenant_id && storage.tenant_id !== "default"
-              ? ` · 租户 ${storage.tenant_id}`
-              : ""}
-          </span>
+          <>
+            <span
+              className={clsx(
+                "settings-cred-status",
+                storage.turso_ready ? "settings-cred-status--ok" : "settings-cred-status--pending",
+              )}
+              title={
+                storage.turso_ready
+                  ? `${storageBackendLabel(storage.backend)} · 连接正常`
+                  : "请配置 Turso Database URL 与 Auth Token"
+              }
+            >
+              {statusLabel}
+            </span>
+            <span className="settings-storage-meta">
+              {storageBackendLabel(storage.backend)}
+              {storage.tenant_id && storage.tenant_id !== "default"
+                ? ` · 租户 ${storage.tenant_id}`
+                : ""}
+            </span>
+          </>
         }
         feedback={rowMsg}
         feedbackOk={feedbackOk(rowMsg)}
