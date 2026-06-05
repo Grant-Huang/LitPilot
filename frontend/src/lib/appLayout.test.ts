@@ -11,6 +11,8 @@ describe("appLayout", () => {
     expect(isChatRoute("/chat/foo")).toBe(true);
     expect(isFunctionalRoute("/settings")).toBe(true);
     expect(isFunctionalRoute("/library")).toBe(true);
+    expect(isFunctionalRoute("/help")).toBe(true);
+    expect(isFunctionalRoute("/settings/admin")).toBe(true);
     expect(isFunctionalRoute("/chat")).toBe(false);
   });
 

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 _URL_IN_TEXT = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
 _MAX_REQUEST_URLS = 50
+_S2_PAPER_HASH = re.compile(r"^[a-f0-9]{40}$", re.I)
 
 
 def _normalize_url(raw: str) -> str | None:
@@ -128,12 +129,12 @@ def _dedupe_urls(urls: list[str]) -> list[str]:
 
 
 def merge_fetch_hits(
-    tavily_hits: list[dict[str, str]],
+    search_hits: list[dict[str, str]],
     extra_urls: list[str],
     *,
     max_urls: int,
 ) -> tuple[list[dict[str, str]], int]:
-    """Prioritize user URLs, then Tavily hits. Returns (queue, extra_count)."""
+    """Prioritize user URLs, then web_search hits. Returns (queue, extra_count)."""
     seen: set[str] = set()
     merged: list[dict[str, str]] = []
     extra_count = 0
@@ -152,13 +153,13 @@ def merge_fetch_hits(
         if len(merged) >= max_urls:
             return merged, extra_count
 
-    for hit in tavily_hits:
+    for hit in search_hits:
         url = str(hit.get("url") or "").strip()
         if not url or url in seen:
             continue
         seen.add(url)
         row = dict(hit)
-        row.setdefault("source", "tavily")
+        row.setdefault("source", "web_search")
         merged.append(row)
         if len(merged) >= max_urls:
             break
@@ -166,11 +167,52 @@ def merge_fetch_hits(
     return merged, extra_count
 
 
+def display_title_from_url(url: str) -> str:
+    """从 URL 推导可读标题；Semantic Scholar 末段为 paper id，取上一段 slug。"""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    try:
+        parsed = urlparse(u)
+        parts = [p for p in parsed.path.split("/") if p]
+        if not parts:
+            return parsed.netloc or ""
+        if "semanticscholar.org" in (parsed.netloc or "").lower() and len(parts) >= 2:
+            if _S2_PAPER_HASH.match(parts[-1]):
+                slug = parts[-2]
+                title = slug.replace("-", " ").replace("%20", " ")
+                return title[:200] if len(title) >= 8 else ""
+        seg = parts[-1]
+        if _S2_PAPER_HASH.match(seg) and len(parts) >= 2:
+            seg = parts[-2]
+        title = seg.replace("-", " ").replace("%20", " ")
+        if len(title) >= 8 and not title.lower().startswith("http"):
+            return title[:200]
+        return parsed.netloc or u[:80]
+    except Exception:
+        return u[:80]
+
+
+def title_from_search_hit(hit: dict[str, str], *, url: str = "") -> str:
+    """检索命中写入文献库时的标题（优先检索结果 title，避免用 paper id 占位）。"""
+    link = (url or str(hit.get("url") or "")).strip()
+    title = str(hit.get("title") or "").strip()
+    if title and title != link and not _S2_PAPER_HASH.match(title):
+        return title[:200]
+    snippet = str(hit.get("snippet") or "").strip()
+    if snippet:
+        first = snippet.split("\n")[0].strip()
+        if len(first) >= 12 and not first.lower().startswith("http"):
+            return first[:200]
+    derived = display_title_from_url(link)
+    return derived or "（标题待补全）"
+
+
 def resolve_fetch_display_title(hit: dict[str, str], ctx_md: str = "") -> str:
     """用于 UI 展示的文章标题（不用域名冒充标题）。"""
     url = str(hit.get("url") or "").strip()
     title = str(hit.get("title") or "").strip()
-    if title and title != url:
+    if title and title != url and not _S2_PAPER_HASH.match(title):
         return title[:200]
 
     if ctx_md:

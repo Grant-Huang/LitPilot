@@ -47,6 +47,20 @@ def _cors_allow_origins() -> list[str]:
     ]
 
 
+@app.on_event("startup")
+async def _log_runtime_config() -> None:
+    from app.core.config import DATA_DIR
+    from app.storage.file_store import get_store
+
+    merged = get_store().get_agent_settings_merged()
+    logger.info(
+        "LitPilot data_dir=%s fetch_provider=%s max_fetch_urls=%s",
+        DATA_DIR,
+        merged.get("fetch_provider"),
+        merged.get("max_fetch_urls"),
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),

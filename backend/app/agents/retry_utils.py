@@ -1,4 +1,4 @@
-"""Retry helpers for Tavily / Jina fetch."""
+"""Retry helpers for web_search / web_fetch."""
 from __future__ import annotations
 
 import asyncio

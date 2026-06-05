@@ -24,12 +24,13 @@ from app.agents.literature_phases import (
 )
 from app.agents.literature_planner import PlannerContext
 from app.agents.literature_router import LiteratureRouterResult
-from app.agents.literature_source import should_skip_tavily
+from app.agents.literature_source import should_skip_web_search
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
-from app.agents.literature_turn_graph import sync_graph_node
-from app.agents.literature_turn_helpers import augment_query, resolve_search_queries
+from app.agents.literature_turn_graph import sync_graph_node, sync_graph_nodes
+from app.agents.literature_turn_helpers import resolve_search_queries
 from app.agents.search_expansion import expand_search_queries
+from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
 from app.agents.url_list import effective_fetch_cap
 from app.agents.workflow_emitter import WorkflowNodeEmitter
@@ -51,7 +52,7 @@ class RetrievalPipelineContext:
     clar_state: ClarificationState
     finalize_ctx: TurnFinalizeContext
     store: Any
-    llm: Any
+    planner_llm: Any
     emitter: WorkflowNodeEmitter
     graph: Any
     graph_artifact_id: str
@@ -61,26 +62,28 @@ class RetrievalPipelineContext:
     citation_format: str
     fmt_label: str
     source_mode: str
-    tavily_key: str | None
-    tavily_max_results: int
-    tavily_retry_count: int
+    search_api_key: str | None
+    search_max_results: int
+    search_retry_count: int
     fetch_retry_delay_ms: int
-    tavily_include_domains: list[str]
-    tavily_exclude_domains: list[str]
-    tavily_search_depth: str
-    tavily_enforce_domain_filter: bool
-    tavily_enable_junk_filter: bool
+    search_include_domains: list[str]
+    search_exclude_domains: list[str]
+    search_depth: str
+    search_enforce_domain_filter: bool
+    search_enable_junk_filter: bool
     enable_query_expansion: bool
     search_expansion_count: int
     enable_paper_attributes: bool
     max_fetch_urls: int
     max_source_chars: int
-    jina_key: str | None
+    fetch_api_key: str | None
     parallel: int
     timeout_sec: int
     fetch_retry_count: int
     upload_urls: list[str]
     working: SessionCorpus
+    search_provider: str = "native"
+    fetch_provider: str = "native"
     fetch_results: list[tuple[dict[str, str], str, str | None]] = field(default_factory=list)
     cite_records: list[Any] = field(default_factory=list)
     failed_literature: list[dict[str, str]] = field(default_factory=list)
@@ -92,7 +95,24 @@ class RetrievalPipelineContext:
     outline_draft: LiteratureOutline | None = None
     outline_obj: LiteratureOutline | None = None
     sub_topics_for_search: list[Any] = field(default_factory=list)
+    search_hit_exclusions: list[str] = field(default_factory=list)
     early_return: bool = False
+
+
+def _search_phase_corpus(ctx: RetrievalPipelineContext) -> SessionCorpus | None:
+    """检索去重语料：has_corpus 时用已持久化的会话 corpus，避免 working 为空导致去重不一致。"""
+    if not ctx.turn_ctx.has_corpus:
+        return None
+    saved = ctx.finalize_ctx.corpus
+    if saved and (
+        saved.known_url_keys
+        or saved.fetch_hits
+        or saved.sources_md
+    ):
+        return saved
+    if ctx.working.known_url_keys or ctx.working.fetch_hits:
+        return ctx.working
+    return None
 
 
 async def run_retrieval_pipeline(
@@ -102,8 +122,8 @@ async def run_retrieval_pipeline(
     working = ctx.working
 
     run_search = intent.intent in ("new_topic", "expand_search") or (
-        intent.intent == "supplement" and not intent.skip_tavily
-    ) or (intent.intent == "synthesis_matrix" and not intent.skip_tavily)
+        intent.intent == "supplement" and not intent.skip_web_search
+    ) or (intent.intent == "synthesis_matrix" and not intent.skip_web_search)
     run_fetch = intent.intent in (
         "new_topic",
         "expand_search",
@@ -134,22 +154,26 @@ async def run_retrieval_pipeline(
         base_query, query = resolve_search_queries(
             intent, ctx.router_result, ctx.route_message
         )
-        skip_tavily = should_skip_tavily(ctx.source_mode, ctx.upload_urls)
-        if intent.skip_tavily:
-            skip_tavily = True
+        skip_web_search = should_skip_web_search(ctx.source_mode, ctx.upload_urls)
+        if intent.skip_web_search:
+            skip_web_search = True
         search_out: dict[str, Any] = {}
         try:
             expanded_queries = [query]
             if (
                 ctx.use_outline_path
                 and len(ctx.sub_topics_for_search) >= 2
-                and not skip_tavily
+                and not skip_web_search
             ):
                 expanded_queries = [
-                    augment_query(str(st.search_query or query))
+                    str(st.search_query or query)
                     for st in ctx.sub_topics_for_search
                 ]
-            elif ctx.enable_query_expansion and ctx.search_expansion_count > 1:
+            elif (
+                ctx.enable_query_expansion
+                and ctx.search_expansion_count > 1
+                and not skip_web_search
+            ):
                 planner_llm = await get_planner_llm()
                 expanded_queries = await expand_search_queries(
                     query,
@@ -159,52 +183,76 @@ async def run_retrieval_pipeline(
                     use_llm=True,
                 )
 
+            if not skip_web_search and expanded_queries:
+                planner_llm = await get_planner_llm()
+                refinement = await refine_literature_search_queries(
+                    expanded_queries,
+                    user_message=ctx.route_message,
+                    llm=planner_llm,
+                    use_llm=True,
+                )
+                expanded_queries = refinement.queries or expanded_queries
+                ctx.search_hit_exclusions = list(refinement.exclude_title_substrings)
+                yield (
+                    "literature_search_refine",
+                    {
+                        "queries": expanded_queries,
+                        "exclude_title_substrings": ctx.search_hit_exclusions,
+                    },
+                )
+                if len(expanded_queries) == 1:
+                    query = expanded_queries[0]
+
             if len(expanded_queries) > 1:
                 async for ev in stream_expanded_search_phase(
                     user_message=ctx.route_message,
                     queries=expanded_queries,
-                    tavily_key=ctx.tavily_key or "",
-                    tavily_max_results=ctx.tavily_max_results,
-                    tavily_retry_count=ctx.tavily_retry_count,
+                    search_api_key=ctx.search_api_key or "",
+                    search_max_results=ctx.search_max_results,
+                    search_retry_count=ctx.search_retry_count,
                     fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
                     source_mode=ctx.source_mode,
                     upload_count=len(ctx.upload_urls),
-                    skip_tavily=skip_tavily,
+                    skip_web_search=skip_web_search,
                     upload_urls=ctx.upload_urls,
                     think_acc=ctx.think_acc,
                     planner_ctx=ctx.planner_ctx,
                     execution_trace=ctx.execution_trace,
-                    corpus=working if ctx.turn_ctx.has_corpus else None,
+                    corpus=_search_phase_corpus(ctx),
                     result=search_out,
-                    tavily_include_domains=ctx.tavily_include_domains,
-                    tavily_exclude_domains=ctx.tavily_exclude_domains,
-                    tavily_search_depth=ctx.tavily_search_depth,
-                    tavily_enforce_domain_filter=ctx.tavily_enforce_domain_filter,
-                    tavily_enable_junk_filter=ctx.tavily_enable_junk_filter,
+                    search_include_domains=ctx.search_include_domains,
+                    search_exclude_domains=ctx.search_exclude_domains,
+                    search_depth=ctx.search_depth,
+                    search_enforce_domain_filter=ctx.search_enforce_domain_filter,
+                    search_enable_junk_filter=ctx.search_enable_junk_filter,
+                    exclude_title_substrings=ctx.search_hit_exclusions,
+                    search_provider=ctx.search_provider,
                 ):
                     yield ev
             else:
                 async for ev in stream_search_phase(
                     user_message=ctx.route_message,
                     query=query,
-                    tavily_key=ctx.tavily_key or "",
-                    tavily_max_results=ctx.tavily_max_results,
-                    tavily_retry_count=ctx.tavily_retry_count,
+                    search_api_key=ctx.search_api_key or "",
+                    search_max_results=ctx.search_max_results,
+                    search_retry_count=ctx.search_retry_count,
                     fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
                     source_mode=ctx.source_mode,
                     upload_count=len(ctx.upload_urls),
-                    skip_tavily=skip_tavily,
+                    skip_web_search=skip_web_search,
                     upload_urls=ctx.upload_urls,
                     think_acc=ctx.think_acc,
                     planner_ctx=ctx.planner_ctx,
                     execution_trace=ctx.execution_trace,
-                    corpus=working if ctx.turn_ctx.has_corpus else None,
+                    corpus=_search_phase_corpus(ctx),
                     result=search_out,
-                    tavily_include_domains=ctx.tavily_include_domains,
-                    tavily_exclude_domains=ctx.tavily_exclude_domains,
-                    tavily_search_depth=ctx.tavily_search_depth,
-                    tavily_enforce_domain_filter=ctx.tavily_enforce_domain_filter,
-                    tavily_enable_junk_filter=ctx.tavily_enable_junk_filter,
+                    search_include_domains=ctx.search_include_domains,
+                    search_exclude_domains=ctx.search_exclude_domains,
+                    search_depth=ctx.search_depth,
+                    search_enforce_domain_filter=ctx.search_enforce_domain_filter,
+                    search_enable_junk_filter=ctx.search_enable_junk_filter,
+                    exclude_title_substrings=ctx.search_hit_exclusions,
+                    search_provider=ctx.search_provider,
                 ):
                     yield ev
         except ValueError as e:
@@ -219,8 +267,11 @@ async def run_retrieval_pipeline(
             ctx.early_return = True
             return
         except Exception as e:
+            from app.agents.tools.web_providers import search_provider_display
+
+            search_label = search_provider_display(ctx.search_provider)
             if not ctx.upload_urls:
-                fail_msg = f"Tavily 搜索不可用（{e}）。请检查 API Key；本次会话已终止。"
+                fail_msg = f"{search_label} 检索不可用（{e}）。请检查能力绑定与凭据；本次会话已终止。"
                 yield ("text", {"delta": fail_msg})
                 ctx.finalize_ctx.corpus = working
                 ctx.finalize_ctx.fetch_results = []
@@ -231,7 +282,7 @@ async def run_retrieval_pipeline(
                 ctx.early_return = True
                 return
             async for ev in emit_system_think_line(
-                f"Tavily 检索失败，将仅使用用户链接（{len(ctx.upload_urls)} 条）。",
+                f"{search_label} 检索失败，将仅使用用户链接（{len(ctx.upload_urls)} 条）。",
                 accumulator=ctx.think_acc,
             ):
                 yield ev
@@ -242,7 +293,7 @@ async def run_retrieval_pipeline(
         search_zero_gate = detect_search_zero_gate(
             hits=ctx.hits,
             upload_urls=ctx.upload_urls,
-            skip_tavily=skip_tavily,
+            skip_web_search=skip_web_search,
             query=query,
             answer=ctx.answer,
             gate_resolved=ctx.clar_state.resolved,
@@ -282,7 +333,8 @@ async def run_retrieval_pipeline(
         fetch_hits = [
             h
             for h in build_result.hits
-            if not working.has_url(str(h.get("url") or ""))
+            if str(h.get("source") or "") == "upload"
+            or not working.has_url(str(h.get("url") or ""))
         ]
 
         yield (
@@ -290,9 +342,11 @@ async def run_retrieval_pipeline(
             {
                 "mode": build_result.mode,
                 "user_count": build_result.user_count,
-                "tavily_count": build_result.tavily_count,
-                "skipped_tavily": build_result.skipped_tavily or intent.skip_tavily,
+                "search_hit_count": build_result.search_hit_count,
+                "skipped_web_search": build_result.skipped_web_search or intent.skip_web_search,
                 "total_fetch": len(fetch_hits),
+                "fetch_provider": ctx.fetch_provider,
+                "fetch_cap": fetch_cap,
             },
         )
 
@@ -302,8 +356,9 @@ async def run_retrieval_pipeline(
                 user_message=ctx.user_message,
                 fetch_hits=fetch_hits,
                 fetch_cap=fetch_cap,
-                jina_key=ctx.jina_key,
-                llm=ctx.llm,
+                fetch_api_key=ctx.fetch_api_key,
+                fetch_provider=ctx.fetch_provider,
+                llm=ctx.planner_llm,
                 parallel=ctx.parallel,
                 timeout_sec=ctx.timeout_sec,
                 fetch_retry_count=ctx.fetch_retry_count,
@@ -315,7 +370,7 @@ async def run_retrieval_pipeline(
                 graph=ctx.graph,
                 graph_artifact_id=ctx.graph_artifact_id,
                 sync_graph_node=sync_graph_node,
-                tavily_answer=ctx.answer,
+                search_answer=ctx.answer,
                 result=fetch_out,
                 max_source_chars=ctx.max_source_chars,
             ):
@@ -333,7 +388,7 @@ async def run_retrieval_pipeline(
                 user_message=ctx.user_message,
                 fetch_hits=fetch_hits,
                 fetch_cap=fetch_cap,
-                jina_key=ctx.jina_key,
+                fetch_api_key=ctx.fetch_api_key,
                 timeout_sec=ctx.timeout_sec,
                 citation_format=ctx.citation_format,
                 fmt_label=ctx.fmt_label,
@@ -384,8 +439,8 @@ async def run_retrieval_pipeline(
             {
                 "mode": "corpus_reuse",
                 "user_count": 0,
-                "tavily_count": 0,
-                "skipped_tavily": True,
+                "search_hit_count": 0,
+                "skipped_web_search": True,
                 "total_fetch": 0,
             },
         )
@@ -397,6 +452,14 @@ async def run_retrieval_pipeline(
         upsert_stage(ctx.execution_trace, "文献检索", "skipped")
         upsert_stage(ctx.execution_trace, "抓取网页", "skipped")
         upsert_stage(ctx.execution_trace, "引用抽取", "skipped")
+        async for ev in sync_graph_nodes(
+            ctx.emitter,
+            ctx.graph,
+            ctx.graph_artifact_id,
+            ["fetch", "cite_extract"],
+            "skipped",
+        ):
+            yield ev
         ctx.failed_literature = list(working.failed_literature)
         ctx.fetch_results = list(working.fetch_results)
 
@@ -423,7 +486,7 @@ async def run_retrieval_pipeline(
                 corpus=working,
                 fetch_results=attr_fetch_results,
                 cite_records=ctx.cite_records,
-                llm=ctx.llm,
+                llm=ctx.planner_llm,
                 parallel=ctx.parallel,
                 think_acc=ctx.think_acc,
                 planner_ctx=ctx.planner_ctx,

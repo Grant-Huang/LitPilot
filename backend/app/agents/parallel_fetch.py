@@ -18,6 +18,7 @@ async def iter_fetch_sources_parallel(
     max_urls: int,
     retry_count: int = 0,
     retry_delay_ms: int = 500,
+    fetch_provider: str | None = None,
 ) -> AsyncIterator[tuple[dict[str, str], str, str | None]]:
     """每完成一篇即 yield，顺序为完成先后（便于 SSE 逐条展示）。"""
     sem = asyncio.Semaphore(max(1, parallel))
@@ -34,6 +35,7 @@ async def iter_fetch_sources_parallel(
                     llm=llm,
                     fetch_timeout=timeout_per_url,
                     title=hit.get("title") or "",
+                    fetch_provider=fetch_provider,
                 ),
                 timeout=timeout_per_url + 30,
             )
@@ -80,6 +82,7 @@ async def fetch_sources_parallel(
     max_urls: int,
     retry_count: int = 0,
     retry_delay_ms: int = 500,
+    fetch_provider: str | None = None,
 ) -> list[tuple[dict[str, str], str, str | None]]:
     return [
         item
@@ -92,5 +95,6 @@ async def fetch_sources_parallel(
             max_urls=max_urls,
             retry_count=retry_count,
             retry_delay_ms=retry_delay_ms,
+            fetch_provider=fetch_provider,
         )
     ]

@@ -1,8 +1,10 @@
 from app.agents.url_list import (
+    display_title_from_url,
     merge_fetch_hits,
     parse_url_list_file,
     resolve_fetch_display_title,
     sanitize_fetch_urls,
+    title_from_search_hit,
 )
 
 
@@ -43,10 +45,30 @@ def test_resolve_fetch_display_title_from_ctx_md() -> None:
 def test_resolve_fetch_display_title_prefers_hit_title() -> None:
     hit = {
         "url": "https://example.com/p",
-        "title": "From Tavily",
+        "title": "From web_search",
         "snippet": "short",
     }
-    assert resolve_fetch_display_title(hit, "") == "From Tavily"
+    assert resolve_fetch_display_title(hit, "") == "From web_search"
+
+
+def test_display_title_from_semantic_scholar_url() -> None:
+    url = (
+        "https://www.semanticscholar.org/paper/"
+        "Agentic-AI-Frameworks-in-SMMEs-A-Systematic-Review/"
+        "423706ce66f4d5fc20de13852410d99b7a403e98"
+    )
+    title = display_title_from_url(url)
+    assert "423706ce" not in title
+    assert "Agentic" in title or "SMMEs" in title
+
+
+def test_title_from_search_hit_uses_snippet_not_hash() -> None:
+    hit = {
+        "url": "https://www.semanticscholar.org/paper/X/y/abcdef0123456789abcdef0123456789abcdef01",
+        "title": "",
+        "snippet": "Evaluating Agentic AI Systems in Manufacturing",
+    }
+    assert "Evaluating Agentic" in title_from_search_hit(hit)
 
 
 def test_resolve_fetch_display_title_snippet_fallback() -> None:

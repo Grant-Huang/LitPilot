@@ -76,10 +76,26 @@ class WorkflowGraph:
         return deepcopy(self)
 
 
+def fetch_node_description(fetch_provider: str) -> str:
+    """Human-readable fetch backend label for the execution plan UI."""
+    p = (fetch_provider or "native").strip().lower()
+    if p == "native":
+        return "native 直连 HTTP / web_fetch"
+    from app.agents.tools.web_providers import fetch_provider_display
+
+    return f"{fetch_provider_display(p)} / web_fetch"
+
+
+def apply_fetch_provider_label(graph: WorkflowGraph, fetch_provider: str) -> None:
+    n = graph.node("fetch")
+    if n:
+        n.description = fetch_node_description(fetch_provider)
+
+
 def build_literature_graph_legacy() -> WorkflowGraph:
     """Fixed 4-node graph when outline_mode=off (compatible with pre-M2 UI)."""
     nodes = [
-        WorkflowNode("fetch", "抓取全文", "fetch", description="Jina Reader / web_fetch"),
+        WorkflowNode("fetch", "抓取全文", "fetch", description=fetch_node_description("native")),
         WorkflowNode("cite_extract", "引用抽取", "cite_extract", description="引用元数据"),
         WorkflowNode("generate", "综述生成", "llm", description="LLM 综合写作"),
         WorkflowNode("deliver", "交付", "deliver", description="保存引用与 Artifact"),
@@ -107,7 +123,7 @@ def build_literature_graph(
     """
     section_specs = section_specs or []
     nodes: list[WorkflowNode] = [
-        WorkflowNode("fetch", "抓取全文", "fetch", description="Jina Reader / web_fetch"),
+        WorkflowNode("fetch", "抓取全文", "fetch", description=fetch_node_description("native")),
         WorkflowNode("cite_extract", "引用抽取", "cite_extract", description="引用元数据"),
         WorkflowNode("attributes", "文献结构化", "cite_extract", description="AttributeTree lite"),
         WorkflowNode("outline", "大纲规划", "llm", description="子主题与章节挂载"),

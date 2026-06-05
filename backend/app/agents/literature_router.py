@@ -6,7 +6,7 @@ from typing import Any
 
 from app.agents.llm_json import parse_json_object
 from app.llm.base import LLMMessage
-from app.services.llm_service import get_llm
+from app.services.llm_service import get_planner_llm
 from app.storage.file_store import is_default_session_title
 
 ROUTER_SYSTEM = """你是文献综述助手的路由器。根据用户首条研究问题，输出唯一 JSON（无 markdown 代码块）：
@@ -63,6 +63,19 @@ def fallback_session_title(user_message: str) -> str:
 _fallback_title = fallback_session_title
 
 
+def title_is_message_truncation(title: str, user_message: str) -> bool:
+    """True when title is the rule-based truncation of the user message, not an LLM summary."""
+    msg = user_message.strip().replace("\n", " ")
+    raw = (title or "").strip()
+    if not raw or not msg:
+        return False
+    fb = fallback_session_title(msg)
+    if raw == fb.strip():
+        return True
+    prefix = msg[:40].rstrip()
+    return raw == prefix or raw == prefix + "…"
+
+
 def sanitize_session_title(title: str, user_message: str) -> str:
     t = (title or "").strip().strip("\"'「」『』")
     if not t or is_default_session_title(t):
@@ -111,7 +124,7 @@ async def route_literature(user_message: str) -> LiteratureRouterResult:
     if not msg:
         return fallback
     try:
-        llm = await get_llm()
+        llm = await get_planner_llm()
         resp = await llm.chat(
             [LLMMessage(role="user", content=msg[:800])],
             system=ROUTER_SYSTEM,
@@ -122,6 +135,23 @@ async def route_literature(user_message: str) -> LiteratureRouterResult:
         return build_router_result(data, msg)
     except Exception:
         return fallback
+
+
+async def refine_router_session_title(
+    result: LiteratureRouterResult,
+    user_message: str,
+) -> LiteratureRouterResult:
+    """When orchestrator output lacks JSON, call dedicated router for a real summary title."""
+    msg = user_message.strip()
+    if not msg or not title_is_message_truncation(result.session_title, msg):
+        return result
+    routed = await route_literature(msg)
+    if title_is_message_truncation(routed.session_title, msg):
+        return result
+    return LiteratureRouterResult(
+        session_title=routed.session_title,
+        search_query=routed.search_query or result.search_query,
+    )
 
 
 def should_auto_rename_session(
@@ -140,5 +170,4 @@ def should_auto_rename_session(
     title = (meta.get("title") or "").strip()
     if is_default_session_title(title):
         return True
-    prefix = user_message.strip()[:40]
-    return bool(prefix and title == prefix)
+    return title_is_message_truncation(title, user_message)

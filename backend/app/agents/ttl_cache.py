@@ -50,5 +50,5 @@ class TTLCache(Generic[T]):
             self._data.popitem(last=False)
 
 
-tavily_cache: TTLCache[dict] = TTLCache()
-jina_cache: TTLCache[str] = TTLCache()
+search_cache: TTLCache[dict] = TTLCache()
+fetch_cache: TTLCache[str] = TTLCache()

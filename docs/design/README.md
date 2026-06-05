@@ -6,7 +6,7 @@
 |------|------|
 | [overview.md](./overview.md) | 架构分层、数据目录、Meso SSE |
 | [literature-pipeline.md](./literature-pipeline.md) | M1–M3 文献管线、大纲分章、章节 refine |
-| [settings-capabilities.md](./settings-capabilities.md) | Tavily / 抓取 / Prompts 能力与硬顶 |
+| [settings-capabilities.md](./settings-capabilities.md) | web_search / web_fetch / Prompts 能力与硬顶 |
 | [multi-turn-refine.md](./multi-turn-refine.md) | 多轮会话、意图路由、精化剧本 |
 
 产品工作流细节见 [../literature-workflow.md](../literature-workflow.md)。

@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from filelock import FileLock
 
-from app.agents.tools.tavily_search import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
+from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 from app.core.config import DATA_DIR
 from app.core.deploy_defaults import (
     SENSITIVE_SETTING_KEYS,
@@ -65,7 +65,7 @@ class FileStore:
             "sources",
             "pdfs",
             "artifacts",
-            "cache/tavily",
+            "cache/web_search",
         ):
             (self.root / sub).mkdir(parents=True, exist_ok=True)
         idx = self.root / "sessions" / "index.json"
@@ -134,8 +134,8 @@ class FileStore:
             personal=self.get_personal_preferences(),
         )
         env_map = {
-            "tavily_api_key": os.getenv("TAVILY_API_KEY", ""),
-            "jina_api_key": os.getenv("JINA_API_KEY", ""),
+            "web_search_api_key": os.getenv("TAVILY_API_KEY", ""),
+            "fetch_api_key": os.getenv("JINA_API_KEY", ""),
             "llm_provider": os.getenv("LLM_PROVIDER", "openai"),
             "llm_api_key": os.getenv("OPENAI_API_KEY", ""),
             "llm_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
@@ -143,10 +143,10 @@ class FileStore:
             "llm_group_id": os.getenv("MINIMAX_GROUP_ID", ""),
         }
         merged = dict(runtime)
-        if not merged.get("tavily_api_key"):
-            merged["tavily_api_key"] = env_map["tavily_api_key"]
-        if not merged.get("jina_api_key"):
-            merged["jina_api_key"] = env_map["jina_api_key"]
+        if not merged.get("web_search_api_key") and str(merged.get("search_provider") or "") == "tavily":
+            merged["web_search_api_key"] = env_map["web_search_api_key"]
+        if not merged.get("fetch_api_key") and str(merged.get("fetch_provider") or "") == "jina":
+            merged["fetch_api_key"] = env_map["fetch_api_key"]
         if not merged.get("llm_api_key"):
             merged["llm_api_key"] = env_map["llm_api_key"]
         if not merged.get("llm_provider"):
@@ -448,14 +448,20 @@ class FileStore:
         add_cred(
             key="tavily",
             type_="tavily",
-            name="Tavily · default",
-            secret=str(legacy.get("tavily_api_key") or ""),
+            name="web_search · default",
+            secret=str(legacy.get("web_search_api_key") or ""),
         )
         add_cred(
             key="jina",
             type_="jina",
-            name="Jina · default",
-            secret=str(legacy.get("jina_api_key") or ""),
+            name="web_fetch · default",
+            secret=str(legacy.get("fetch_api_key") or ""),
+        )
+        add_cred(
+            key="brave",
+            type_="brave",
+            name="Brave Search · default",
+            secret="",
         )
         llm_provider = str(legacy.get("llm_provider") or "openai")
         add_cred(
@@ -582,11 +588,11 @@ class FileStore:
         )
         cap(
             "web_search",
-            "web_search · Tavily 检索",
+            "web_search",
             primary_ref={"kind": "credential", "id": cred_by_key.get("tavily")},
             params={
-                "tavily_max_results": int(legacy.get("tavily_max_results") or 8),
-                "tavily_retry_count": int(legacy.get("tavily_retry_count") or 0),
+                "search_max_results": int(legacy.get("search_max_results") or 8),
+                "search_retry_count": int(legacy.get("search_retry_count") or 0),
                 "include_domains": list(ACADEMIC_SEARCH_DOMAINS),
                 "exclude_domains": list(DEFAULT_EXCLUDE_DOMAINS),
                 "search_depth": "advanced",
@@ -596,7 +602,7 @@ class FileStore:
         )
         cap(
             "web_fetch",
-            "web_fetch · Jina 抓取",
+            "web_fetch",
             primary_ref={"kind": "credential", "id": cred_by_key.get("jina")},
             params={
                 "max_fetch_urls": int(legacy.get("max_fetch_urls") or 5),
@@ -930,6 +936,49 @@ class FileStore:
                 changed = True
         if changed:
             self._save_config_list(self.system_capabilities_path, caps)
+        self._ensure_brave_credential()
+        self._ensure_provider_capability_labels()
+
+    def _ensure_provider_capability_labels(self) -> None:
+        if not self.system_capabilities_path.is_file():
+            return
+        label_by_id = {
+            "web_search": "web_search",
+            "web_fetch": "web_fetch",
+        }
+        caps = self._load_config_list(self.system_capabilities_path)
+        changed = False
+        for cap in caps:
+            cap_id = str(cap.get("capability_id") or "")
+            want = label_by_id.get(cap_id)
+            if want and cap.get("label") != want:
+                cap["label"] = want
+                changed = True
+        if changed:
+            self._save_config_list(self.system_capabilities_path, caps)
+
+    def _ensure_brave_credential(self) -> None:
+        creds = self._load_config_list(self.system_credentials_path)
+        if any(str(c.get("type") or "") == "brave" for c in creds):
+            return
+        from datetime import datetime, timezone as _tz
+
+        now = datetime.now(_tz.utc).isoformat()
+        creds.append(
+            {
+                "id": uuid.uuid4().hex,
+                "type": "brave",
+                "name": "Brave Search · default",
+                "secret": "",
+                "base_url": "",
+                "group_id": "",
+                "status": "unknown",
+                "last_verified_at": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        self._save_config_list(self.system_credentials_path, creds)
 
     def _ensure_default_instances(self) -> None:
         """Backfill orchestrator instance and align review-main model on existing v2 installs."""

@@ -8,7 +8,7 @@ from app.core.response import ok
 from app.library.crossref import normalize_doi
 from app.library.dedupe import dedupe_library
 from app.library.enrich import enrich_item_citations
-from app.library.metadata_enrich import enrich_item_from_crossref
+from app.library.metadata_enrich import enrich_item_from_crossref, refresh_library_metadata
 from app.library.migrate import migrate_legacy_refs
 from app.library.reconcile import reconcile_library
 from app.library.store import LibraryStore
@@ -28,6 +28,11 @@ class StarBody(BaseModel):
 
 class TagsBody(BaseModel):
     tags: list[str] = []
+
+
+class RefreshMetadataBody(BaseModel):
+    item_ids: Optional[list[str]] = None
+    parallel: int = Field(default=4, ge=1, le=12)
 
 
 class MetadataBody(BaseModel):
@@ -101,12 +106,33 @@ async def dedupe_refs():
 @router.post("/reconcile")
 async def reconcile_refs(body: ReconcileBody):
     settings = get_store().get_agent_settings_merged()
+    fetch_provider = str(settings.get("fetch_provider") or "native").strip().lower()
+    fetch_api_key = (
+        str(settings.get("fetch_api_key") or "").strip()
+        if fetch_provider == "jina"
+        else None
+    )
     stats = await reconcile_library(
         session_id=body.session_id,
         mode=body.mode,
-        jina_api_key=settings.get("jina_api_key") or None,
+        fetch_api_key=fetch_api_key or None,
         timeout=float(settings.get("fetch_timeout_sec") or 45),
         citation_format=str(settings.get("citation_format") or "apa"),
+    )
+    return ok(stats)
+
+
+@router.post("/refresh-metadata")
+async def refresh_all_metadata(body: RefreshMetadataBody | None = None):
+    """按 Crossref/OpenAlex 重新拉取书目与被引数，覆盖库内已有字段。"""
+    lib = _ensure_library()
+    settings = get_store().get_agent_settings_merged()
+    body = body or RefreshMetadataBody()
+    stats = await refresh_library_metadata(
+        lib,
+        parallel=body.parallel,
+        citation_format=str(settings.get("citation_format") or "apa"),
+        item_ids=body.item_ids,
     )
     return ok(stats)
 
@@ -173,7 +199,21 @@ async def delete_library_item(item_id: str):
     lib = _ensure_library()
     if not lib.delete_item(item_id):
         raise HTTPException(status_code=404, detail="Item not found")
+    from app.library.from_run import _sync_exports
+
+    _sync_exports(lib)
     return ok({"deleted": True, "item_id": item_id})
+
+
+@router.delete("/items")
+async def clear_library_items():
+    """清空全局文献库（不可恢复）。"""
+    lib = _ensure_library()
+    removed = lib.clear_all()
+    from app.library.from_run import _sync_exports
+
+    _sync_exports(lib)
+    return ok({"cleared": removed})
 
 
 @router.get("/items/{item_id}/related-sessions")

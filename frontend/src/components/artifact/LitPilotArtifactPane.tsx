@@ -359,6 +359,10 @@ export function LitPilotArtifactPane({
           <WorkflowArtifactPanel
             graph={liveGraph}
             workflowRuns={workflowRuns}
+            stages={streamState.stages.map((s) => ({
+              name: s.name,
+              state: s.state,
+            }))}
           />
         )}
         {mainTab === "outline" && showOutline && outlineArtifact && (

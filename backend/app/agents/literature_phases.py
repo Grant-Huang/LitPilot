@@ -22,13 +22,13 @@ from app.agents.literature_source import build_fetch_hits
 from app.agents.parallel_fetch import iter_fetch_sources_parallel
 from app.agents.retry_utils import retry_async
 from app.agents.session_corpus import SessionCorpus, hits_from_urls
-from app.agents.tools.cached_tools import cached_tavily_search
+from app.agents.tools.cached_tools import cached_web_search
 from app.agents.research_decompose import format_pass_query_label
-from app.agents.tools.tavily_search import (
+from app.agents.tools.search_hits import (
     ACADEMIC_SEARCH_DOMAINS,
     DEFAULT_EXCLUDE_DOMAINS,
     apply_literature_hit_filters,
-    normalize_tavily_results,
+    normalize_search_results,
 )
 from app.agents.url_list import resolve_fetch_display_title
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
@@ -86,41 +86,51 @@ async def stream_search_phase(
     *,
     user_message: str,
     query: str,
-    tavily_key: str,
-    tavily_max_results: int,
-    tavily_retry_count: int,
+    search_api_key: str,
+    search_max_results: int,
+    search_retry_count: int,
     fetch_retry_delay_ms: int,
     source_mode: str,
     upload_count: int,
-    skip_tavily: bool,
+    skip_web_search: bool,
     upload_urls: list[str],
     think_acc: ThinkAccumulator,
     planner_ctx,
     execution_trace: dict[str, Any],
     corpus: SessionCorpus | None = None,
     result: dict[str, Any] | None = None,
-    tavily_include_domains: tuple[str, ...] | None = None,
-    tavily_exclude_domains: tuple[str, ...] | None = None,
-    tavily_search_depth: str = "advanced",
-    tavily_enforce_domain_filter: bool = True,
-    tavily_enable_junk_filter: bool = True,
+    search_include_domains: tuple[str, ...] | None = None,
+    search_exclude_domains: tuple[str, ...] | None = None,
+    search_depth: str = "advanced",
+    search_enforce_domain_filter: bool = True,
+    search_enable_junk_filter: bool = True,
+    exclude_title_substrings: list[str] | None = None,
     pass_index: int = 1,
     pass_total: int = 1,
     emit_stage_lifecycle: bool = True,
+    search_provider: str | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    include_domains = tavily_include_domains or ACADEMIC_SEARCH_DOMAINS
-    exclude_domains = tavily_exclude_domains or DEFAULT_EXCLUDE_DOMAINS
-    search_depth = tavily_search_depth if tavily_search_depth in ("basic", "advanced") else "advanced"
+    from app.agents.tools.web_providers import normalize_search_provider
+
+    if search_provider is None:
+        from app.agents.agent_settings import get_web_search_provider
+
+        search_provider = await get_web_search_provider()
+    search_prov = normalize_search_provider(search_provider)
+    include_domains = search_include_domains or ACADEMIC_SEARCH_DOMAINS
+    exclude_domains = search_exclude_domains or DEFAULT_EXCLUDE_DOMAINS
+    search_depth = search_depth if search_depth in ("basic", "advanced") else "advanced"
     hits: list[dict[str, str]] = []
     answer = ""
     out = result if result is not None else {}
+    search_failed = False
 
     if emit_stage_lifecycle and pass_index == 1:
         yield ("stage", {"name": "文献检索", "state": "active"})
 
-    if skip_tavily:
+    if skip_web_search:
         async for ev in emit_system_think_line(
-            f"已跳过 Tavily 网络检索（用户列表 {upload_count} 条）。",
+            f"已跳过 web_search 网络检索（用户列表 {upload_count} 条）。",
             accumulator=think_acc,
         ):
             yield ev
@@ -134,9 +144,10 @@ async def stream_search_phase(
         search_before_ctx = format_search_before_context(
             query=query,
             source_mode=source_mode,
-            tavily_max_results=tavily_max_results,
+            search_max_results=search_max_results,
             upload_count=upload_count,
-            skipped_tavily=False,
+            skipped_web_search=False,
+            search_provider=search_prov,
         )
         async for ev in narrate_phase_stream(
             "B",
@@ -154,13 +165,15 @@ async def stream_search_phase(
         ):
             yield ev
 
+    pre_corpus_hit_count = 0
     try:
 
-        async def _tavily_call() -> dict:
-            return await cached_tavily_search(
-                tavily_key,
+        async def _search_call() -> dict:
+            return await cached_web_search(
+                search_api_key,
                 query,
-                max_results=tavily_max_results,
+                provider=search_prov,
+                max_results=search_max_results,
                 search_depth=search_depth,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
@@ -168,17 +181,18 @@ async def stream_search_phase(
 
         t0 = time.monotonic()
         raw_search = await retry_async(
-            _tavily_call,
-            max_retries=tavily_retry_count,
+            _search_call,
+            max_retries=search_retry_count,
             delay_ms=fetch_retry_delay_ms,
         )
         search_ms = int((time.monotonic() - t0) * 1000)
-        raw_hits = normalize_tavily_results(raw_search)
+        raw_hits = normalize_search_results(raw_search)
         hits, filter_warning = apply_literature_hit_filters(
             raw_hits,
             include_domains=include_domains,
-            enable_junk_filter=tavily_enable_junk_filter,
-            enforce_domain_filter=tavily_enforce_domain_filter,
+            enable_junk_filter=search_enable_junk_filter,
+            enforce_domain_filter=search_enforce_domain_filter,
+            exclude_title_substrings=exclude_title_substrings,
         )
         if filter_warning:
             async for ev in emit_system_think_line(
@@ -188,6 +202,7 @@ async def stream_search_phase(
                 yield ev
         answer = str(raw_search.get("answer") or "").strip()
 
+        pre_corpus_hit_count = len(hits)
         if corpus:
             hits = [h for h in hits if not corpus.has_url(str(h.get("url") or ""))]
 
@@ -196,7 +211,7 @@ async def stream_search_phase(
             "web_search",
             {
                 "query": query,
-                "provider": "tavily",
+                "provider": search_prov,
                 "pass_index": pass_index,
                 "pass_total": pass_total,
             },
@@ -204,7 +219,8 @@ async def stream_search_phase(
                 {
                     "answer": answer[:500],
                     "hits": len(hits),
-                    "retries": tavily_retry_count,
+                    "hits_before_corpus": pre_corpus_hit_count,
+                    "retries": search_retry_count,
                 },
                 ensure_ascii=False,
             ),
@@ -212,17 +228,45 @@ async def stream_search_phase(
             trace=execution_trace,
         ):
             yield ev
-    except Exception as e:
+        # 工具条已展示命中后立刻落盘，避免后续 narrate/异常导致 pass_out 丢失
+        out["hits"] = [dict(h) for h in hits]
+        out["answer"] = answer
+        out["tool_hit_count"] = len(hits)
+        out["hits_before_corpus"] = pre_corpus_hit_count
+    except Exception:
+        search_failed = True
         if not upload_urls:
             raise
         async for ev in emit_system_think_line(
-            f"Tavily 检索失败，将仅使用用户链接（{len(upload_urls)} 条）。",
+            f"web_search（{search_prov}）检索失败，将仅使用用户链接（{len(upload_urls)} 条）。",
             accumulator=think_acc,
         ):
             yield ev
     else:
-        if not hits and not answer and not upload_urls:
+        # 多轮分主题检索：单轮 0 命中不终止，合并后再判定（避免第 4/4 轮空结果丢掉前 3 轮命中）
+        if (
+            pass_total == 1
+            and not hits
+            and not answer
+            and not upload_urls
+        ):
+            async for ev in emit_system_think_line(
+                "⟦sys⟧单轮检索无命中（pass_hit_counts=[0]，未进入合并阶段）。⟦/sys⟧",
+                accumulator=think_acc,
+            ):
+                yield ev
             raise ValueError("未检索到可用文献结果，本次会话已终止。")
+        if pass_total > 1 and not hits and not answer:
+            async for ev in emit_system_think_line(
+                f"⟦sys⟧第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。⟦/sys⟧",
+                accumulator=think_acc,
+            ):
+                yield ev
+
+    if not search_failed and "hits" not in out:
+        out["hits"] = [dict(h) for h in hits]
+        out["answer"] = answer
+        out["tool_hit_count"] = len(hits)
 
     if pass_index == pass_total:
         search_ctx = format_search_context(hits, answer, query=query)
@@ -237,32 +281,32 @@ async def stream_search_phase(
         if emit_stage_lifecycle:
             yield ("stage", {"name": "文献检索", "state": "done"})
             upsert_stage(execution_trace, "文献检索", "done")
-    out["hits"] = hits
-    out["answer"] = answer
 
 
 async def stream_expanded_search_phase(
     *,
     user_message: str,
     queries: list[str],
-    tavily_key: str,
-    tavily_max_results: int,
-    tavily_retry_count: int,
+    search_api_key: str,
+    search_max_results: int,
+    search_retry_count: int,
     fetch_retry_delay_ms: int,
     source_mode: str,
     upload_count: int,
-    skip_tavily: bool,
+    skip_web_search: bool,
     upload_urls: list[str],
     think_acc: ThinkAccumulator,
     planner_ctx,
     execution_trace: dict[str, Any],
     corpus: SessionCorpus | None = None,
     result: dict[str, Any] | None = None,
-    tavily_include_domains: tuple[str, ...] | None = None,
-    tavily_exclude_domains: tuple[str, ...] | None = None,
-    tavily_search_depth: str = "advanced",
-    tavily_enforce_domain_filter: bool = True,
-    tavily_enable_junk_filter: bool = True,
+    search_include_domains: tuple[str, ...] | None = None,
+    search_exclude_domains: tuple[str, ...] | None = None,
+    search_depth: str = "advanced",
+    search_enforce_domain_filter: bool = True,
+    search_enable_junk_filter: bool = True,
+    exclude_title_substrings: list[str] | None = None,
+    search_provider: str | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.search_merge import merge_search_hits
 
@@ -271,10 +315,12 @@ async def stream_expanded_search_phase(
     if not clean_queries:
         clean_queries = [""]
     total = len(clean_queries)
-    per_query_max = max(2, tavily_max_results // total)
+    per_query_max = max(2, search_max_results // total)
     hits_lists: list[list[dict[str, str]]] = []
     answers: list[str] = []
     raw_total = 0
+    raw_before_corpus = 0
+    tool_hit_total = 0
 
     yield (
         "literature_search_plan",
@@ -290,48 +336,100 @@ async def stream_expanded_search_phase(
         async for ev in stream_search_phase(
             user_message=user_message,
             query=query,
-            tavily_key=tavily_key,
-            tavily_max_results=per_query_max,
-            tavily_retry_count=tavily_retry_count,
+            search_api_key=search_api_key,
+            search_max_results=per_query_max,
+            search_retry_count=search_retry_count,
             fetch_retry_delay_ms=fetch_retry_delay_ms,
             source_mode=source_mode,
             upload_count=upload_count if idx == 1 else 0,
-            skip_tavily=skip_tavily,
+            skip_web_search=skip_web_search,
             upload_urls=upload_urls if idx == 1 else [],
             think_acc=think_acc,
             planner_ctx=planner_ctx,
             execution_trace=execution_trace,
             corpus=corpus,
             result=pass_out,
-            tavily_include_domains=tavily_include_domains,
-            tavily_exclude_domains=tavily_exclude_domains,
-            tavily_search_depth=tavily_search_depth,
-            tavily_enforce_domain_filter=tavily_enforce_domain_filter,
-            tavily_enable_junk_filter=tavily_enable_junk_filter,
+            search_include_domains=search_include_domains,
+            search_exclude_domains=search_exclude_domains,
+            search_depth=search_depth,
+            search_enforce_domain_filter=search_enforce_domain_filter,
+            search_enable_junk_filter=search_enable_junk_filter,
+            exclude_title_substrings=exclude_title_substrings,
             pass_index=idx,
             pass_total=total,
             emit_stage_lifecycle=idx == 1 or idx == total,
+            search_provider=search_provider,
         ):
             yield ev
-        pass_hits = list(pass_out.get("hits") or [])
+        pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
         raw_total += len(pass_hits)
+        raw_before_corpus += int(pass_out.get("hits_before_corpus") or len(pass_hits))
+        tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
         hits_lists.append(pass_hits)
         ans = str(pass_out.get("answer") or "").strip()
         if ans:
             answers.append(ans)
 
-    merged = merge_search_hits(hits_lists, max_results=tavily_max_results)
+    merge_cap = search_max_results if search_max_results > 0 else None
+    pass_hit_counts = [len(h) for h in hits_lists]
+    merged_pre_corpus = merge_search_hits(hits_lists, max_results=merge_cap)
+    merged = list(merged_pre_corpus)
+    corpus_dropped = 0
     if corpus:
+        before = len(merged)
         merged = [h for h in merged if not corpus.has_url(str(h.get("url") or ""))]
+        corpus_dropped = before - len(merged)
 
     yield (
         "literature_search_merge",
         {
             "raw_total": raw_total,
+            "raw_before_corpus": raw_before_corpus,
+            "tool_hit_total": tool_hit_total,
             "deduped": len(merged),
-            "cap": tavily_max_results,
+            "deduped_pre_corpus": len(merged_pre_corpus),
+            "corpus_dropped": corpus_dropped,
+            "cap": search_max_results,
+            "pass_hit_counts": pass_hit_counts,
         },
     )
+
+    combined_answer = " ".join(answers).strip()
+    has_existing_material = bool(
+        corpus
+        and (corpus.fetch_hits or corpus.sources_md or corpus.known_url_keys)
+    )
+    # 以各轮 pass_out 合计为准；避免「工具条显示有命中、合并后误判为 0」
+    if (
+        not merged
+        and not combined_answer
+        and not upload_urls
+        and raw_total <= 0
+        and tool_hit_total <= 0
+        and not has_existing_material
+    ):
+        diag = (
+            f"pass_hit_counts={pass_hit_counts}，raw_total={raw_total}，"
+            f"tool_hit_total={tool_hit_total}，raw_before_corpus={raw_before_corpus}，"
+            f"deduped={len(merged)}，deduped_pre_corpus={len(merged_pre_corpus)}，"
+            f"corpus_dropped={corpus_dropped}"
+        )
+        async for ev in emit_system_think_line(
+            f"⟦sys⟧检索合并后无可用命中（{diag}）。"
+            "若 pass_hit_counts 全 0 而工具条有命中，属 pass_out 未写入；"
+            "若 raw_total>0 且 deduped=0，属语料去重或 URL 合并异常。⟦/sys⟧",
+            accumulator=think_acc,
+        ):
+            yield ev
+        raise ValueError("未检索到可用文献结果，本次会话已终止。")
+
+    if not merged and raw_total > 0 and merged_pre_corpus:
+        merged = merged_pre_corpus
+        async for ev in emit_system_think_line(
+            f"⟦sys⟧合并后语料去重为 0，保留去重前 {len(merged)} 条用于抓取。⟦/sys⟧",
+            accumulator=think_acc,
+        ):
+            yield ev
 
     out["hits"] = merged
     out["answer"] = answers[0] if answers else ""
@@ -431,7 +529,8 @@ async def stream_fetch_phase(
     user_message: str,
     fetch_hits: list[dict[str, str]],
     fetch_cap: int,
-    jina_key: str | None,
+    fetch_api_key: str | None,
+    fetch_provider: str | None = None,
     llm,
     parallel: int,
     timeout_sec: float,
@@ -444,18 +543,34 @@ async def stream_fetch_phase(
     graph,
     graph_artifact_id: str,
     sync_graph_node,
-    tavily_answer: str = "",
+    search_answer: str = "",
     result: dict[str, Any] | None = None,
     max_source_chars: int = MAX_SOURCE_CHARS,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    from app.agents.agent_settings import get_web_fetch_provider
+    from app.agents.tools.web_providers import normalize_fetch_provider
+    from app.agents.workflow_graph import apply_fetch_provider_label
+
+    if fetch_provider is None:
+        fetch_provider = await get_web_fetch_provider()
+    fetch_provider = normalize_fetch_provider(fetch_provider)
+    apply_fetch_provider_label(graph, fetch_provider)
     out = result if result is not None else {}
     delta = SessionCorpus()
-    if tavily_answer:
-        delta.append_tavily_answer(tavily_answer)
+    if search_answer:
+        delta.append_search_answer(search_answer)
 
     yield ("stage", {"name": "抓取网页", "state": "active"})
+    upload_n = sum(1 for h in fetch_hits if str(h.get("source") or "") == "upload")
+    search_n = len(fetch_hits) - upload_n
+    queue_parts = []
+    if upload_n:
+        queue_parts.append(f"用户上传 {upload_n} 条")
+    if search_n:
+        queue_parts.append(f"检索命中 {search_n} 条")
+    queue_desc = "、".join(queue_parts) if queue_parts else "0 条"
     async for ev in emit_system_think_line(
-        f"开始并行抓取 {len(fetch_hits)} 篇来源（上限 {fetch_cap}）。",
+        f"开始并行 web_fetch（{fetch_provider}）：{queue_desc}，队列共 {len(fetch_hits)} 篇（上限 {fetch_cap}）。",
         accumulator=think_acc,
     ):
         yield ev
@@ -475,13 +590,14 @@ async def stream_fetch_phase(
 
     async for hit, ctx_md, err in iter_fetch_sources_parallel(
         fetch_hits,
-        api_key=jina_key or None,
+        api_key=fetch_api_key or None,
         llm=llm,
         parallel=parallel,
         timeout_per_url=timeout_sec,
         max_urls=fetch_cap,
         retry_count=fetch_retry_count,
         retry_delay_ms=fetch_retry_delay_ms,
+        fetch_provider=fetch_provider,
     ):
         idx = fetch_idx
         fetch_idx += 1
@@ -491,7 +607,11 @@ async def stream_fetch_phase(
         delta.register_url(url)
 
         child_id = f"fetch_{idx}"
-        child_meta = {"url": url, "title": hit.get("title") or ""}
+        child_meta = {
+            "url": url,
+            "title": hit.get("title") or "",
+            "provider": fetch_provider,
+        }
         async for ev in emitter.yield_begin(
             child_id, name="web_fetch", parent_id="fetch", metadata=child_meta
         ):
@@ -510,7 +630,7 @@ async def stream_fetch_phase(
             async for ev in emit_tool_event(
                 lambda p, i=idx: f"{p}_{i}",
                 "web_fetch",
-                {"url": url, "title": display_title, "char_count": char_count},
+                {"url": url, "title": display_title, "char_count": char_count, "provider": fetch_provider},
                 preview,
                 trace=execution_trace,
             ):
@@ -557,7 +677,7 @@ async def stream_fetch_phase(
             async for ev in emit_tool_event(
                 lambda p, i=idx: f"{p}_{i}",
                 "web_fetch",
-                {"url": url, "title": display_title},
+                {"url": url, "title": display_title, "provider": fetch_provider},
                 "",
                 error=err_msg,
                 trace=execution_trace,
@@ -632,7 +752,7 @@ async def stream_cite_phase(
     user_message: str,
     fetch_hits: list[dict[str, str]],
     fetch_cap: int,
-    jina_key: str | None,
+    fetch_api_key: str | None,
     timeout_sec: float,
     citation_format: str,
     fmt_label: str,
@@ -663,7 +783,7 @@ async def stream_cite_phase(
 
     cite_records = await extract_and_persist_batch(
         fetch_hits,
-        jina_api_key=jina_key or None,
+        fetch_api_key=fetch_api_key or None,
         timeout=timeout_sec,
         max_items=fetch_cap,
         citation_format=citation_format,

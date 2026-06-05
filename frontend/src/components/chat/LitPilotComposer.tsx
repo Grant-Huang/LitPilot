@@ -78,10 +78,10 @@ export function LitPilotComposer({
   const sourceHint =
     fetchUrls.length > 0
       ? literatureSourceMode === "user_only"
-        ? "当前：仅用户列表，将跳过 Tavily 网络检索"
+        ? "当前：仅用户列表，将跳过 web_search 网络检索"
         : "当前：合并模式，您的链接将优先抓取"
       : literatureSourceMode === "user_only"
-        ? "仅用户列表模式：上传链接后跳过检索；未上传时将自动 Tavily 检索"
+        ? "仅用户列表模式：上传链接后跳过检索；未上传时将自动 web_search 检索"
         : null;
 
   return (

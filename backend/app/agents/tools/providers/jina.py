@@ -22,7 +22,7 @@ def normalize_reader_target_url(url: str) -> str:
     return target
 
 
-async def jina_fetch(
+async def fetch(
     url: str,
     *,
     api_key: str | None = None,

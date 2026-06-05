@@ -1,15 +1,15 @@
-from app.agents.tools.tavily_search import (
+from app.agents.search_query_refiner import apply_academic_search_suffix
+from app.agents.tools.providers.tavily import build_search_payload, search
+from app.agents.tools.search_hits import (
     ACADEMIC_SEARCH_DOMAINS,
     apply_literature_hit_filters,
-    augment_literature_search_query,
-    build_tavily_search_payload,
-    filter_tavily_hits,
-    normalize_tavily_results,
+    filter_search_hits,
+    normalize_search_results,
 )
 
 
 def test_build_payload_uses_academic_include_domains() -> None:
-    payload = build_tavily_search_payload(
+    payload = build_search_payload(
         "tvly-test",
         "multimodal llm survey",
         include_domains=ACADEMIC_SEARCH_DOMAINS,
@@ -23,20 +23,41 @@ def test_build_payload_uses_academic_include_domains() -> None:
 
 
 def test_build_payload_always_excludes_social_noise() -> None:
-    payload = build_tavily_search_payload("tvly-test", "rag papers")
+    payload = build_search_payload("tvly-test", "rag papers")
 
     assert "include_domains" not in payload
     assert "reddit.com" in payload["exclude_domains"]
     assert "github.com" in payload["exclude_domains"]
 
 
-def test_augment_query_disambiguates_manufacturing_mom() -> None:
-    q = augment_literature_search_query("AI-native MOM 制造运营系统")
-    assert "manufacturing operations management" in q.lower()
-    assert "site:" not in q.lower()
+def test_augment_query_adds_academic_context_only_for_generic_topics() -> None:
+    q = apply_academic_search_suffix("graph neural networks link prediction")
+    assert "academic survey" in q.lower()
+    assert "manufacturing" not in q.lower()
 
 
-def test_filter_tavily_hits_drops_junk() -> None:
+def test_filter_search_hits_applies_llm_exclusions() -> None:
+    hits = [
+        {
+            "url": "https://arxiv.org/abs/1",
+            "title": "An AI-native MOM (Mental Health Operational Model) framework",
+            "snippet": "",
+        },
+        {
+            "url": "https://arxiv.org/abs/2",
+            "title": "AI-native manufacturing operations management reference model",
+            "snippet": "",
+        },
+    ]
+    kept = filter_search_hits(
+        hits,
+        exclude_title_substrings=["mental health operational model"],
+    )
+    assert len(kept) == 1
+    assert "manufacturing" in kept[0]["title"].lower()
+
+
+def test_filter_search_hits_drops_junk() -> None:
     hits = [
         {
             "url": "https://www.reddit.com/r/PhD/comments/x",
@@ -54,12 +75,12 @@ def test_filter_tavily_hits_drops_junk() -> None:
             "snippet": "",
         },
     ]
-    kept = filter_tavily_hits(hits)
+    kept = filter_search_hits(hits)
     assert len(kept) == 1
     assert kept[0]["url"].startswith("https://arxiv.org/abs/2401")
 
 
-def test_normalize_tavily_results_keeps_snippet_short() -> None:
+def test_normalize_search_results_keeps_snippet_short() -> None:
     data = {
         "results": [
             {
@@ -71,7 +92,7 @@ def test_normalize_tavily_results_keeps_snippet_short() -> None:
         ]
     }
 
-    rows = normalize_tavily_results(data)
+    rows = normalize_search_results(data)
 
     assert len(rows) == 1
     assert rows[0]["url"] == "https://arxiv.org/abs/2401.00001"
@@ -101,3 +122,7 @@ def test_apply_literature_hit_filters_relaxes_empty_domain_filter() -> None:
     assert len(hits) == 2
     assert warning is not None
     assert "域名过滤" in warning
+
+
+def test_search_exported() -> None:
+    assert callable(search)

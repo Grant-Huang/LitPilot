@@ -74,6 +74,7 @@ class LibraryStore:
         *,
         url: str = "",
         doi: str = "",
+        authoritative: bool = False,
     ) -> dict[str, Any]:
         key = canonical_key(url=url or patch.get("url", ""), doi=doi or patch.get("doi", ""))
         if not key and patch.get("canonical_key"):
@@ -84,12 +85,14 @@ class LibraryStore:
             keys: dict[str, str] = db.setdefault("keys", {})
             existing = keys.get(key) if key else None
             if existing and existing in items:
-                merged = merge_item(items[existing], patch)
+                merged = merge_item(
+                    items[existing], patch, authoritative=authoritative
+                )
                 items[existing] = merged
                 return merged
             nid = patch.get("id") or None
             if nid and nid in items:
-                merged = merge_item(items[nid], patch)
+                merged = merge_item(items[nid], patch, authoritative=authoritative)
                 items[nid] = merged
                 if key:
                     keys[key] = nid
@@ -108,7 +111,7 @@ class LibraryStore:
                 display_index=next_idx,
             )
             item["id"] = patch.get("id") or item["id"]
-            merged = merge_item(item, patch)
+            merged = merge_item(item, patch, authoritative=authoritative)
             items[merged["id"]] = merged
             if key:
                 keys[key] = merged["id"]
@@ -240,6 +243,23 @@ class LibraryStore:
             merged = merge_item(row, clean)
             items[item_id] = merged
             return merged
+
+        return self._with_lock(_op)
+
+    def clear_all(self) -> int:
+        """删除全部文献条目及对应 sources 文件。"""
+
+        def _op(db: dict[str, Any]) -> int:
+            items: dict[str, Any] = db.get("items") or {}
+            count = len(items)
+            for iid in list(items.keys()):
+                src = self.root / "sources" / f"{iid}.md"
+                if src.is_file():
+                    src.unlink()
+            db["items"] = {}
+            db["keys"] = {}
+            db["next_display_index"] = 0
+            return count
 
         return self._with_lock(_op)
 

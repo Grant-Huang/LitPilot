@@ -11,4 +11,6 @@ pydantic-settings>=2.7.0
 anyio==4.7.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
+pypdf==5.1.0
 filelock==3.16.1
+# Optional PDF backend: pip install -r requirements-optional.txt  (pymupdf4llm; Artifex license for commercial use)

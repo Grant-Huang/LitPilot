@@ -20,6 +20,7 @@ from app.agents.literature_router import (
     fallback_router_result,
     fallback_session_title,
     parse_router_json,
+    refine_router_session_title,
     route_literature,
     sanitize_session_title,
 )
@@ -61,7 +62,7 @@ NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取�
 
 NARRATE_SEARCH_BEFORE = """你是文献综述的过程解说员。根据【即将执行的检索】用 2–3 句话说明：
 - 将采用何种检索策略、为何这样查
-- 对用户上传链接与 Tavily 结果如何取舍（若有）
+- 对用户上传链接与 web_search 检索结果如何取舍（若有）
 不要编造文献。不要输出 JSON。"""
 
 NARRATE_FETCH_PROGRESS = """你是文献综述的过程解说员。根据【抓取进度】用 1–3 句话简要更新：
@@ -205,6 +206,7 @@ async def stream_understanding_and_route(
             yield ev
         merged = "".join(content_buf)
         result = _extract_router_from_text(merged, user_message)
+        result = await refine_router_session_title(result, user_message)
     except Exception:
         _log.exception("orchestrator understanding/route failed; fallback to rules")
         result = await route_literature(user_message)
@@ -264,7 +266,7 @@ def format_search_context(
 ) -> str:
     lines = [f"【检索查询】\n{query}", f"【命中数】{len(hits)}"]
     if answer.strip():
-        lines.append(f"【Tavily 摘要】\n{answer.strip()[:800]}")
+        lines.append(f"【检索摘要】\n{answer.strip()[:800]}")
     if hits:
         lines.append("【标题列表（前 8 条）】")
         for i, h in enumerate(hits[:8], 1):
@@ -294,18 +296,23 @@ def format_search_before_context(
     *,
     query: str,
     source_mode: str,
-    tavily_max_results: int,
+    search_max_results: int,
     upload_count: int,
-    skipped_tavily: bool,
+    skipped_web_search: bool,
+    search_provider: str = "native",
 ) -> str:
+    from app.agents.tools.web_providers import search_provider_display
+
+    provider_label = search_provider_display(search_provider)
     lines = [
         f"【检索查询】\n{query}",
         f"【来源策略】{source_mode}",
-        f"【Tavily 上限】{tavily_max_results} 条",
+        f"【检索后端】{provider_label}",
+        f"【检索上限】{search_max_results} 条",
         f"【用户上传链接】{upload_count} 条",
     ]
-    if skipped_tavily:
-        lines.append("【说明】将跳过 Tavily，仅使用用户列表")
+    if skipped_web_search:
+        lines.append("【说明】将跳过 web_search，仅使用用户列表")
     return "\n".join(lines)
 
 

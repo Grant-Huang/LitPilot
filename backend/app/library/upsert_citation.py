@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.library.metadata_enrich import build_enrich_patch_for_record, merge_enrich_into_patch
+from app.agents.url_list import title_from_search_hit
+from app.library.metadata_enrich import (
+    build_enrich_patch_for_record,
+    merge_enrich_into_patch,
+    rebuild_citation_lines,
+)
 from app.library.models import merge_item, parse_authors, provenance_entry
 from app.library.store import LibraryStore
 from app.skills.citation_extractor import CitationFormat, CitationRecord
@@ -57,14 +62,28 @@ def upsert_from_citation(
         cr = enrich_patch if enrich_patch is not None else build_enrich_patch_for_record(rec)
         if cr:
             merge_enrich_into_patch(patch, cr, rec_doi=rec.doi or "")
-        item = lib.upsert(patch, url=url, doi=patch.get("doi") or rec.doi or "")
+        rebuild_citation_lines(
+            patch,
+            display_index=idx,
+            citation_format=citation_format,
+        )
+        item = lib.upsert(
+            patch,
+            url=url,
+            doi=patch.get("doi") or rec.doi or "",
+            authoritative=True,
+        )
         lib._with_lock(
             lambda db: _set_display_index(db, item["id"], idx) or {}
         )
         return lib.get_item(item["id"])
 
     patch = {
-        "title": rec.title or url,
+        "title": (
+            rec.title
+            if rec.title and len(rec.title.strip()) >= 12
+            else title_from_search_hit({"title": rec.title, "snippet": ""}, url=url)
+        ),
         "url": url,
         "provenance": prov,
         "availability": {

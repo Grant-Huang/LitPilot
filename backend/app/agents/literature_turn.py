@@ -12,30 +12,33 @@ from app.agents.agent_settings import (
     get_fetch_retry_count,
     get_fetch_retry_delay_ms,
     get_fetch_timeout_sec,
-    get_jina_api_key,
+    get_fetch_api_key,
     get_literature_source_mode,
     get_max_fetch_urls,
     get_max_source_chars,
     get_outline_mode,
     get_post_refine_mode,
     get_search_expansion_count,
-    get_tavily_api_key,
-    get_tavily_enable_junk_filter,
-    get_tavily_enforce_domain_filter,
-    get_tavily_exclude_domains,
-    get_tavily_include_domains,
-    get_tavily_max_results,
-    get_tavily_retry_count,
-    get_tavily_search_depth,
+    get_web_search_api_key,
+    get_web_search_provider,
+    get_search_enable_junk_filter,
+    get_search_enforce_domain_filter,
+    get_search_exclude_domains,
+    get_search_include_domains,
+    get_search_max_results,
+    get_search_retry_count,
+    get_search_depth,
+    get_web_fetch_provider,
 )
 from app.agents.agent_skills import skill_active_event
 from app.agents.literature_clarification import (
     ClarificationGate,
     ClarificationState,
-    detect_first_turn_ambiguity,
+    assess_first_turn_gate,
     merge_first_turn_message,
     resolve_pending_gate,
 )
+from app.agents.first_turn_assessor import format_brief_assessment_message
 from app.agents.literature_intent import (
     LiteratureIntentResult,
     build_session_turn_context,
@@ -48,29 +51,34 @@ from app.agents.literature_planner import (
     load_planner_context,
     stream_understanding_and_route,
 )
-from app.agents.literature_router import should_auto_rename_session
+from app.agents.literature_router import should_auto_rename_session, title_is_message_truncation
 from app.agents.review_prompt import citation_format_label
 from app.agents.session_corpus import (
     SessionCorpus,
     resolve_session_corpus,
 )
-from app.agents.tavily_key import tavily_key_hint
+from app.agents.search_credential_hint import search_credential_secret_hint
 from app.agents.url_list import sanitize_fetch_urls
-from app.agents.workflow_graph import build_literature_graph, build_literature_graph_legacy
+from app.agents.workflow_graph import (
+    apply_fetch_provider_label,
+    build_literature_graph,
+    build_literature_graph_legacy,
+)
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.schemas.literature_outline import LiteratureOutline
-from app.services.llm_service import get_llm
+from app.services.llm_service import get_planner_llm, get_review_llm
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
 from app.agents.literature_turn_graph import (
     publish_workflow_graph as _publish_workflow_graph,
+    sync_graph_nodes,
 )
 from app.agents.literature_turn_generate import GenerateTurnContext, stream_generate_turn
 from app.agents.literature_turn_pipeline import RetrievalPipelineContext, run_retrieval_pipeline
 from app.agents.literature_turn_helpers import (
-    intent_needs_tavily as _intent_needs_tavily,
+    intent_needs_web_search as _intent_needs_web_search,
     last_assistant_failed as _last_assistant_failed,
     new_id as _new_id,
     section_specs_for_graph as _section_specs_for_graph,
@@ -173,27 +181,32 @@ async def stream_literature_turn(
         last_failed=last_failed,
     )
 
-    tavily_key = await get_tavily_api_key()
-    if _intent_needs_tavily(intent):
-        if not tavily_key:
-            yield ("error", {"message": "请先在设置页或 .env 配置 Tavily API Key"})
-            return
-        key_hint = tavily_key_hint(tavily_key)
-        if key_hint:
-            yield ("error", {"message": key_hint})
-            return
+    search_api_key = await get_web_search_api_key()
+    search_provider = await get_web_search_provider()
+    if _intent_needs_web_search(intent) and search_provider not in ("openalex", "native"):
+        if not search_api_key:
+            from app.agents.tools.web_providers import search_provider_display
 
-    tavily_max_results = await get_tavily_max_results()
+            label = search_provider_display(search_provider)
+            yield ("error", {"message": f"请先在设置页配置 {label} API Key"})
+            return
+        if search_provider == "tavily":
+            key_hint = search_credential_secret_hint("tavily", search_api_key)
+            if key_hint:
+                yield ("error", {"message": key_hint})
+                return
+
+    search_max_results = await get_search_max_results()
     max_fetch_urls = await get_max_fetch_urls()
     source_mode = await get_literature_source_mode()
-    tavily_retry_count = await get_tavily_retry_count()
+    search_retry_count = await get_search_retry_count()
     fetch_retry_count = await get_fetch_retry_count()
     fetch_retry_delay_ms = await get_fetch_retry_delay_ms()
-    tavily_include_domains = await get_tavily_include_domains()
-    tavily_exclude_domains = await get_tavily_exclude_domains()
-    tavily_search_depth = await get_tavily_search_depth()
-    tavily_enforce_domain_filter = await get_tavily_enforce_domain_filter()
-    tavily_enable_junk_filter = await get_tavily_enable_junk_filter()
+    search_include_domains = await get_search_include_domains()
+    search_exclude_domains = await get_search_exclude_domains()
+    search_depth = await get_search_depth()
+    search_enforce_domain_filter = await get_search_enforce_domain_filter()
+    search_enable_junk_filter = await get_search_enable_junk_filter()
     max_source_chars = await get_max_source_chars()
     enable_paper_attributes = await get_enable_paper_attributes()
     enable_query_expansion = await get_enable_query_expansion()
@@ -208,7 +221,11 @@ async def stream_literature_turn(
 
     graph_artifact_id = _new_id("wf")
     emitter = WorkflowNodeEmitter(graph_artifact_id)
+    fetch_provider = await get_web_fetch_provider()
     g = build_literature_graph_legacy()
+    apply_fetch_provider_label(g, fetch_provider)
+    async for ev in _publish_workflow_graph(g, graph_artifact_id):
+        yield ev
     use_outline_path = False
     outline_draft: LiteratureOutline | None = None
     outline_obj: LiteratureOutline | None = None
@@ -217,7 +234,8 @@ async def stream_literature_turn(
     think_acc = ThinkAccumulator()
     planner_ctx = await load_planner_context()
     working = SessionCorpus()
-    llm = await get_llm()
+    review_llm = await get_review_llm()
+    planner_llm = await get_planner_llm()
     fetch_results: list[tuple[dict[str, str], str, str | None]] = []
     cite_records: list[Any] = []
     failed_literature: list[dict[str, str]] = []
@@ -249,7 +267,7 @@ async def stream_literature_turn(
     )
 
     if clar_state.search_relax_domain:
-        tavily_enforce_domain_filter = False
+        search_enforce_domain_filter = False
     if clar_state.search_retry_query:
         intent.search_query = clar_state.search_retry_query
 
@@ -296,14 +314,24 @@ async def stream_literature_turn(
         fetch_ok = len(working.fetch_hits)
         fetch_failed = len(failed_literature)
         g = build_literature_graph(_section_specs_for_graph(outline_obj))
+        apply_fetch_provider_label(g, fetch_provider)
         async for ev in _publish_workflow_graph(g, graph_artifact_id):
+            yield ev
+        prefix_done = ["fetch", "cite_extract"]
+        if enable_paper_attributes and g.node("attributes"):
+            prefix_done.append("attributes")
+        if g.node("outline"):
+            prefix_done.append("outline")
+        async for ev in sync_graph_nodes(
+            emitter, g, graph_artifact_id, prefix_done, "done"
+        ):
             yield ev
         yield (
             "literature_intent",
             {
                 "intent": intent.intent,
                 "defer_generate": intent.defer_generate,
-                "skip_tavily": intent.skip_tavily,
+                "skip_web_search": intent.skip_web_search,
                 "skip_fetch": intent.skip_fetch,
                 "use_existing_corpus": intent.use_existing_corpus,
             },
@@ -316,7 +344,7 @@ async def stream_literature_turn(
             {
                 "intent": intent.intent,
                 "defer_generate": intent.defer_generate,
-                "skip_tavily": intent.skip_tavily,
+                "skip_web_search": intent.skip_web_search,
                 "skip_fetch": intent.skip_fetch,
                 "use_existing_corpus": intent.use_existing_corpus,
             },
@@ -341,6 +369,8 @@ async def stream_literature_turn(
             user_message_count=user_turns,
         ):
             new_title = router_result.session_title or intent.session_title
+            if new_title and title_is_message_truncation(new_title, route_message):
+                new_title = ""
             if new_title:
                 store.update_session(
                     session_id,
@@ -360,6 +390,51 @@ async def stream_literature_turn(
             or intent.search_query
             or route_message.strip()
         )
+        planner_llm = await get_planner_llm()
+        first_gate, brief_assessment = await assess_first_turn_gate(
+            route_message,
+            search_query=search_query_for_plan,
+            user_turns=user_turns,
+            intent=intent.intent,
+            gate_resolved=clar_state.resolved,
+            llm=planner_llm,
+        )
+        if brief_assessment and not first_gate:
+            assess_patch: dict[str, Any] = {
+                "brief_assessment": brief_assessment.to_dict(),
+            }
+            if brief_assessment.search_query_hint:
+                assess_patch["initial_query"] = route_message.strip()
+            store.patch_session_meta(session_id, assess_patch)
+            session_meta = store.get_session(session_id) or session_meta
+            if brief_assessment.search_query_hint:
+                search_query_for_plan = brief_assessment.search_query_hint
+                intent.search_query = brief_assessment.search_query_hint
+            rq_msg = format_brief_assessment_message(brief_assessment)
+            if rq_msg:
+                finalize_ctx.assistant_prefix = rq_msg
+                yield ("text", {"delta": rq_msg})
+            yield (
+                "literature_brief_assessment",
+                {
+                    "core_research_questions": brief_assessment.core_research_questions,
+                    "keywords": brief_assessment.keywords,
+                    "search_query_hint": brief_assessment.search_query_hint,
+                    "confidence": brief_assessment.confidence,
+                },
+            )
+        if first_gate:
+            finalize_ctx.corpus = corpus
+            finalize_ctx.fetch_results = []
+            finalize_ctx.cite_records = []
+            finalize_ctx.failed_literature = []
+            async for ev in yield_clarification_pause(
+                first_gate,
+                finalize_ctx,
+                gate_resolved=clar_state.resolved,
+            ):
+                yield ev
+            return
 
         initial_query = str(
             session_meta.get("initial_query") or route_message.strip()
@@ -380,29 +455,10 @@ async def stream_literature_turn(
             g = build_literature_graph(_section_specs_for_graph(outline_draft))
         else:
             g = build_literature_graph_legacy()
+        apply_fetch_provider_label(g, fetch_provider)
         async for ev in _publish_workflow_graph(g, graph_artifact_id):
             yield ev
 
-        first_gate = detect_first_turn_ambiguity(
-            route_message,
-            search_query=search_query_for_plan,
-            user_turns=user_turns,
-            intent=intent.intent,
-            gate_resolved=clar_state.resolved,
-            orchestrator=router_result,
-        )
-        if first_gate:
-            finalize_ctx.corpus = corpus
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = []
-            async for ev in yield_clarification_pause(
-                first_gate,
-                finalize_ctx,
-                gate_resolved=clar_state.resolved,
-            ):
-                yield ev
-            return
         if use_outline_path and sub_topics_for_search:
             yield (
                 "literature_subtopic_plan",
@@ -446,7 +502,7 @@ async def stream_literature_turn(
         if intent.use_existing_corpus and turn_ctx.has_corpus:
             working = SessionCorpus.from_dict(corpus.to_dict()) or SessionCorpus()
 
-        jina_key = await get_jina_api_key()
+        fetch_api_key = await get_fetch_api_key()
         parallel = await get_fetch_parallel()
         timeout_sec = await get_fetch_timeout_sec()
 
@@ -462,7 +518,7 @@ async def stream_literature_turn(
             clar_state=clar_state,
             finalize_ctx=finalize_ctx,
             store=store,
-            llm=llm,
+            planner_llm=planner_llm,
             emitter=emitter,
             graph=g,
             graph_artifact_id=graph_artifact_id,
@@ -472,21 +528,21 @@ async def stream_literature_turn(
             citation_format=citation_format,
             fmt_label=fmt_label,
             source_mode=source_mode,
-            tavily_key=tavily_key,
-            tavily_max_results=tavily_max_results,
-            tavily_retry_count=tavily_retry_count,
+            search_api_key=search_api_key,
+            search_max_results=search_max_results,
+            search_retry_count=search_retry_count,
             fetch_retry_delay_ms=fetch_retry_delay_ms,
-            tavily_include_domains=tavily_include_domains,
-            tavily_exclude_domains=tavily_exclude_domains,
-            tavily_search_depth=tavily_search_depth,
-            tavily_enforce_domain_filter=tavily_enforce_domain_filter,
-            tavily_enable_junk_filter=tavily_enable_junk_filter,
+            search_include_domains=search_include_domains,
+            search_exclude_domains=search_exclude_domains,
+            search_depth=search_depth,
+            search_enforce_domain_filter=search_enforce_domain_filter,
+            search_enable_junk_filter=search_enable_junk_filter,
             enable_query_expansion=enable_query_expansion,
             search_expansion_count=search_expansion_count,
             enable_paper_attributes=enable_paper_attributes,
             max_fetch_urls=max_fetch_urls,
             max_source_chars=max_source_chars,
-            jina_key=jina_key,
+            fetch_api_key=fetch_api_key,
             parallel=parallel,
             timeout_sec=timeout_sec,
             fetch_retry_count=fetch_retry_count,
@@ -503,6 +559,8 @@ async def stream_literature_turn(
             outline_draft=outline_draft,
             outline_obj=outline_obj,
             sub_topics_for_search=sub_topics_for_search,
+            search_provider=search_provider,
+            fetch_provider=fetch_provider,
         )
         async for ev in run_retrieval_pipeline(pipe_ctx):
             yield ev
@@ -563,7 +621,7 @@ async def stream_literature_turn(
         post_refine_mode=post_refine_mode,
         finalize_ctx=finalize_ctx,
         store=store,
-        llm=llm,
+        llm=review_llm,
         emitter=emitter,
         graph=g,
         graph_artifact_id=graph_artifact_id,

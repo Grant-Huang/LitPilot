@@ -30,25 +30,25 @@ export type ChatMessage = {
 };
 
 export type AgentSettings = {
-  tavily_api_key?: string;
-  jina_api_key?: string;
+  web_search_api_key?: string;
+  fetch_api_key?: string;
   llm_provider?: string;
   llm_api_key?: string;
   llm_model?: string;
   llm_base_url?: string;
   fetch_parallel?: number;
   fetch_timeout_sec?: number;
-  tavily_max_results?: number;
+  search_max_results?: number;
   max_fetch_urls?: number;
   literature_source_mode?: "merge" | "user_only";
-  tavily_retry_count?: number;
+  search_retry_count?: number;
   fetch_retry_count?: number;
   fetch_retry_delay_ms?: number;
   plan_confirm?: boolean;
   citation_format?: "apa" | "acm";
   llm_group_id?: string;
-  has_tavily?: boolean;
-  has_jina?: boolean;
+  has_web_search?: boolean;
+  has_fetch?: boolean;
   has_llm?: boolean;
   use_llm_planner?: boolean;
   orchestrator_mode?: "off" | "lite" | "full";
@@ -112,14 +112,6 @@ export const settingsApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  testTavily: (api_key?: string) =>
-    apiRequestData<{ hits: number; answer_preview: string }>(
-      "/settings/agent/test-tavily",
-      {
-        method: "POST",
-        body: JSON.stringify({ api_key }),
-      },
-    ),
 };
 
 export const libraryApi = {
@@ -159,6 +151,14 @@ export const libraryApi = {
       references_count?: number;
       item?: LibraryItem;
     }>(`/library/items/${encodeURIComponent(itemId)}/enrich`, { method: "POST" }),
+  refreshMetadata: (body?: { item_ids?: string[]; parallel?: number }) =>
+    apiRequestData<{ updated: number; skipped: number; total: number }>(
+      "/library/refresh-metadata",
+      {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      },
+    ),
   updateMetadata: (
     itemId: string,
     body: {

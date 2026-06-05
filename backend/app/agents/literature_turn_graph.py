@@ -23,6 +23,29 @@ async def publish_workflow_graph(
     )
 
 
+async def sync_graph_nodes(
+    emitter: WorkflowNodeEmitter,
+    graph,
+    graph_artifact_id: str,
+    node_ids: list[str],
+    status: str,
+    *,
+    parent_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    for node_id in node_ids:
+        async for ev in sync_graph_node(
+            emitter,
+            graph,
+            graph_artifact_id,
+            node_id,
+            status,
+            parent_id=parent_id,
+            metadata=metadata,
+        ):
+            yield ev
+
+
 async def sync_graph_node(
     emitter: WorkflowNodeEmitter,
     graph,

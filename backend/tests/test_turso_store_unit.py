@@ -42,7 +42,12 @@ def mock_conn() -> MagicMock:
 @pytest.fixture
 def turso_store(tmp_path: Path, mock_conn: MagicMock) -> TursoStore:
     reset_store_for_tests()
-    with patch("app.storage.turso_store.apply_migrations"):
+    mock_repo = MagicMock(spec=TursoRepo)
+    mock_repo.conn = mock_conn
+    with (
+        patch("app.storage.turso_store.apply_migrations"),
+        patch("app.storage.turso_store.TursoRepo", return_value=mock_repo),
+    ):
         store = TursoStore(root=tmp_path)
     store._repo = TursoRepo(conn=mock_conn)
     return store

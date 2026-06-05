@@ -20,7 +20,7 @@ async def reconcile_library(
     *,
     session_id: str | None = None,
     mode: ReconcileMode = "session",
-    jina_api_key: str | None = None,
+    fetch_api_key: str | None = None,
     timeout: float = 60.0,
     citation_format: str = "apa",
 ) -> dict[str, Any]:
@@ -88,7 +88,7 @@ async def reconcile_library(
                     continue
                 rec = await extract_citation_from_url(
                     url,
-                    jina_api_key=jina_api_key,
+                    fetch_api_key=fetch_api_key,
                     title_hint=fail.get("title") or "",
                     timeout=timeout,
                 )
@@ -103,9 +103,13 @@ async def reconcile_library(
                 )
                 if rec.success and not (item.get("full_text") or {}).get("path"):
                     try:
-                        from app.agents.tools.jina_reader import jina_fetch
+                        from app.agents.tools.cached_tools import cached_web_fetch
 
-                        body = await jina_fetch(url, api_key=jina_api_key, timeout=timeout)
+                        body = await cached_web_fetch(
+                            url,
+                            api_key=fetch_api_key,
+                            timeout=timeout,
+                        )
                         lib.save_full_text(item["id"], body)
                     except Exception:
                         pass

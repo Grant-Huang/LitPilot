@@ -57,7 +57,7 @@ def build_synthesis_matrix_system_prompt(
 def build_synthesis_matrix_user_prompt(context_block: str) -> str:
     block = (context_block or "").strip()
     return (
-        "请基于下列由 Tavily 检索摘要、Jina Reader 解析正文和引用抽取"
+        "请基于下列由 web_search 检索摘要、web_fetch 解析正文和引用抽取"
         "共同组成的论文材料，生成 Markdown 文献综述矩阵。\n\n"
         f"【多源论文材料】\n{block}"
     )

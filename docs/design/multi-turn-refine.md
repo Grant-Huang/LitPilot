@@ -16,7 +16,7 @@
 |--------|------|
 | `new_topic` | 完整管线 |
 | `supplement` | 增量 fetch |
-| `expand_search` | 增量 Tavily |
+| `expand_search` | 增量 web_search |
 | `refine_gen` | 复用语料，累积约束，可章节级 refine |
 | `regen_only` | 重写，不追加约束 |
 | `query_corpus` | 短答，不重写综述 |

@@ -50,7 +50,7 @@ def test_supplement_with_url() -> None:
     )
     assert result is not None
     assert result.intent == "supplement"
-    assert result.skip_tavily is True
+    assert result.skip_web_search is True
     assert result.new_urls
 
 
@@ -75,7 +75,7 @@ def test_synthesis_matrix_reuses_existing_corpus() -> None:
     )
     assert result is not None
     assert result.intent == "synthesis_matrix"
-    assert result.skip_tavily is True
+    assert result.skip_web_search is True
     assert result.skip_fetch is True
     assert result.use_existing_corpus is True
 
@@ -88,7 +88,7 @@ def test_synthesis_matrix_first_turn_searches() -> None:
     )
     assert result is not None
     assert result.intent == "synthesis_matrix"
-    assert result.skip_tavily is False
+    assert result.skip_web_search is False
     assert result.skip_fetch is False
     assert result.use_existing_corpus is False
 

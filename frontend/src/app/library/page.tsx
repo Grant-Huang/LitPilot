@@ -14,6 +14,7 @@ export default function LibraryPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listIndexById, setListIndexById] = useState<Record<string, number>>({});
   const [detailTab, setDetailTab] = useState<LibraryDetailTab | undefined>();
+  const [refreshingMeta, setRefreshingMeta] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +39,21 @@ export default function LibraryPage() {
   const handleItemChange = useCallback((updated: LibraryItem) => {
     setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
   }, []);
+
+  const handleRefreshMetadata = useCallback(async () => {
+    setRefreshingMeta(true);
+    try {
+      const stats = await libraryApi.refreshMetadata({ parallel: 4 });
+      await load();
+      message.success(
+        `已刷新 ${stats.updated} 条元数据（跳过 ${stats.skipped} 条）`,
+      );
+    } catch {
+      message.error("刷新元数据失败");
+    } finally {
+      setRefreshingMeta(false);
+    }
+  }, [load]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -75,6 +91,14 @@ export default function LibraryPage() {
             <h1>文献库</h1>
             <p className="functional-page__subtitle">共 {items.length} 条文献</p>
           </div>
+          <button
+            type="button"
+            className="btn-sm"
+            disabled={refreshingMeta || items.length === 0}
+            onClick={() => void handleRefreshMetadata()}
+          >
+            {refreshingMeta ? "刷新中…" : "刷新元数据"}
+          </button>
         </div>
       </header>
 

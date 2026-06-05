@@ -24,7 +24,7 @@ from app.agents.url_list import parse_urls_from_text, sanitize_fetch_urls
 from app.library.dedupe import dedupe_library
 from app.library.store import LibraryStore
 from app.llm.base import LLMMessage
-from app.services.llm_service import get_llm
+from app.services.llm_service import get_planner_llm
 
 IntentKind = Literal[
     "new_topic",
@@ -79,7 +79,7 @@ INTENT_ROUTER_SYSTEM = """你是文献综述助手的续聊意图路由器。
   "search_query": "expand_search/supplement/new_topic 时的检索词，≤120字",
   "gen_directives": "refine_gen 时的写作要求摘要，≤200字",
   "defer_generate": false,
-  "skip_tavily": false,
+  "skip_web_search": false,
   "skip_fetch": false,
   "use_existing_corpus": true
 }
@@ -116,7 +116,7 @@ class LiteratureIntentResult:
     search_query: str = ""
     gen_directives: str = ""
     defer_generate: bool = False
-    skip_tavily: bool = False
+    skip_web_search: bool = False
     skip_fetch: bool = False
     use_existing_corpus: bool = False
     manage_action: str = ""
@@ -196,7 +196,7 @@ def detect_intent_rules(
             gen_directives=msg[:500],
             new_urls=urls,
             defer_generate=False,
-            skip_tavily=turn_ctx.has_corpus and not urls,
+            skip_web_search=turn_ctx.has_corpus and not urls,
             skip_fetch=turn_ctx.has_corpus and not urls,
             use_existing_corpus=turn_ctx.has_corpus,
         )
@@ -218,7 +218,7 @@ def detect_intent_rules(
             session_title="",
             new_urls=new_only or urls,
             defer_generate=defer,
-            skip_tavily=True,
+            skip_web_search=True,
             use_existing_corpus=True,
         )
 
@@ -228,7 +228,7 @@ def detect_intent_rules(
             intent="retry_failed",
             new_urls=retry_urls,
             defer_generate=defer,
-            skip_tavily=True,
+            skip_web_search=True,
             use_existing_corpus=True,
         )
 
@@ -239,7 +239,7 @@ def detect_intent_rules(
             manage_action=action,
             manage_targets=targets,
             defer_generate=True,
-            skip_tavily=True,
+            skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
         )
@@ -249,7 +249,7 @@ def detect_intent_rules(
             return LiteratureIntentResult(
                 intent="query_corpus",
                 defer_generate=True,
-                skip_tavily=True,
+                skip_web_search=True,
                 skip_fetch=True,
                 use_existing_corpus=True,
             )
@@ -259,7 +259,7 @@ def detect_intent_rules(
             intent="refine_gen",
             gen_directives=msg[:500],
             defer_generate=defer,
-            skip_tavily=True,
+            skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
         )
@@ -268,7 +268,7 @@ def detect_intent_rules(
         return LiteratureIntentResult(
             intent="regen_only",
             defer_generate=defer,
-            skip_tavily=True,
+            skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
         )
@@ -285,7 +285,7 @@ def detect_intent_rules(
         return LiteratureIntentResult(
             intent="refine_gen",
             gen_directives=msg[:500],
-            skip_tavily=True,
+            skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
         )
@@ -326,7 +326,7 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
         ),
         gen_directives=str(data.get("gen_directives") or msg).strip()[:500],
         defer_generate=bool(data.get("defer_generate")),
-        skip_tavily=bool(data.get("skip_tavily")),
+        skip_web_search=bool(data.get("skip_web_search")),
         skip_fetch=bool(data.get("skip_fetch")),
         use_existing_corpus=bool(data.get("use_existing_corpus", True)),
     )
@@ -373,7 +373,7 @@ async def route_literature_intent(
         )
 
     try:
-        llm = await get_llm()
+        llm = await get_planner_llm()
         body = (
             f"【会话状态】\n{format_session_context_summary(turn_ctx)}\n\n"
             f"【用户消息】\n{user_message.strip()[:800]}"
@@ -391,7 +391,7 @@ async def route_literature_intent(
         result = LiteratureIntentResult(
             intent="refine_gen",
             gen_directives=user_message.strip()[:500],
-            skip_tavily=True,
+            skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
         )
@@ -400,7 +400,7 @@ async def route_literature_intent(
     if urls:
         result.intent = "supplement"
         result.new_urls = filter_new_urls(corpus, urls) or urls
-        result.skip_tavily = True
+        result.skip_web_search = True
         result.use_existing_corpus = True
 
     if result.intent == "new_topic" and turn_ctx.has_corpus:
@@ -415,7 +415,7 @@ async def route_literature_intent(
         if not result.search_query:
             result.search_query = user_message.strip()[:200]
         if turn_ctx.has_corpus and not urls:
-            result.skip_tavily = True
+            result.skip_web_search = True
             result.skip_fetch = True
             result.use_existing_corpus = True
         elif not turn_ctx.has_corpus:

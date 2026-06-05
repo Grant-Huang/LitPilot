@@ -24,3 +24,4 @@ class TurnFinalizeContext:
     cite_records: list[Any]
     failed_literature: list[dict[str, str]]
     gen_constraints: list[str]
+    assistant_prefix: str = ""

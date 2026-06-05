@@ -16,7 +16,7 @@ MAX_BLOCK_CHARS = 14_000
 class SessionCorpus:
     """In-memory corpus for a literature session turn."""
 
-    tavily_answer: str = ""
+    search_answer: str = ""
     sources_md: list[str] = field(default_factory=list)
     fetch_hits: list[dict[str, str]] = field(default_factory=list)
     fetch_results: list[tuple[dict[str, str], str, str | None]] = field(
@@ -29,7 +29,7 @@ class SessionCorpus:
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "version": 2 if self.paper_index else 1,
-            "tavily_answer": self.tavily_answer,
+            "search_answer": self.search_answer,
             "sources_md": self.sources_md,
             "fetch_hits": self.fetch_hits,
             "fetch_results": [
@@ -48,7 +48,7 @@ class SessionCorpus:
         if not data:
             return None
         corpus = cls(
-            tavily_answer=str(data.get("tavily_answer") or ""),
+            search_answer=str(data.get("search_answer") or ""),
             sources_md=list(data.get("sources_md") or []),
             fetch_hits=[dict(h) for h in (data.get("fetch_hits") or [])],
             failed_literature=[
@@ -89,10 +89,10 @@ class SessionCorpus:
         return bool(key and key in self.known_url_keys)
 
     def merge(self, other: SessionCorpus) -> None:
-        if other.tavily_answer and not self.tavily_answer:
-            self.tavily_answer = other.tavily_answer
-        elif other.tavily_answer:
-            self.tavily_answer = f"{self.tavily_answer}\n\n{other.tavily_answer}".strip()
+        if other.search_answer and not self.search_answer:
+            self.search_answer = other.search_answer
+        elif other.search_answer:
+            self.search_answer = f"{self.search_answer}\n\n{other.search_answer}".strip()
 
         existing_blocks = set(self.sources_md)
         for block in other.sources_md:
@@ -139,14 +139,14 @@ class SessionCorpus:
     def source_block_count(self) -> int:
         return len(self.sources_md)
 
-    def append_tavily_answer(self, answer: str) -> None:
+    def append_search_answer(self, answer: str) -> None:
         answer = (answer or "").strip()
         if not answer:
             return
-        block = f"## [Tavily] 检索摘要\n\n{answer}\n"
+        block = f"## [web_search] 检索摘要\n\n{answer}\n"
         if block not in self.sources_md:
             self.sources_md.insert(0, block)
-        self.tavily_answer = answer
+        self.search_answer = answer
 
 
 def load_session_corpus(store: FileStore, session_id: str) -> SessionCorpus | None:

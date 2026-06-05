@@ -3,8 +3,58 @@ import type {
   SystemCredential,
   SystemInstance,
 } from "@/lib/settingsApiV2";
+import {
+  fetchProviderNeedsCredential,
+  searchProviderNeedsCredential,
+} from "@/lib/webProviderOptions";
 
 type PrimaryRef = { kind?: string; id?: string } | null | undefined;
+
+/** 能力 ID → 后端 LLM 运行时角色（与 llm_service 一致） */
+export const CAPABILITY_LLM_ROLE: Partial<
+  Record<
+    string,
+    { role: "review" | "planner"; summary: string; modules: string[] }
+  >
+> = {
+  review_main: {
+    role: "review",
+    summary: "绑定实例 → get_review_llm()",
+    modules: [
+      "literature_turn_generate（语料问答、矩阵、分章综述、全文流式）",
+      "literature_section_writer（单章撰写）",
+    ],
+  },
+  orchestrator: {
+    role: "planner",
+    summary: "绑定实例 → get_planner_llm()",
+    modules: [
+      "literature_planner（理解+路由 A、阶段解说 B–G）",
+      "literature_router（独立 router JSON 回退）",
+      "literature_intent（多轮意图路由）",
+      "search_query_refiner（检索式精炼 / 澄清问题）",
+      "search_expansion（检索式扩展）",
+      "literature_clarification（首轮 LLM 澄清）",
+      "content_pipeline（网页分块摘要）",
+      "paper_attributes（文献结构化）",
+    ],
+  },
+};
+
+export function capabilityLlmModulesTitle(capId: string): string | undefined {
+  const role = CAPABILITY_LLM_ROLE[capId];
+  if (!role?.modules.length) return undefined;
+  return role.modules.join("\n");
+}
+
+const PROVIDER_CAP_IDS = new Set(["web_search", "web_fetch"]);
+
+export function capabilityDisplayTitle(cap: SystemCapability): string {
+  if (PROVIDER_CAP_IDS.has(cap.capability_id)) {
+    return cap.capability_id;
+  }
+  return cap.label || cap.capability_id;
+}
 
 export function resolveCapabilityRefLabel(
   cap: SystemCapability | undefined,
@@ -32,15 +82,33 @@ export function formatCapabilityParams(
 ): string {
   const p = params || {};
   if (capId === "web_search") {
-    return `检索 ${Number(p.tavily_max_results ?? 8)} · 重试 ${Number(p.tavily_retry_count ?? 0)}`;
+    const prov = String(p.search_provider ?? "native");
+    return `${prov} · 检索 ${Number(p.search_max_results ?? 8)} · 重试 ${Number(p.search_retry_count ?? 0)}`;
   }
   if (capId === "web_fetch") {
-    return `抓取 ${Number(p.max_fetch_urls ?? 5)} · 并行 ${Number(p.fetch_parallel ?? 3)}`;
+    const prov = String(p.fetch_provider ?? "native");
+    const pdf = String(p.pdf_extract_backend ?? "pypdf");
+    const pdfPart = prov === "native" ? ` · PDF ${pdf}` : "";
+    return `${prov} · 抓取 ${Number(p.max_fetch_urls ?? 5)} · 并行 ${Number(p.fetch_parallel ?? 3)}${pdfPart}`;
   }
   if (capId === "orchestrator") {
     return `${String(p.orchestrator_mode ?? "lite")} · ${Number(p.orchestrator_max_tokens_per_phase ?? 280)} tok`;
   }
   return "";
+}
+
+export function capabilityNeedsCredentialRef(
+  cap: SystemCapability,
+  params?: Record<string, unknown>,
+): boolean {
+  const p = params ?? cap.params ?? {};
+  if (cap.capability_id === "web_search") {
+    return searchProviderNeedsCredential(String(p.search_provider ?? "native"));
+  }
+  if (cap.capability_id === "web_fetch") {
+    return fetchProviderNeedsCredential(String(p.fetch_provider ?? "native"));
+  }
+  return cap.capability_id === "review_main" || cap.capability_id === "orchestrator";
 }
 
 export function capabilityRefOptions(
@@ -57,12 +125,31 @@ export function capabilityRefOptions(
       })),
     };
   }
-  if (cap.capability_id === "web_search" || cap.capability_id === "web_fetch") {
-    const typePrefix = cap.capability_id === "web_search" ? "tavily" : "jina";
+  if (cap.capability_id === "web_search") {
+    const provider = String(cap.params?.search_provider ?? "native");
+    if (!searchProviderNeedsCredential(provider)) {
+      return { kind: "", items: [] };
+    }
+    const credType = provider === "brave" ? "brave" : "tavily";
     return {
       kind: "credential",
       items: credentials
-        .filter((c) => String(c.type || "").startsWith(typePrefix))
+        .filter((c) => String(c.type || "") === credType)
+        .map((c) => ({
+          id: c.id,
+          label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置"}`,
+        })),
+    };
+  }
+  if (cap.capability_id === "web_fetch") {
+    const provider = String(cap.params?.fetch_provider ?? "native");
+    if (!fetchProviderNeedsCredential(provider)) {
+      return { kind: "", items: [] };
+    }
+    return {
+      kind: "credential",
+      items: credentials
+        .filter((c) => String(c.type || "").startsWith("jina"))
         .map((c) => ({
           id: c.id,
           label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置"}`,
@@ -72,8 +159,19 @@ export function capabilityRefOptions(
   return { kind: "", items: [] };
 }
 
-export function capabilityRefLabel(capId: string): string {
-  if (capId === "web_search") return "Tavily";
-  if (capId === "web_fetch") return "Jina";
+export function capabilityRefLabel(
+  capId: string,
+  params?: Record<string, unknown>,
+): string {
+  if (capId === "web_search") {
+    const p = String(params?.search_provider ?? "native");
+    if (p in ("brave", "tavily")) return "web_search 凭据";
+    return "凭据";
+  }
+  if (capId === "web_fetch") {
+    const p = String(params?.fetch_provider ?? "native");
+    if (p === "jina") return "web_fetch 凭据";
+    return "凭据";
+  }
   return "实例";
 }

@@ -31,9 +31,9 @@ def test_credential_test_persists_ok_status(client: TestClient, store: FileStore
     store.save_system_credentials(creds)
 
     with (
-        patch("app.api.settings.tavily_key_hint", return_value=None),
+        patch("app.api.settings.search_credential_secret_hint", return_value=None),
         patch(
-            "app.api.settings.tavily_search",
+            "app.api.settings.tavily_provider_search",
             new_callable=AsyncMock,
             return_value={"results": [{}, {}, {}]},
         ),

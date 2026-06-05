@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAPABILITY_LLM_ROLE,
+  capabilityLlmModulesTitle,
   capabilityRefOptions,
   formatCapabilityParams,
   resolveCapabilityRefLabel,
@@ -34,7 +36,7 @@ describe("capabilityFormat", () => {
       enabled: true,
       primary_ref: { kind: "credential", id: "c1" },
       override_params: {},
-      params: { tavily_max_results: 10, tavily_retry_count: 1 },
+      params: { search_max_results: 10, search_retry_count: 1 },
     } as SystemCapability;
     expect(resolveCapabilityRefLabel(cap, creds, insts)).toBe("Tavily Key");
     expect(formatCapabilityParams("web_search", cap.params)).toBe("检索 10 · 重试 1");
@@ -64,5 +66,11 @@ describe("capabilityFormat", () => {
     );
     expect(opts.kind).toBe("instance");
     expect(opts.items[0].label).toContain("Main");
+  });
+
+  it("lists planner modules for orchestrator capability", () => {
+    expect(CAPABILITY_LLM_ROLE.orchestrator?.modules.length).toBeGreaterThan(5);
+    expect(capabilityLlmModulesTitle("orchestrator")).toContain("literature_planner");
+    expect(capabilityLlmModulesTitle("review_main")).toContain("literature_turn_generate");
   });
 });

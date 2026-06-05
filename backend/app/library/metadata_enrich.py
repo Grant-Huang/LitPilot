@@ -27,6 +27,11 @@ _ENRICH_PATCH_KEYS = (
     "title",
 )
 
+# Crossref / OpenAlex 书目字段优先于页面抓取
+_AUTHORITATIVE_BIB_KEYS = frozenset(
+    {"title", "authors", "year", "venue", "doi", "volume", "issue", "pages", "month", "publisher"}
+)
+
 
 def _sync_exports(lib: LibraryStore) -> None:
     from app.library.from_run import _sync_exports as sync
@@ -76,22 +81,59 @@ def merge_enrich_into_patch(
     enrich: dict[str, Any],
     *,
     rec_doi: str = "",
+    authoritative: bool = True,
 ) -> None:
     """Merge Crossref/OpenAlex enrich fields into library upsert patch."""
-    if enrich.get("title") and not patch.get("title"):
-        patch["title"] = enrich["title"]
+    if not enrich:
+        return
     for key in _ENRICH_PATCH_KEYS:
-        if key == "title":
-            continue
-        if enrich.get(key) is None or enrich.get(key) == "":
+        val = enrich.get(key)
+        if val is None or val == "":
             continue
         if key == "abstract" and patch.get("abstract"):
-            if len(str(enrich["abstract"])) <= len(str(patch["abstract"])):
+            if len(str(val)) <= len(str(patch["abstract"])):
                 continue
-        patch[key] = enrich[key]
+        if key in _AUTHORITATIVE_BIB_KEYS and authoritative:
+            patch[key] = val
+            continue
+        if key == "title" and not patch.get("title"):
+            patch["title"] = val
+            continue
+        if key != "title":
+            patch[key] = val
     resolved = normalize_doi(enrich.get("doi") or rec_doi or patch.get("doi", ""))
     if resolved:
         patch["doi"] = resolved
+
+
+def rebuild_citation_lines(
+    patch: dict[str, Any],
+    *,
+    display_index: int,
+    citation_format: str = "apa",
+) -> None:
+    """Regenerate APA/ACM lines from patch title/authors/year/venue/doi."""
+    from app.skills.citation_extractor import CitationFormat, CitationRecord
+
+    authors = patch.get("authors") or []
+    if isinstance(authors, list):
+        authors_str = ", ".join(str(a) for a in authors if str(a).strip())
+    else:
+        authors_str = str(authors)
+    rec = CitationRecord(
+        title=str(patch.get("title") or ""),
+        authors=authors_str,
+        year=str(patch.get("year") or ""),
+        venue=str(patch.get("venue") or ""),
+        doi=str(patch.get("doi") or ""),
+        url=str(patch.get("url") or ""),
+        success=True,
+    )
+    fmt: CitationFormat = "acm" if citation_format == "acm" else "apa"
+    cites = dict(patch.get("citations") or {})
+    cites["apa"] = rec.to_apa(display_index)
+    cites[fmt] = rec.format_line(display_index, fmt)
+    patch["citations"] = cites
 
 
 async def enrich_records_parallel(
@@ -121,13 +163,107 @@ def apply_metadata_patch(
         items = db["items"]
         if item_id not in items:
             return None
-        merged = merge_item(items[item_id], patch)
+        merged = merge_item(items[item_id], patch, authoritative=True)
         if patch.get("doi"):
             merged["doi"] = normalize_doi(str(patch["doi"]))
         items[item_id] = merged
         return merged
 
     return lib._with_lock(_op)
+
+
+def refresh_item_metadata(
+    item: dict[str, Any],
+    *,
+    enrich_patch: dict[str, Any] | None = None,
+    citation_format: str = "apa",
+) -> dict[str, Any]:
+    """Apply authoritative Crossref patch and rebuild citation lines for one item."""
+    patch: dict[str, Any] = {
+        "title": item.get("title"),
+        "authors": item.get("authors"),
+        "year": item.get("year"),
+        "venue": item.get("venue"),
+        "doi": item.get("doi"),
+        "url": item.get("url"),
+        "publisher": item.get("publisher"),
+        "abstract": item.get("abstract"),
+        "citations": dict(item.get("citations") or {}),
+    }
+    ep = enrich_patch if enrich_patch is not None else {}
+    if not ep:
+        rec = _citation_record_from_item(item)
+        ep = build_enrich_patch_for_record(rec)
+    merge_enrich_into_patch(patch, ep, rec_doi=str(item.get("doi") or ""))
+    idx = int(item.get("display_index") or 0) or 1
+    rebuild_citation_lines(patch, display_index=idx, citation_format=citation_format)
+    return patch
+
+
+def _citation_record_from_item(item: dict[str, Any]) -> CitationRecord:
+    authors = item.get("authors") or []
+    if isinstance(authors, list):
+        authors_str = ", ".join(str(a) for a in authors)
+    else:
+        authors_str = str(authors or "")
+    return CitationRecord(
+        title=str(item.get("title") or ""),
+        authors=authors_str,
+        year=str(item.get("year") or ""),
+        venue=str(item.get("venue") or ""),
+        doi=str(item.get("doi") or ""),
+        url=str(item.get("url") or ""),
+        abstract=str(item.get("abstract") or ""),
+        publisher=str(item.get("publisher") or ""),
+        success=True,
+    )
+
+
+async def refresh_library_metadata(
+    lib: LibraryStore | None = None,
+    *,
+    parallel: int = 4,
+    citation_format: str = "apa",
+    item_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Re-enrich all (or selected) library items from Crossref/OpenAlex."""
+    import asyncio
+
+    lib = lib or LibraryStore()
+    items = lib.list_items()
+    if item_ids:
+        wanted = set(item_ids)
+        items = [i for i in items if i.get("id") in wanted]
+
+    sem = asyncio.Semaphore(max(1, min(parallel, 12)))
+    updated = 0
+    skipped = 0
+
+    async def _one(item: dict[str, Any]) -> None:
+        nonlocal updated, skipped
+        async with sem:
+            ep = await asyncio.to_thread(
+                build_enrich_patch_for_record,
+                _citation_record_from_item(item),
+            )
+        if not ep:
+            skipped += 1
+            return
+        patch = refresh_item_metadata(
+            item,
+            enrich_patch=ep,
+            citation_format=citation_format,
+        )
+        result = apply_metadata_patch(lib, str(item["id"]), patch)
+        if result:
+            updated += 1
+        else:
+            skipped += 1
+
+    await asyncio.gather(*[_one(i) for i in items])
+    if updated:
+        _sync_exports(lib)
+    return {"updated": updated, "skipped": skipped, "total": len(items)}
 
 
 def enrich_item_from_crossref(
@@ -149,10 +285,16 @@ def enrich_item_from_crossref(
         )
     if not resolved:
         return {"ok": False, "error": "no_doi"}
-    patch = enrich_patch_from_doi(resolved)
-    if not patch:
+    ep = enrich_patch_from_doi(resolved)
+    if not ep:
         return {"ok": False, "error": "crossref_failed"}
-    patch["doi"] = resolved
+    ep["doi"] = resolved
+    item = lib.get_item(item_id) or {}
+    patch = refresh_item_metadata(
+        item,
+        enrich_patch=ep,
+        citation_format="apa",
+    )
     updated = apply_metadata_patch(lib, item_id, patch)
     if not updated:
         return {"ok": False, "error": "not_found"}

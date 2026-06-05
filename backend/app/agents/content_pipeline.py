@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
-from app.agents.tools.cached_tools import cached_jina_fetch
+from app.agents.tools.cached_tools import cached_web_fetch
 from app.llm.base import LLMMessage
 
 if TYPE_CHECKING:
@@ -125,15 +125,21 @@ async def process_url_for_context(
     llm: BaseLLM | None,
     fetch_timeout: float,
     title: str = "",
+    fetch_provider: str | None = None,
 ) -> tuple[str, str | None]:
     try:
-        raw = await cached_jina_fetch(url, api_key=api_key, timeout=fetch_timeout)
+        raw = await cached_web_fetch(
+            url,
+            provider=fetch_provider,
+            api_key=api_key,
+            timeout=fetch_timeout,
+        )
     except Exception as e:
         return "", str(e)
 
     inferred_title = ""
     if not title:
-        # Jina Reader 通常会在开头给出 Markdown 标题（# Title）
+        # web_fetch（Jina Reader）通常会在开头给出 Markdown 标题（# Title）
         for ln in (raw or "").splitlines()[:30]:
             s = ln.strip()
             if s.startswith("# "):

@@ -6,8 +6,8 @@
 
 | 能力 | 说明 |
 |------|------|
-| 学术检索 | [Tavily](https://tavily.com/) 搜索，自动增强 arXiv / DBLP 站点偏好 |
-| 全文抓取 | [Jina Reader](https://jina.ai/reader/) 并行抓取论文页面正文 |
+| 学术检索 | `web_search`（可选 [Tavily](https://tavily.com/) / Brave / OpenAlex / native），自动增强 arXiv / DBLP 站点偏好 |
+| 全文抓取 | `web_fetch`（[Jina Reader](https://jina.ai/reader/) 或 native 直连）并行抓取论文页面正文 |
 | 引用抽取 | 从出版商页面提取元数据，写入本地引用库 |
 | 综述生成 | 多源材料 + LLM 流式输出结构化综述 |
 | 引用格式 | **APA**（默认）与 **ACM**，在设置页切换 |
@@ -21,7 +21,7 @@
 | 前端 | Next.js 15、React 19、`@meso.ai/ui`、Ant Design、Tailwind |
 | 后端 | FastAPI、httpx、OpenAI 兼容 LLM 客户端 |
 | 存储 | 本地文件（JSON / JSONL / Markdown），[filelock](https://pypi.org/project/filelock/) 并发安全 |
-| 外部服务 | Tavily、Jina Reader、可选多厂商 LLM |
+| 外部服务 | web_search / web_fetch 各 provider、可选多厂商 LLM |
 
 ## 项目结构
 
@@ -49,7 +49,7 @@ LitPilot/
 - **Python** 3.11+（推荐 3.13；仓库内 venv 可能为 3.14）
 - **Node.js** 18+ 与 **pnpm**
 - **pnpm** 或 **npm**（前端通过 npm 安装 [MESO](https://github.com/Grant-Huang/meso) 的 `@meso.ai/ui` / `@meso.ai/types`）
-- API Key：**Tavily**（必填）、**LLM**（必填，Ollama 除外）、**Jina**（可选）
+- API Key：**web_search** 凭据（按所选 provider，native/OpenAlex 无需 Key）、**LLM**（必填，Ollama 除外）、**web_fetch** 凭据（native 无需 Key）
 
 ## 快速开始
 
@@ -158,11 +158,11 @@ BACKEND_URL=http://127.0.0.1:8001
 ## 文献综述工作流
 
 ```
-理解问题 → Tavily 检索 → Jina 并行抓取 → 引用抽取 → LLM 综述 → 交付 Artifact
+理解问题 → web_search → web_fetch → 引用抽取 → LLM 综述 → 交付 Artifact
 ```
 
-- 材料分栏：`[Tavily]` 摘要、`[网页材料]` 正文、`[Citations]` 已收录引用
-- 单 URL 抓取失败时回退 Tavily snippet，不阻断整轮
+- 材料分栏：`[web_search]` 摘要、`[网页材料]` 正文、`[Citations]` 已收录引用
+- 单 URL 抓取失败时回退检索 snippet，不阻断整轮
 - 引用元数据不足时不写入半条记录，正文中标注「待核实」
 
 详细说明见 [docs/literature-workflow.md](docs/literature-workflow.md)。
@@ -207,7 +207,6 @@ BACKEND_URL=http://127.0.0.1:8001
 | `GET` | `/api/health` | 健康检查 |
 | `POST` | `/api/chat/literature/execute` | SSE 文献综述流（Meso v1.0 envelope） |
 | `GET` / `POST` | `/api/settings/agent` | 读取 / 保存 Agent 配置 |
-| `POST` | `/api/settings/agent/test-tavily` | 测试 Tavily Key |
 | `GET` | `/api/sessions` | 会话列表 |
 | `POST` | `/api/sessions` | 创建会话 |
 | `GET` | `/api/sessions/{id}/messages` | 会话消息 |
@@ -248,9 +247,9 @@ pnpm lint
 - 确认使用 Route Handler 透传（`/api/chat/literature/execute`），勿仅用 `next.config` rewrite 代理 SSE。
 - 检查 `BACKEND_URL` 与后端端口一致。
 
-**提示未配置 Tavily**
+**提示未配置 web_search 凭据**
 
-- 在设置页保存 Tavily Key，或在 `.env` 中设置 `TAVILY_API_KEY` 后重启后端。
+- 在管理员 **凭据 / 能力** 页配置所选 provider 的 API Key，或在 `.env` 中设置 `TAVILY_API_KEY`（Tavily provider）后重启后端。
 
 **端口占用**
 
@@ -259,7 +258,7 @@ pnpm lint
 
 **API 费用**
 
-- Tavily、Jina、LLM 均可能产生第三方费用，请自行关注各平台用量。
+- web_search / web_fetch 各 provider 与 LLM 均可能产生第三方费用，请自行关注各平台用量。
 
 ## 许可证
 

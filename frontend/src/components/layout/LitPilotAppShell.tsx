@@ -115,6 +115,7 @@ export function LitPilotAppShell({ children }: Props) {
   const titles: Record<string, string> = {
     "/library": "文献库",
     "/settings": "设置",
+    "/help": "帮助中心",
   };
   const mainTitle = isChat ? "文献综述" : titles[pathname] || "LitPilot";
   const layoutFlags = getAppLayoutFlags(pathname, artifactVisible);

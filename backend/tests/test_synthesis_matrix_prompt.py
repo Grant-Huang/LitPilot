@@ -19,8 +19,8 @@ def test_matrix_system_prompt_includes_directives() -> None:
 def test_matrix_user_prompt_wraps_materials() -> None:
     out = build_synthesis_matrix_user_prompt("## Paper\nbody")
 
-    assert "Tavily" in out
-    assert "Jina Reader" in out
+    assert "web_search" in out
+    assert "web_fetch" in out
     assert "## Paper" in out
 
 

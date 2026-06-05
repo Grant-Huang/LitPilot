@@ -19,13 +19,13 @@ def capabilities_payload() -> dict:
                 "name": "web_search",
                 "provider": "api",
                 "risk": "safe",
-                "description": "Tavily 学术检索",
+                "description": "web_search 学术检索",
             },
             {
                 "name": "web_fetch",
                 "provider": "api",
                 "risk": "safe",
-                "description": "Jina 网页抓取",
+                "description": "web_fetch 网页抓取",
             },
             {
                 "name": "extract_citation",

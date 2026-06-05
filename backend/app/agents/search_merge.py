@@ -1,4 +1,4 @@
-"""Merge and deduplicate Tavily search hit lists."""
+"""Merge and deduplicate web_search hit lists."""
 from __future__ import annotations
 
 from app.library.canonical import canonical_key, normalize_url
@@ -9,6 +9,8 @@ def merge_search_hits(
     *,
     max_results: int | None = None,
 ) -> list[dict[str, str]]:
+    if max_results is not None and max_results < 1:
+        max_results = None
     seen: set[str] = set()
     merged: list[dict[str, str]] = []
     for hits in hits_lists:

@@ -1,6 +1,68 @@
 "use client";
 
 import clsx from "clsx";
+import { Tooltip } from "antd";
+import { QuestionCircleOutlined } from "@ant-design/icons";
+
+export function FieldTip({ title }: { title: string }) {
+  return (
+    <Tooltip title={title} placement="topLeft">
+      <button
+        type="button"
+        className="settings-field-tip"
+        aria-label="帮助说明"
+        tabIndex={-1}
+        onClick={(e) => e.preventDefault()}
+      >
+        <QuestionCircleOutlined />
+      </button>
+    </Tooltip>
+  );
+}
+
+export function InlineField({
+  label,
+  htmlFor,
+  children,
+  className,
+  tip,
+}: {
+  label: string;
+  htmlFor?: string;
+  children: React.ReactNode;
+  className?: string;
+  tip?: string;
+}) {
+  return (
+    <div className={clsx("settings-inline-field", className)}>
+      <label className="label settings-inline-field__label" htmlFor={htmlFor}>
+        <span className="settings-inline-field__label-text">{label}</span>
+        {tip ? <FieldTip title={tip} /> : null}
+      </label>
+      <div className="settings-inline-field__control">{children}</div>
+    </div>
+  );
+}
+
+export function InlineCheck({
+  label,
+  checked,
+  onChange,
+  tip,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  tip?: string;
+}) {
+  return (
+    <label className="settings-cap-inline-check">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+      {tip ? <FieldTip title={tip} /> : null}
+    </label>
+  );
+}
 
 export function SettingStatus({ status, hint }: { status?: string; hint?: string }) {
   const normalized = status === "ok" ? "ok" : status === "fail" ? "fail" : "pending";
@@ -18,27 +80,6 @@ export function SettingStatus({ status, hint }: { status?: string; hint?: string
     >
       {label}
     </span>
-  );
-}
-
-export function InlineField({
-  label,
-  htmlFor,
-  children,
-  className,
-}: {
-  label: string;
-  htmlFor?: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={clsx("settings-inline-field", className)}>
-      <label className="label settings-inline-field__label" htmlFor={htmlFor}>
-        {label}
-      </label>
-      <div className="settings-inline-field__control">{children}</div>
-    </div>
   );
 }
 

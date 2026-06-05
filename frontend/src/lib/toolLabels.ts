@@ -135,7 +135,9 @@ export function describeToolAction(call: ToolCallPayload): string {
   switch (call.name) {
     case "web_search": {
       const q = String(args.query ?? "").trim();
-      return q ? `${WEB_SEARCH_LABEL}：${q}` : WEB_SEARCH_LABEL;
+      const prov = String(args.provider ?? "").trim();
+      const provTag = prov ? `（${prov}）` : "";
+      return q ? `${WEB_SEARCH_LABEL}${provTag}：${q}` : WEB_SEARCH_LABEL;
     }
     case "web_fetch": {
       const parsed = parseWebFetchArgs(args as Record<string, unknown>);

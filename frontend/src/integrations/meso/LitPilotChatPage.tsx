@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { message } from "antd";
 import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotComposer } from "@/components/chat/LitPilotComposer";
@@ -30,6 +30,7 @@ export function LitPilotChatPage() {
     streamState,
     liveMessages,
     streaming,
+    streamSettling,
     send: sendStream,
     abort,
   } = useLiteratureStream();
@@ -47,6 +48,7 @@ export function LitPilotChatPage() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(
     null,
   );
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void settingsApiV2
@@ -76,11 +78,13 @@ export function LitPilotChatPage() {
 
   const streamDone = streamState.status === "done";
   const streamError = streamState.status === "error";
-  const activeStreaming = streaming || streamDone || streamError;
+  const activeStreaming =
+    streaming || streamDone || streamError || streamSettling;
 
-  const liveStreaming = activeStreaming
-    ? stripWorkflowArtifacts(streamState)
-    : undefined;
+  const liveStreaming =
+    (streaming || streamDone || streamError) && !streamSettling
+      ? stripWorkflowArtifacts(streamState)
+      : undefined;
 
   useEffect(() => {
     if (!activeStreaming) return;
@@ -232,10 +236,12 @@ export function LitPilotChatPage() {
   return (
     <div className="litpilot-chat-pane">
       <div className="litpilot-chat-pane__center">
-        <div className="litpilot-chat-scroll">
+        <div className="litpilot-chat-scroll" ref={chatScrollRef}>
           <LitPilotMessageList
             messages={historyMessages}
             streaming={liveStreaming}
+            scrollContainerRef={chatScrollRef}
+            scrollResetKey={activeSessionId}
             emptyStateAlign="top"
             emptyState={
               historyMessages.length === 0 && !activeStreaming ? (

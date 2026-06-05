@@ -20,11 +20,11 @@ const geistMono = Geist_Mono({
   display: "swap",
 });
 
-export const viewport: Viewport = {
-  themeColor: "#0E1633",
-};
+const appOrigin =
+  process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3002";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(appOrigin),
   title: "LitPilot — Literature review, on autopilot",
   description: "Literature review, on autopilot.",
   manifest: "/brand/site.webmanifest",
@@ -47,6 +47,10 @@ export const metadata: Metadata = {
     description: "Literature review, on autopilot.",
     images: ["/brand/png/og-image-1200x630.png"],
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0E1633",
 };
 
 const themeInitScript = `(function(){var t=localStorage.getItem('meso-theme')||'light';document.documentElement.setAttribute('data-theme',t);})();`;

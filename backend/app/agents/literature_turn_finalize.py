@@ -11,6 +11,14 @@ from app.agents.session_corpus import save_session_corpus
 from app.library.from_run import upsert_library_from_run
 
 
+def _combine_assistant_text(ctx: TurnFinalizeContext, main_text: str) -> str:
+    prefix = (ctx.assistant_prefix or "").strip()
+    body = (main_text or "").strip()
+    if prefix and body:
+        return f"{prefix}\n\n{body}"
+    return prefix or body
+
+
 async def finalize_turn(
     ctx: TurnFinalizeContext,
     *,
@@ -43,6 +51,8 @@ async def finalize_turn(
     think_text = ctx.think_acc.finalize()
     if think_text:
         ctx.execution_trace["thinkContent"] = think_text
+
+    main_text = _combine_assistant_text(ctx, main_text)
 
     msg_meta: dict[str, Any] = {
         "execution_trace": ctx.execution_trace,

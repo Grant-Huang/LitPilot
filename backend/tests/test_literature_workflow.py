@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.tools.tavily_search import augment_literature_search_query
+from app.agents.search_query_refiner import apply_academic_search_suffix
 from app.core.think_stream import chunk_text
 
 
@@ -26,7 +26,7 @@ async def _mock_understanding_stream():
 
 
 def test_augment_query_adds_academic_context() -> None:
-    q = augment_literature_search_query("transformer efficiency")
+    q = apply_academic_search_suffix("transformer efficiency")
     assert "academic" in q.lower() or "survey" in q.lower()
     assert "site:" not in q.lower()
 
@@ -37,7 +37,7 @@ def test_chunk_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
+async def test_stream_requires_search_api_key(tmp_path, monkeypatch) -> None:
     from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
@@ -45,10 +45,17 @@ async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("app.agents.literature_turn.get_store", lambda: store)
     meta = store.create_session("test")
 
-    with patch(
-        "app.agents.literature_turn.get_tavily_api_key",
-        new_callable=AsyncMock,
-        return_value="",
+    with (
+        patch(
+            "app.agents.literature_turn.get_web_search_api_key",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+        patch(
+            "app.agents.literature_turn.get_web_search_provider",
+            new_callable=AsyncMock,
+            return_value="tavily",
+        ),
     ):
         events = []
         async for ev in stream_literature_turn(meta["id"], "test query"):
@@ -57,7 +64,7 @@ async def test_stream_requires_tavily_key(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
+async def test_user_only_skips_web_search(tmp_path, monkeypatch) -> None:
     from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
@@ -70,13 +77,20 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
     )
     store.save_agent_settings(
         {
-            "tavily_api_key": "tvly-test",
+            "web_search_api_key": "tvly-test",
             "literature_source_mode": "user_only",
         }
     )
+    caps = store.list_system_capabilities()
+    for cap in caps:
+        if cap.get("capability_id") == "literature_source":
+            cap.setdefault("params", {})["literature_source_mode"] = "user_only"
+        if cap.get("capability_id") == "web_search":
+            cap.setdefault("params", {})["search_provider"] = "tavily"
+    store.save_system_capabilities(caps)
     meta = store.create_session("test")
 
-    tavily_mock = AsyncMock(
+    search_mock = AsyncMock(
         return_value={"results": [{"url": "https://t.com/x", "title": "T", "content": "s"}], "answer": "a"}
     )
 
@@ -85,22 +99,36 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
 
     with (
         patch(
-            "app.agents.literature_turn.get_llm",
+            "app.agents.literature_turn.get_review_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,
         ),
         patch(
-            "app.agents.literature_turn.get_tavily_api_key",
+            "app.agents.literature_turn.get_planner_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_web_search_api_key",
             new_callable=AsyncMock,
             return_value="tvly-test",
+        ),
+        patch(
+            "app.agents.literature_turn.assess_first_turn_gate",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
+        patch(
+            "app.agents.literature_turn.resolve_outline_plan",
+            return_value=(False, None, []),
         ),
         patch(
             "app.agents.literature_turn.stream_understanding_and_route",
             return_value=_mock_understanding_stream(),
         ),
         patch(
-            "app.agents.literature_phases.cached_tavily_search",
-            tavily_mock,
+            "app.agents.literature_phases.cached_web_search",
+            search_mock,
         ),
         patch(
             "app.agents.literature_phases.iter_fetch_sources_parallel",
@@ -119,10 +147,85 @@ async def test_user_only_skips_tavily(tmp_path, monkeypatch) -> None:
             extra_fetch_urls=["https://user.example/paper"],
         ):
             events.append(ev)
-            if ev[0] in ("literature_source", "error"):
+
+    search_mock.assert_not_called()
+    source_ev = [e for e in events if e[0] == "literature_source"]
+    assert source_ev, f"events={[e[0] for e in events]}"
+    assert source_ev[0][1]["skipped_web_search"] is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_graph_emitted_before_understanding_stage(
+    tmp_path, monkeypatch
+) -> None:
+    from app.agents.literature_turn import stream_literature_turn
+    from app.storage.file_store import FileStore
+
+    store = FileStore(tmp_path)
+    monkeypatch.setattr("app.agents.literature_turn.get_store", lambda: store)
+    monkeypatch.setattr("app.agents.agent_settings.get_store", lambda: store)
+    store.save_agent_settings({"web_search_api_key": "tvly-test"})
+    meta = store.create_session("wf-order")
+
+    mock_llm = MagicMock()
+    mock_llm.chat = AsyncMock(return_value=MagicMock(content=""))
+
+    with (
+        patch(
+            "app.agents.literature_turn.get_review_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_planner_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_web_search_api_key",
+            new_callable=AsyncMock,
+            return_value="tvly-test",
+        ),
+        patch(
+            "app.agents.literature_turn.stream_understanding_and_route",
+            return_value=_mock_understanding_stream(),
+        ),
+        patch(
+            "app.agents.literature_turn.assess_first_turn_gate",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
+        patch(
+            "app.agents.literature_turn.resolve_outline_plan",
+            return_value=(False, None, []),
+        ),
+        patch(
+            "app.agents.literature_turn.run_retrieval_pipeline",
+            return_value=_empty_fetch_iter(),
+        ),
+    ):
+        events = []
+        async for ev in stream_literature_turn(meta["id"], "survey topic"):
+            events.append(ev)
+            if ev[0] == "stage" and ev[1].get("name") == "理解研究问题":
                 break
 
-    tavily_mock.assert_not_called()
-    source_ev = [e for e in events if e[0] == "literature_source"]
-    assert source_ev
-    assert source_ev[0][1]["skipped_tavily"] is True
+    wf_idx = next(
+        (
+            i
+            for i, e in enumerate(events)
+            if e[0] == "artifact" and e[1].get("lang") == "workflow-graph"
+        ),
+        None,
+    )
+    understand_idx = next(
+        (
+            i
+            for i, e in enumerate(events)
+            if e[0] == "stage" and e[1].get("name") == "理解研究问题"
+        ),
+        None,
+    )
+    assert wf_idx is not None
+    assert understand_idx is not None
+    assert wf_idx < understand_idx

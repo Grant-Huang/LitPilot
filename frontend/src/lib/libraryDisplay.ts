@@ -23,21 +23,48 @@ export function formatCitationForList(
   return raw.replace(/^\[\d+\]/, `[${listIndex}]`);
 }
 
+const S2_PAPER_HASH = /^[a-f0-9]{40}$/i;
+
+function titleFromUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (!parts.length) return u.hostname;
+    if (u.hostname.includes("semanticscholar.org") && parts.length >= 2) {
+      const last = parts[parts.length - 1];
+      if (S2_PAPER_HASH.test(last)) {
+        const slug = decodeURIComponent(parts[parts.length - 2] || "");
+        const title = slug.replace(/-/g, " ");
+        if (title.length >= 8) return title;
+      }
+    }
+    let seg = parts[parts.length - 1];
+    if (S2_PAPER_HASH.test(seg) && parts.length >= 2) {
+      seg = parts[parts.length - 2];
+    }
+    const decoded = decodeURIComponent(seg.replace(/\.(html?|pdf)$/i, ""));
+    if (decoded.length >= 8 && !decoded.startsWith("http")) {
+      return decoded.replace(/-/g, " ");
+    }
+    return u.hostname;
+  } catch {
+    return url.slice(0, 80);
+  }
+}
+
 export function resolveDisplayTitle(item: LibraryItem): string {
   const t = (item.title || "").trim();
-  if (t && !/^https?:\/\//i.test(t) && t.length < 200) {
+  if (
+    t &&
+    !/^https?:\/\//i.test(t) &&
+    t.length < 200 &&
+    !S2_PAPER_HASH.test(t)
+  ) {
     return t;
   }
   const url = (item.url || "").trim();
-  if (!url) return t || "Untitled";
-  try {
-    const u = new URL(url);
-    const seg = u.pathname.split("/").filter(Boolean).pop();
-    if (seg) return decodeURIComponent(seg.replace(/\.(html?|pdf)$/i, ""));
-    return u.hostname;
-  } catch {
-    return t || url.slice(0, 80);
-  }
+  if (!url) return t || "（标题待补全）";
+  return titleFromUrl(url) || t || "（标题待补全）";
 }
 
 export function looksLikeAbstract(text: string): boolean {

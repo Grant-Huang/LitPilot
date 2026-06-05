@@ -84,7 +84,12 @@ def new_item(
     }
 
 
-def merge_item(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+def merge_item(
+    existing: dict[str, Any],
+    patch: dict[str, Any],
+    *,
+    authoritative: bool = False,
+) -> dict[str, Any]:
     out = dict(existing)
     for field in (
         "title",
@@ -101,20 +106,28 @@ def merge_item(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
     ):
         new_val = (patch.get(field) or "").strip()
         old_val = (out.get(field) or "").strip()
-        if field == "title":
-            if new_val and (not old_val or len(new_val) > len(old_val)):
-                out[field] = new_val
-        elif new_val and not old_val:
+        if not new_val:
+            continue
+        if authoritative:
             out[field] = new_val
-        elif new_val and field == "abstract" and len(new_val) > len(old_val):
+            continue
+        if field == "title":
+            if not old_val or len(new_val) > len(old_val):
+                out[field] = new_val
+        elif not old_val:
+            out[field] = new_val
+        elif field == "abstract" and len(new_val) > len(old_val):
             out[field] = new_val
 
     if patch.get("authors"):
-        merged = list(out.get("authors") or [])
-        for a in patch["authors"]:
-            if a not in merged:
-                merged.append(a)
-        out["authors"] = merged[:12]
+        if authoritative:
+            out["authors"] = list(patch["authors"])[:12]
+        else:
+            merged = list(out.get("authors") or [])
+            for a in patch["authors"]:
+                if a not in merged:
+                    merged.append(a)
+            out["authors"] = merged[:12]
 
     if patch.get("citation_count") is not None:
         out["citation_count"] = patch["citation_count"]

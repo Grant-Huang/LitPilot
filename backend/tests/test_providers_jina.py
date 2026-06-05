@@ -1,4 +1,4 @@
-from app.agents.tools.jina_reader import normalize_reader_target_url
+from app.agents.tools.providers.jina import normalize_reader_target_url
 
 
 def test_normalize_reader_target_adds_scheme() -> None:

@@ -15,7 +15,7 @@ def normalize_literature_source_mode(mode: str | None) -> LiteratureSourceMode:
     return "merge"
 
 
-def should_skip_tavily(mode: LiteratureSourceMode, user_urls: list[str]) -> bool:
+def should_skip_web_search(mode: LiteratureSourceMode, user_urls: list[str]) -> bool:
     return mode == "user_only" and bool(user_urls)
 
 
@@ -32,20 +32,20 @@ def hit_from_url(url: str) -> dict[str, str]:
 class FetchBuildResult:
     hits: list[dict[str, str]]
     user_count: int
-    tavily_count: int
-    skipped_tavily: bool
+    search_hit_count: int
+    skipped_web_search: bool
     mode: LiteratureSourceMode
     used_user_only: bool
 
 
 def build_fetch_hits(
     mode: str | None,
-    tavily_hits: list[dict[str, str]],
+    search_hits: list[dict[str, str]],
     user_urls: list[str],
     *,
     max_urls: int,
 ) -> FetchBuildResult:
-    """Build web_fetch queue from settings mode + Tavily + user URLs."""
+    """Build web_fetch queue from settings mode + web search + user URLs."""
     from app.agents.url_list import merge_fetch_hits
 
     norm = normalize_literature_source_mode(mode)
@@ -55,34 +55,34 @@ def build_fetch_hits(
         return FetchBuildResult(
             hits=hits,
             user_count=len(user_urls),
-            tavily_count=0,
-            skipped_tavily=True,
+            search_hit_count=0,
+            skipped_web_search=True,
             mode=norm,
             used_user_only=True,
         )
 
     if norm == "merge" and user_urls:
         merged, user_count = merge_fetch_hits(
-            tavily_hits, user_urls, max_urls=max_urls
+            search_hits, user_urls, max_urls=max_urls
         )
-        tavily_in = sum(1 for h in merged if h.get("source") != "upload")
+        search_in = sum(1 for h in merged if h.get("source") != "upload")
         return FetchBuildResult(
             hits=merged,
             user_count=user_count,
-            tavily_count=tavily_in,
-            skipped_tavily=False,
+            search_hit_count=search_in,
+            skipped_web_search=False,
             mode=norm,
             used_user_only=False,
         )
 
-    hits = [dict(h) for h in tavily_hits[:max_urls]]
+    hits = [dict(h) for h in search_hits[:max_urls]]
     for h in hits:
-        h.setdefault("source", "tavily")
+        h.setdefault("source", "web_search")
     return FetchBuildResult(
         hits=hits,
         user_count=0,
-        tavily_count=len(hits),
-        skipped_tavily=False,
+        search_hit_count=len(hits),
+        skipped_web_search=False,
         mode=norm,
         used_user_only=False,
     )

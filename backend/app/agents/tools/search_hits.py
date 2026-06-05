@@ -1,10 +1,9 @@
+"""Shared web_search hit normalization and literature-oriented filtering."""
 from __future__ import annotations
 
 import re
 from typing import Any
 from urllib.parse import urlparse
-
-import httpx
 
 ACADEMIC_SEARCH_DOMAINS: tuple[str, ...] = (
     "arxiv.org",
@@ -51,7 +50,7 @@ DEFAULT_EXCLUDE_DOMAINS: tuple[str, ...] = (
 
 _ZH_WRITING_JUNK_RE = re.compile(
     r"(?i)"
-    r"(?:"  # 中文写作/教程/工具类噪声（对“学术综述”检索极易污染）
+    r"(?:"
     r"文献综述\s*(?:怎么写|写作|写法|模板|结构|指南|教程|步骤|技巧)|"
     r"(?:怎么写|如何写|写作)\s*(?:文献综述|综述|论文)|"
     r"(?:AI|大模型|ChatGPT|GPT)\s*(?:写作|写论文|写综述|论文写作|文献综述)|"
@@ -61,7 +60,7 @@ _ZH_WRITING_JUNK_RE = re.compile(
 
 _EN_WRITING_JUNK_RE = re.compile(
     r"(?i)"
-    r"(?:"  # English “how to write a literature review” junk
+    r"(?:"
     r"how\s+to\s+write\s+(?:a\s+)?literature\s+review|"
     r"literature\s+review\s+(?:guide|template|tips|steps)|"
     r"ai\s+writing|paper\s+writing\s+tool"
@@ -92,61 +91,31 @@ _JUNK_HOST_SUFFIXES = (
     "stackoverflow.com",
 )
 
-_MOM_MANUFACTURING_RE = re.compile(
-    r"(?i)"
-    r"(?:"
-    r"ai[-\s]?native\s+mom|"
-    r"制造运营|"
-    r"制造执行|"
-    r"\bMES\b|"
-    r"\bMOM\b.*(?:制造|manufactur|shop\s*floor|ISA-?95)|"
-    r"manufacturing\s+operations\s+management"
-    r")"
-)
-
 _MOM_ML_FALSE_POSITIVE_RE = re.compile(
     r"(?i)mixture[-\s]?of[-\s]?memor",
 )
 
 
-def augment_literature_search_query(query: str) -> str:
-    """Refine router output for Tavily — avoid Google site: operators."""
-    q = query.strip()
-    if not q:
-        return q
+def augment_literature_search_query(query: str, **kwargs) -> str:
+    """Deprecated: use search_query_refiner.refine_literature_search_queries (LLM)."""
+    from app.agents.search_query_refiner import apply_academic_search_suffix
 
-    lower = q.lower()
-    if _MOM_MANUFACTURING_RE.search(q):
-        extras = []
-        if "manufacturing operations management" not in lower:
-            extras.append("manufacturing operations management")
-        if "mes" not in lower and "制造执行" not in q:
-            extras.append("MES manufacturing execution system")
-        if "isa-95" not in lower:
-            extras.append("ISA-95")
-        if extras:
-            q = f"{q} ({' '.join(extras)})"
-
-    if not any(
-        x in lower
-        for x in (
-            "survey",
-            "systematic review",
-            "literature review",
-            "综述",
-            "arxiv",
-            "doi",
-            "paper",
-            "论文",
-        )
-    ):
-        q = f"{q} academic survey peer-reviewed"
-
-    return q[:500]
+    _ = kwargs
+    return apply_academic_search_suffix(query)
 
 
-def filter_tavily_hits(hits: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Drop obvious non-paper URLs/titles after Tavily returns."""
+def _title_matches_exclusion(title: str, exclude_title_substrings: list[str]) -> bool:
+    lower = (title or "").lower()
+    return any(sub and sub in lower for sub in exclude_title_substrings)
+
+
+def filter_search_hits(
+    hits: list[dict[str, str]],
+    *,
+    exclude_title_substrings: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Drop obvious non-paper URLs/titles after web_search returns."""
+    exclusions = [s.lower() for s in (exclude_title_substrings or []) if str(s).strip()]
     kept: list[dict[str, str]] = []
     for hit in hits:
         url = str(hit.get("url") or "").strip()
@@ -163,6 +132,8 @@ def filter_tavily_hits(hits: list[dict[str, str]]) -> list[dict[str, str]]:
         if _JUNK_TITLE_RE.search(title) or _JUNK_TITLE_RE.search(url):
             continue
         if _MOM_ML_FALSE_POSITIVE_RE.search(title):
+            continue
+        if _title_matches_exclusion(title, exclusions):
             continue
         path = urlparse(url).path.lower()
         if path.endswith((".xlsx", ".json", ".csv", ".tit", ".aux", ".log")):
@@ -199,10 +170,18 @@ def apply_literature_hit_filters(
     include_domains: list[str] | tuple[str, ...] | None,
     enable_junk_filter: bool = True,
     enforce_domain_filter: bool = True,
+    exclude_title_substrings: list[str] | None = None,
 ) -> tuple[list[dict[str, str]], str | None]:
     """Apply junk + domain filters; relax domain filter when it removes all hits."""
     pre_count = len(raw_hits)
-    hits = filter_tavily_hits(raw_hits) if enable_junk_filter else list(raw_hits)
+    hits = (
+        filter_search_hits(
+            raw_hits,
+            exclude_title_substrings=exclude_title_substrings,
+        )
+        if enable_junk_filter
+        else list(raw_hits)
+    )
     if not enforce_domain_filter or not include_domains:
         return hits, None
     domain_hits = restrict_hits_to_domains(hits, include_domains=include_domains)
@@ -217,60 +196,7 @@ def apply_literature_hit_filters(
     return hits, warning
 
 
-def build_tavily_search_payload(
-    api_key: str,
-    query: str,
-    *,
-    max_results: int = 8,
-    search_depth: str = "advanced",
-    include_domains: list[str] | tuple[str, ...] | None = None,
-    exclude_domains: list[str] | tuple[str, ...] | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "api_key": api_key,
-        "query": query,
-        "max_results": max_results,
-        "search_depth": search_depth,
-        "include_answer": True,
-        "include_raw_content": False,
-    }
-    if include_domains:
-        payload["include_domains"] = list(include_domains)
-    merged_exclude = list(exclude_domains or ()) + [
-        d for d in DEFAULT_EXCLUDE_DOMAINS if d not in (exclude_domains or ())
-    ]
-    if merged_exclude:
-        payload["exclude_domains"] = merged_exclude
-    return payload
-
-
-async def tavily_search(
-    api_key: str,
-    query: str,
-    *,
-    max_results: int = 8,
-    search_depth: str = "advanced",
-    include_domains: list[str] | tuple[str, ...] | None = None,
-    exclude_domains: list[str] | tuple[str, ...] | None = None,
-) -> dict[str, Any]:
-    if not api_key:
-        raise ValueError("Tavily API Key 未配置")
-
-    payload = build_tavily_search_payload(
-        api_key,
-        query,
-        max_results=max_results,
-        search_depth=search_depth,
-        include_domains=include_domains,
-        exclude_domains=exclude_domains,
-    )
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        resp = await client.post("https://api.tavily.com/search", json=payload)
-        resp.raise_for_status()
-        return resp.json()
-
-
-def normalize_tavily_results(data: dict[str, Any]) -> list[dict[str, str]]:
+def normalize_search_results(data: dict[str, Any]) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for item in data.get("results") or []:
         if not isinstance(item, dict):

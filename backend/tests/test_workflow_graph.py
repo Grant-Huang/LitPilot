@@ -1,4 +1,9 @@
-from app.agents.workflow_graph import build_literature_graph, build_literature_graph_legacy
+from app.agents.workflow_graph import (
+    apply_fetch_provider_label,
+    build_literature_graph,
+    build_literature_graph_legacy,
+    fetch_node_description,
+)
 
 
 def test_legacy_graph_four_nodes() -> None:
@@ -19,3 +24,11 @@ def test_dynamic_graph_grows_with_sections() -> None:
     assert "sec-b" in ids
     assert ids.index("sec-a") < ids.index("sec-b")
     assert ids.index("sec-b") < ids.index("refine")
+
+
+def test_fetch_node_description_reflects_provider() -> None:
+    assert "native" in fetch_node_description("native")
+    assert "Jina Reader" in fetch_node_description("jina")
+    g = build_literature_graph_legacy()
+    apply_fetch_provider_label(g, "native")
+    assert g.node("fetch").description == fetch_node_description("native")

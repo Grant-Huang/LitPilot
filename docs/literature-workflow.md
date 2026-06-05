@@ -1,15 +1,15 @@
 # 文献综述工作流
 
 ```
-router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract → generate (LLM) → deliver
+router → search (web_search，可跳过) → fetch (web_fetch 并行) → cite_extract → generate (LLM) → deliver
 ```
 
 ## 文献来源策略（`literature_source_mode`）
 
 | 模式 | 有用户 URL 列表时 | 无用户 URL 时 |
 |------|------------------|---------------|
-| `merge`（默认） | Tavily 检索 + **用户链接优先**合并去重后 `web_fetch` | 仅 Tavily |
-| `user_only` | **跳过 Tavily**，只抓取用户 URL | 仍执行 Tavily（未强制要求上传） |
+| `merge`（默认） | web_search 检索 + **用户链接优先**合并去重后 `web_fetch` | 仅 web_search |
+| `user_only` | **跳过 web_search**，只抓取用户 URL | 仍执行 web_search（未强制要求上传） |
 
 用户 URL 通过聊天输入框「+」上传 `.txt` / `.csv` / `.json`，请求体字段 `fetch_urls`。
 
@@ -17,11 +17,11 @@ router → search (Tavily，可跳过) → fetch (Jina 并行) → cite_extract 
 
 | 配置项 | 作用 |
 |--------|------|
-| `tavily_max_results` | `web_search` 单次最多返回条数（1–80，默认 8） |
+| `search_max_results` | `web_search` 单次最多返回条数（1–80，默认 8） |
 | `max_fetch_urls` | `web_fetch` 队列上限（1–50，默认 5） |
-| `fetch_parallel` | Jina 并行并发；**cite 阶段**引用抽取与 Crossref/OpenAlex 元数据补全共用该并发上限 |
+| `fetch_parallel` | web_fetch 并行并发；**cite 阶段**引用抽取与 Crossref/OpenAlex 元数据补全共用该并发上限 |
 | `fetch_timeout_sec` | 单 URL 超时 |
-| `tavily_retry_count` | Tavily 请求异常重试 |
+| `search_retry_count` | web_search 请求异常重试 |
 | `fetch_retry_count` | 单 URL 抓取异常重试 |
 | `fetch_retry_delay_ms` | 重试间隔 |
 | `enable_query_expansion` | 是否启用多 query 检索扩展（默认关） |
@@ -42,7 +42,7 @@ cite 之后、generate 之前（`enable_paper_attributes`，默认开）：
 启用 `enable_query_expansion` 时：
 
 1. 由编排 LLM（或规则回退）生成 2–4 条检索式
-2. 分轮 Tavily 检索，按 URL 去重合并，总量不超过 `tavily_max_results`
+2. 分轮 web_search 检索，按 URL 去重合并，总量不超过 `search_max_results`
 3. SSE：`literature_search_plan`、`literature_search_merge`
 
 ## 大纲驱动分章写作（M2）
@@ -62,7 +62,7 @@ fetch → cite → attributes → outline → [章节×N 流式] → refine → 
 ```
 
 1. **decompose**：规则解析用户 brief 为 `ResearchSubTopic`（子主题检索式）
-2. **分主题检索**：≥2 子主题时各跑一轮 Tavily，URL 去重合并（优先于 query expansion）
+2. **分主题检索**：≥2 子主题时各跑一轮 web_search，URL 去重合并（优先于 query expansion）
 3. **mount**：按关键词将 `paper_index` 挂载到各 `OutlineSection`
 4. **分节写作**：每章独立 LLM 流式输出，前文摘要衔接
 5. SSE：`literature_subtopic_plan`、`literature_outline`（artifact `literature-outline+json`）、按章节 `text` 增量
@@ -98,15 +98,15 @@ SSE：`literature_refine_report`
 
 ---
 
-- `[Tavily]` — 检索摘要
-- `[网页材料]` — Jina 正文要点（content_pipeline 压缩）
+- `[web_search]` — 检索摘要
+- `[网页材料]` — web_fetch 正文要点（content_pipeline 压缩）
 - `[Citations]` — `ref-list.txt` 中已收录 APA / ACM 条目
 
 ## 引用元数据补全（cite_extract）
 
 每条成功抓取的 URL 会：
 
-1. **并行** Jina 抽取 APA/ACM 书目字段（`fetch_parallel` 限流）。
+1. **并行** web_fetch 抽取 APA/ACM 书目字段（`fetch_parallel` 限流）。
 2. **并行** 元数据 enrich：
    - 页面已解析出 DOI → 直接 **Crossref** 补全被引数、他引数、卷期页等；
    - 无 DOI → 用 **标题 + 首作者 + 年份** 调 **OpenAlex** 反查 DOI，再 Crossref enrich。
@@ -116,32 +116,40 @@ SSE：`literature_refine_report`
 
 ## 失败策略
 
-- Tavily 全部失败：终止当轮，提示检查 Key
-- 单 URL Jina 失败：跳过，使用 Tavily snippet；`ref-list` 可记 `[FAILED]`
+- web_search 全部失败：终止当轮，提示检查凭据
+- 单 URL web_fetch 失败：跳过，使用检索 snippet；`ref-list` 可记 `[FAILED]`
 - 引用元数据不足：不写入半条引用，综述中标注「待核实」
 
 ## 引用格式
 
 设置页 `citation_format` 支持 `apa`（默认）与 `acm`，影响引用抽取、ref-list 与 LLM 参考文献章节。
 
-## 编排模型设置（`data/config/agent.json`）
+## LLM 能力绑定（管理员 → 能力）
 
-编排模型（Orchestrator）负责理解、规划与过程解说；撰写综述用主模型 `llm_model`，两者可分开配置。
+工作流中所有 LLM 调用均通过 `get_planner_llm()` / `get_review_llm()` 读取 **能力页** 绑定的模型实例（`runtime_settings.build_runtime_settings` → `agent_settings.get_*_llm_config`）。不再从 `agent.json` 单独指定模型。
+
+| 能力 ID | 运行时 | 消费模块 |
+|---------|--------|----------|
+| **orchestrator** | planner | `literature_planner`（理解+路由 A、阶段解说 B–G）、`literature_router`、`literature_intent`、`search_query_refiner`、`search_expansion`、`literature_clarification`、`content_pipeline`、`paper_attributes` |
+| **review_main** | review | `literature_turn_generate`（语料问答、矩阵、分章综述、全文流式）、`literature_section_writer` |
+
+编排能力卡片参数（非 Prompts 页）：
 
 | 配置项 | 默认 | 说明 |
 |--------|------|------|
 | `use_llm_planner` | `true` | 是否用 LLM 做理解与过程解说 |
 | `orchestrator_mode` | `lite` | `off` / `lite`（A+C+E）/ `full`（A–G，D 每 5 篇或 8s） |
 | `orchestrator_use_reasoning` | `false` | MiniMax 国内版：原生推理流进思考区 |
-| `orchestrator_model` | 空 | 编排模型；留空=与主 LLM 相同（建议 MiniMax-M2.7-highspeed） |
 | `orchestrator_max_tokens_per_phase` | `280` | 单检查点解说 token 上限 |
+
+未绑定 orchestrator 实例时，编排模型回退为 review_main 同一实例。
 
 检查点 A 与 `route_literature` 合并为 **一次流式 LLM 调用**（叙述 + 末行 JSON）。
 
 | 检查点 | 时机 | lite | full |
 |--------|------|------|------|
 | A | 理解 + router | ✓ | ✓ |
-| B | Tavily 检索前 | | ✓ |
+| B | web_search 检索前 | | ✓ |
 | C | 检索后 | ✓ | ✓ |
 | D | 抓取进行中（节流） | | ✓ |
 | E | 抓取后 | ✓ | ✓ |
@@ -155,7 +163,7 @@ SSE：`literature_refine_report`
 执行过程中会推送：
 - `stage` — 阶段时间线（理解问题 / 检索 / 抓取 / 引用 / 生成）
 - `think` — **Planner 模型流式解说**（默认 lite：理解 / 检索后 / 抓取后）；极短系统注记以 `⟦sys⟧…⟦/sys⟧` 标记并灰色展示
-- `tool_call` / `tool_result` — Tavily、引用抽取等
+- `tool_call` / `tool_result` — web_search、引用抽取等
 - `workflow_node` — 右侧 DAG 节点状态（配合初始 `workflow-graph` artifact）
 - `text` — 综述正文流式增量
 
@@ -173,7 +181,7 @@ SSE：`literature_refine_report`
 | `supplement` | 补充 URL / 文件 | 增量 fetch，合并 session corpus |
 | `refine_gen` | 调整写作要求 | 复用语料，增强 gen_prompt |
 | `regen_only` | 仅重生成 | 同 refine，不追加约束 |
-| `expand_search` | 扩展检索 | Tavily 增量 + fetch 新命中 |
+| `expand_search` | 扩展检索 | web_search 增量 + fetch 新命中 |
 | `retry_failed` | 重试失败项 | 仅 fetch 失败 URL |
 | `query_corpus` | 文献问答 | 短回答，不生成完整综述 |
 | `manage_library` | 库管理 | 删除 / 导出 / 去重 |
@@ -190,7 +198,7 @@ SSE 推送 `literature_intent` extension，字段含 `intent`、`defer_generate`
 | kind | 触发 | 用户可 |
 |------|------|--------|
 | `first_turn` | 首轮 brief 过短/歧义（如单独「MOM」） | 补充主题说明 |
-| `search_zero` | Tavily 零命中且无用户 URL | 放宽域名 / 换 query / 取消 |
+| `search_zero` | web_search 零命中且无用户 URL | 放宽域名 / 换 query / 取消 |
 | `outline_confirm` | `plan_confirm=true` 且大纲已生成 | 确认撰写 / 修改大纲意图 |
 
 - SSE：`literature_clarification`（含 `kind`）

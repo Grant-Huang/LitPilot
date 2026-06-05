@@ -8,7 +8,6 @@ export default function AdminSettingsLayout({ children }: { children: React.Reac
   const router = useRouter();
 
   const tabs = [
-    { id: "overview", label: "概览", href: "/settings/admin" },
     { id: "credentials", label: "凭据", href: "/settings/admin/credentials" },
     { id: "instances", label: "实例库", href: "/settings/admin/instances" },
     { id: "capabilities", label: "能力绑定", href: "/settings/admin/capabilities" },
@@ -33,8 +32,16 @@ export default function AdminSettingsLayout({ children }: { children: React.Reac
                   key={t.id}
                   type="button"
                   role="tab"
-                  aria-selected={pathname === t.href}
-                  className={clsx("settings-tabs__btn", pathname === t.href && "settings-tabs__btn--active")}
+                  aria-selected={
+                    pathname === t.href ||
+                    (t.id === "credentials" && pathname === "/settings/admin")
+                  }
+                  className={clsx(
+                    "settings-tabs__btn",
+                    (pathname === t.href ||
+                      (t.id === "credentials" && pathname === "/settings/admin")) &&
+                      "settings-tabs__btn--active",
+                  )}
                   onClick={() => router.push(t.href)}
                 >
                   {t.label}

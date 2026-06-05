@@ -139,7 +139,27 @@ def test_system_capability_single_card_save(client: TestClient) -> None:
     items3 = body3["data"]["items"]
     fetch = next(x for x in items3 if x.get("capability_id") == "web_fetch")
     assert fetch["params"]["max_fetch_urls"] == 9
-    assert fetch["params"]["fetch_parallel"] == 2
+def test_web_fetch_capability_test_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(url: str, **kwargs):
+        return {
+            "text": "# Sample\n\n" + ("x" * 120),
+            "final_url": url,
+            "is_pdf": False,
+        }
+
+    monkeypatch.setattr(
+        "app.agents.tools.web_providers.web_fetch_url_with_meta",
+        fake_fetch,
+    )
+    res = client.post(
+        "/api/settings/system/capabilities/web_fetch/test",
+        json={"url": "https://example.com/paper", "provider": "native"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "success"
+    assert body["data"]["ok"] is True
+    assert body["data"]["provider"] == "native"
 
 
 def test_system_storage_get_and_save(client: TestClient, store: FileStore) -> None:

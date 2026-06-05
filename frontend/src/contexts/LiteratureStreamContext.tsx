@@ -11,22 +11,26 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { message } from "antd";
+import { toastError } from "@/lib/toastFeedback";
 import { useSSEStream } from "@meso.ai/ui";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import type { LitPilotMessage } from "@/lib/chatTypes";
+import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
 import { persistActiveSession } from "@/lib/sessionStorage";
-import { sessionsApi } from "@/lib/api";
 import {
-  clearClarificationUnreadTitle,
-  setClarificationUnreadTitle,
-} from "@/lib/clarificationTitle";
+  ASSISTANT_RELOAD_ATTEMPTS,
+  ASSISTANT_RELOAD_BASE_MS,
+  sessionHasAssistantReply,
+} from "@/lib/streamTurnFinalize";
+import { sessionsApi } from "@/lib/api";
 
 type LiteratureStreamContextValue = {
   streamState: ReturnType<typeof useSSEStream>["state"];
   liveMessages: LitPilotMessage[];
   streaming: boolean;
+  /** 流已结束，正在等待助手消息落库并刷新会话 */
+  streamSettling: boolean;
   send: (text: string, fetchUrls: string[]) => Promise<void>;
   abort: () => void;
   resetStreamUi: () => void;
@@ -51,10 +55,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   );
 
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
+  const [streamSettling, setStreamSettling] = useState(false);
   const streamStartedRef = useRef(false);
+  const streamFinalizeRef = useRef(false);
   const turnSessionRef = useRef<string | null>(null);
-  /** 本轮 SSE 中 extension.session 下发的权威 session_id（可能与发送时不一致） */
-  const streamSessionRef = useRef<string | null>(null);
   const pendingUserTextRef = useRef<string | null>(null);
   const extensionHandledRef = useRef(0);
 
@@ -64,21 +68,88 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!streamStartedRef.current || !(streamDone || streamError)) return;
-    const sid =
-      streamSessionRef.current || activeSessionId || turnSessionRef.current;
-    streamStartedRef.current = false;
+    if (streamFinalizeRef.current) return;
+    streamFinalizeRef.current = true;
+    setStreamSettling(true);
+
+    const sid = turnSessionRef.current || activeSessionId;
+    const pendingUser = pendingUserTextRef.current;
+    const snapshotText = streamState.textContent?.trim() ?? "";
+    const trace = collectExecutionTraceFromStream(streamState);
+    const hasTrace =
+      trace.stages.length > 0 ||
+      trace.tools.length > 0 ||
+      trace.workflows.length > 0 ||
+      Boolean(trace.thinkContent);
+
+    setLiveMessages((prev) => {
+      const users = prev.filter((m) => m.role === "user");
+      const baseUsers =
+        users.length > 0
+          ? users
+          : pendingUser
+            ? [
+                {
+                  id: `pending-user-${Date.now()}`,
+                  role: "user" as const,
+                  content: pendingUser,
+                },
+              ]
+            : [];
+      const placeholderContent =
+        snapshotText ||
+        (streamError ? "请求失败，请查看提示或重试。" : "（正在保存回答…）");
+      return [
+        ...baseUsers,
+        {
+          id: `pending-assistant-${Date.now()}`,
+          role: "assistant" as const,
+          content: placeholderContent,
+          extras: hasTrace
+            ? {
+                executionTrace: trace,
+                thinkContent: trace.thinkContent,
+              }
+            : undefined,
+        },
+      ];
+    });
+
     void (async () => {
       try {
         await loadSessions();
-        if (sid) await handleSelectSession(sid);
+        if (sid) {
+          for (let attempt = 0; attempt < ASSISTANT_RELOAD_ATTEMPTS; attempt += 1) {
+            await handleSelectSession(sid);
+            const msgs = await sessionsApi.messages(sid);
+            if (sessionHasAssistantReply(msgs, pendingUser)) break;
+            await new Promise((resolve) => {
+              setTimeout(
+                resolve,
+                ASSISTANT_RELOAD_BASE_MS + attempt * 80,
+              );
+            });
+          }
+        }
       } finally {
         reset();
+        streamStartedRef.current = false;
         turnSessionRef.current = null;
-        streamSessionRef.current = null;
+        pendingUserTextRef.current = null;
+        streamFinalizeRef.current = false;
+        setStreamSettling(false);
         setLiveMessages([]);
       }
     })();
-  }, [streamDone, streamError, reset, loadSessions, handleSelectSession]);
+  }, [
+    streamDone,
+    streamError,
+    streamState,
+    reset,
+    loadSessions,
+    activeSessionId,
+    handleSelectSession,
+  ]);
 
   useEffect(() => {
     const log = streamState.extensionLog;
@@ -90,21 +161,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     };
     for (let i = extensionHandledRef.current; i < log.length; i += 1) {
       const ext = log[i];
-      if (ext.payload.name === "session" && streamStartedRef.current) {
-        const sid = (ext.payload.data as Record<string, unknown> | undefined)
-          ?.session_id;
-        if (typeof sid === "string" && sid) {
-          streamSessionRef.current = sid;
-          turnSessionRef.current = sid;
-        }
-      }
-      if (ext.payload.name === "literature_clarification") {
-        const kind = (ext.payload.data as Record<string, unknown> | undefined)
-          ?.kind;
-        setClarificationUnreadTitle(
-          typeof kind === "string" ? kind : undefined,
-        );
-      }
       handleLiteratureExtensionEvent(
         ext.payload.name,
         ext.payload.data as Record<string, unknown> | undefined,
@@ -120,23 +176,28 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     const persisted = storedMessages.some(
       (m) => m.role === "user" && m.content === pending,
     );
-    if (persisted) {
+    if (!persisted) return;
+    if (sessionHasAssistantReply(storedMessages, pending)) {
       pendingUserTextRef.current = null;
       setLiveMessages([]);
+      return;
     }
+    setLiveMessages((prev) =>
+      prev.filter((m) => !(m.role === "user" && m.content === pending)),
+    );
   }, [storedMessages]);
 
   useEffect(() => {
-    if (streaming || streamStartedRef.current) return;
+    if (streaming || streamSettling) return;
     if (turnSessionRef.current && turnSessionRef.current !== activeSessionId) {
       setLiveMessages([]);
     }
-  }, [activeSessionId, streaming]);
+  }, [activeSessionId, streaming, streamSettling]);
 
   const send = useCallback(
     async (text: string, fetchUrls: string[]) => {
       const trimmed = text.trim();
-      if (!trimmed || streaming) return;
+      if (!trimmed || streaming || streamSettling) return;
 
       let sessionId = activeSessionId;
       if (!sessionId) {
@@ -147,9 +208,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         await loadSessions();
       }
 
+      streamFinalizeRef.current = false;
       turnSessionRef.current = sessionId;
-      streamSessionRef.current = sessionId;
-      clearClarificationUnreadTitle();
       pendingUserTextRef.current = trimmed;
       setLiveMessages([
         {
@@ -173,7 +233,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       } catch (e: unknown) {
         if (e instanceof Error && e.name === "AbortError") return;
         const errText = e instanceof Error ? e.message : String(e);
-        message.error(errText);
+        toastError(errText);
         setLiveMessages((prev) => [
           ...prev,
           {
@@ -184,13 +244,15 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         ]);
         streamStartedRef.current = false;
         turnSessionRef.current = null;
-        streamSessionRef.current = null;
+        streamFinalizeRef.current = false;
+        setStreamSettling(false);
         reset();
       }
     },
     [
       activeSessionId,
       streaming,
+      streamSettling,
       setActiveSessionId,
       loadSessions,
       reset,
@@ -199,22 +261,31 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   );
 
   const resetStreamUi = useCallback(() => {
-    if (!streaming) {
+    if (!streaming && !streamSettling) {
       setLiveMessages([]);
       turnSessionRef.current = null;
     }
-  }, [streaming]);
+  }, [streaming, streamSettling]);
 
   const value = useMemo(
     () => ({
       streamState,
       liveMessages,
       streaming,
+      streamSettling,
       send,
       abort,
       resetStreamUi,
     }),
-    [streamState, liveMessages, streaming, send, abort, resetStreamUi],
+    [
+      streamState,
+      liveMessages,
+      streaming,
+      streamSettling,
+      send,
+      abort,
+      resetStreamUi,
+    ],
   );
 
   return (

@@ -5,6 +5,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from app.agents.url_list import title_from_search_hit
 from app.library.models import provenance_entry
 from app.library.store import LibraryStore
 from app.library.upsert_citation import upsert_from_citation
@@ -39,7 +40,7 @@ def upsert_library_from_run(
             )
         ]
         patch: dict[str, Any] = {
-            "title": hit.get("title") or "",
+            "title": title_from_search_hit(hit, url=url),
             "url": url,
             "provenance": prov,
         }
@@ -81,7 +82,10 @@ def upsert_library_from_run(
         if not url:
             continue
         patch = {
-            "title": fail.get("title") or url,
+            "title": title_from_search_hit(
+                {"title": fail.get("title") or "", "snippet": ""},
+                url=url,
+            ),
             "url": url,
             "provenance": [
                 provenance_entry(

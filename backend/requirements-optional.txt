@@ -1,0 +1,6 @@
+# Optional dependencies (install only when needed)
+#
+# pymupdf4llm — PDF → Markdown with tables/layout (native web_fetch pdf_extract_backend)
+# PyMuPDF is AGPL; commercial/proprietary use requires an Artifex Software license.
+# See: https://artifex.com/licensing/
+pymupdf4llm>=1.27.0

@@ -53,6 +53,11 @@ def test_session_pin_and_rename(store: FileStore) -> None:
 def test_agent_settings_merge(store: FileStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TAVILY_API_KEY", "env-key")
     store.save_agent_settings({"fetch_parallel": 5})
+    caps = store.list_system_capabilities()
+    for cap in caps:
+        if cap.get("capability_id") == "web_search":
+            cap.setdefault("params", {})["search_provider"] = "tavily"
+    store.save_system_capabilities(caps)
     merged = store.get_agent_settings_merged()
-    assert merged["tavily_api_key"] == "env-key"
+    assert merged["web_search_api_key"] == "env-key"
     assert merged["fetch_parallel"] == 5

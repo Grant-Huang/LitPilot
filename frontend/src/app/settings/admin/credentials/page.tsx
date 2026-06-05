@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
+import { toastError, toastSuccess, toastWarning } from "@/lib/toastFeedback";
 import { feedbackOk, InlineField, SettingToolbar } from "../_ui";
 import {
   entityFromTestError,
@@ -12,7 +13,8 @@ import {
   SettingsErrorMsg,
   SettingsLoading,
 } from "../../_shared";
-import { settingsApiV2, type SystemCredential } from "@/lib/settingsApiV2";
+import { settingsApiV2, type SystemCapability, type SystemCredential } from "@/lib/settingsApiV2";
+import { WebProviderTestPanel } from "./WebProviderTestPanel";
 
 function mergeCredentialList(items: SystemCredential[], updated: SystemCredential): SystemCredential[] {
   return mergeById(items, updated);
@@ -73,9 +75,9 @@ function CredentialRow({
       const saved = await settingsApiV2.updateCredential(credential.id, body);
       onUpdated(saved);
       setKeyDraft(null);
-      setRowMsg("已保存");
+      toastSuccess("已保存");
     } catch (e: unknown) {
-      setRowMsg(e instanceof Error ? e.message : String(e));
+      toastError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -83,11 +85,11 @@ function CredentialRow({
 
   const onTest = async () => {
     if (!credential.has_secret && !keyEditing) {
-      setRowMsg("请先填写并保存 Key");
+      toastWarning("请先填写并保存 Key");
       return;
     }
     if (keyEditing) {
-      setRowMsg("请先保存 Key");
+      toastWarning("请先保存 Key");
       return;
     }
     setTesting(true);
@@ -102,13 +104,18 @@ function CredentialRow({
           ? `连接测试已通过，命中 ${hits} 条`
           : "连接测试已通过",
       );
+      toastSuccess(
+        hits !== null ? `连接测试已通过，命中 ${hits} 条` : "连接测试已通过",
+      );
     } catch (e: unknown) {
       const failed = credentialFromTestError(e);
       if (failed) {
         onUpdated(failed);
-        setStatusHint(e instanceof Error ? e.message : String(e));
+        const errText = e instanceof Error ? e.message : String(e);
+        setStatusHint(errText);
+        toastError(errText);
       } else {
-        setRowMsg(e instanceof Error ? e.message : String(e));
+        toastError(e instanceof Error ? e.message : String(e));
       }
     } finally {
       setTesting(false);
@@ -195,13 +202,18 @@ function CredentialRow({
 export default function AdminCredentialsPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<SystemCredential[]>([]);
+  const [caps, setCaps] = useState<SystemCapability[]>([]);
   const [msg, setMsg] = useState("");
 
   const load = async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);
     try {
-      const res = await settingsApiV2.listCredentials();
-      setItems(res.items || []);
+      const [credRes, capRes] = await Promise.all([
+        settingsApiV2.listCredentials(),
+        settingsApiV2.getSystemCapabilities(),
+      ]);
+      setItems(credRes.items || []);
+      setCaps(capRes.items || []);
     } catch (e: unknown) {
       setMsg(errorMessage(e));
     } finally {
@@ -217,6 +229,13 @@ export default function AdminCredentialsPage() {
     return <SettingsLoading />;
   }
 
+  const webSearchCap = caps.find((c) => c.capability_id === "web_search");
+  const webFetchCap = caps.find((c) => c.capability_id === "web_fetch");
+  const searchProvider = String(webSearchCap?.params?.search_provider ?? "native");
+  const fetchProvider = String(webFetchCap?.params?.fetch_provider ?? "native");
+  const pdfExtractBackend = String(webFetchCap?.params?.pdf_extract_backend ?? "pypdf");
+  const fetchTimeoutSec = Number(webFetchCap?.params?.fetch_timeout_sec ?? 45);
+
   return (
     <div className="card settings-section settings-section--compact">
       <SettingsErrorMsg msg={msg} />
@@ -231,6 +250,13 @@ export default function AdminCredentialsPage() {
             }}
           />
         ))}
+
+        <WebProviderTestPanel
+          fetchProvider={fetchProvider}
+          pdfExtractBackend={pdfExtractBackend}
+          fetchTimeoutSec={fetchTimeoutSec}
+          searchProvider={searchProvider}
+        />
       </div>
     </div>
   );

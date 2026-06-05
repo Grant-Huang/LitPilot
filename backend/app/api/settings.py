@@ -1,22 +1,54 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
+
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents.agent_settings import MAX_FETCH_URLS_CAP, TAVILY_MAX_RESULTS_CAP
+from app.agents.agent_settings import MAX_FETCH_URLS_CAP, SEARCH_MAX_RESULTS_CAP
 from app.agents.literature_source import normalize_literature_source_mode
 from app.agents.review_prompt import (
     MAX_REVIEW_SYSTEM_PROMPT_LEN,
     default_review_system_prompt_template,
 )
-from app.agents.tavily_key import tavily_key_hint
-from app.agents.tools.tavily_search import tavily_search
+from app.agents.search_credential_hint import search_credential_secret_hint
+from app.agents.tools.providers.tavily import search as tavily_provider_search
+from app.agents.tools.web_providers import SEARCH_PROVIDER_LABELS
 from app.core.response import err, ok
 from app.storage.file_store import get_store
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+
+def _capability_params(cap: dict) -> dict:
+    params = dict(cap.get("params") or {}) if isinstance(cap.get("params"), dict) else {}
+    override = cap.get("override_params")
+    if isinstance(override, dict) and override:
+        params.update(override)
+    return params
+
+
+def _capability_health_ok(cap: dict, *, cred_ok: dict, inst_ok: dict) -> bool:
+    cap_id = str(cap.get("capability_id") or "")
+    params = _capability_params(cap)
+    if cap_id == "web_search":
+        sp = str(params.get("search_provider") or "native").strip().lower()
+        if sp in ("native", "openalex"):
+            return True
+    if cap_id == "web_fetch":
+        fp = str(params.get("fetch_provider") or "native").strip().lower()
+        if fp == "native":
+            return True
+    ref = (cap.get("primary_ref") or {}) if isinstance(cap.get("primary_ref"), dict) else {}
+    kind = str(ref.get("kind") or "")
+    rid = str(ref.get("id") or "")
+    if kind == "credential":
+        return bool(cred_ok.get(rid))
+    if kind == "instance":
+        return bool(inst_ok.get(rid))
+    return cap_id not in ("web_search", "web_fetch", "review_main", "orchestrator")
 
 
 def _mask_secret(secret: str) -> str:
@@ -51,12 +83,12 @@ def _public_capability(c: dict) -> dict:
 
 def _agent_settings_response(merged: dict) -> dict:
     safe = dict(merged)
-    safe["has_tavily"] = bool(merged.get("tavily_api_key"))
-    safe["has_jina"] = bool(merged.get("jina_api_key"))
+    safe["has_web_search"] = bool(merged.get("web_search_api_key"))
+    safe["has_fetch"] = bool(merged.get("fetch_api_key"))
     provider = merged.get("llm_provider") or "openai"
     safe["has_llm"] = bool(merged.get("llm_api_key")) or provider == "ollama"
     safe["llm_group_id"] = merged.get("llm_group_id") or ""
-    for k in ("tavily_api_key", "jina_api_key", "llm_api_key"):
+    for k in ("web_search_api_key", "fetch_api_key", "llm_api_key"):
         if safe.get(k):
             safe[k] = _mask_secret(str(merged.get(k) or ""))
     safe["review_system_prompt_default"] = default_review_system_prompt_template()
@@ -68,8 +100,8 @@ def _agent_settings_response(merged: dict) -> dict:
 
 # -------------------- legacy agent settings (for current frontend) --------------------
 class AgentSettingsBody(BaseModel):
-    tavily_api_key: str | None = None
-    jina_api_key: str | None = None
+    web_search_api_key: str | None = None
+    fetch_api_key: str | None = None
     llm_provider: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -77,10 +109,10 @@ class AgentSettingsBody(BaseModel):
     llm_group_id: str | None = None
     fetch_parallel: int | None = None
     fetch_timeout_sec: float | None = None
-    tavily_max_results: int | None = None
+    search_max_results: int | None = None
     max_fetch_urls: int | None = None
     literature_source_mode: str | None = None
-    tavily_retry_count: int | None = None
+    search_retry_count: int | None = None
     fetch_retry_count: int | None = None
     fetch_retry_delay_ms: int | None = None
     plan_confirm: bool | None = None
@@ -109,9 +141,9 @@ async def save_agent_settings(body: AgentSettingsBody):
             return err("citation_format 须为 apa 或 acm")
         partial["citation_format"] = raw
 
-    if "tavily_max_results" in partial:
-        partial["tavily_max_results"] = max(
-            1, min(int(partial["tavily_max_results"]), TAVILY_MAX_RESULTS_CAP)
+    if "search_max_results" in partial:
+        partial["search_max_results"] = max(
+            1, min(int(partial["search_max_results"]), SEARCH_MAX_RESULTS_CAP)
         )
     if "max_fetch_urls" in partial:
         partial["max_fetch_urls"] = max(
@@ -121,8 +153,8 @@ async def save_agent_settings(body: AgentSettingsBody):
         partial["literature_source_mode"] = normalize_literature_source_mode(
             partial["literature_source_mode"]
         )
-    if "tavily_retry_count" in partial:
-        partial["tavily_retry_count"] = max(0, min(int(partial["tavily_retry_count"]), 3))
+    if "search_retry_count" in partial:
+        partial["search_retry_count"] = max(0, min(int(partial["search_retry_count"]), 3))
     if "fetch_retry_count" in partial:
         partial["fetch_retry_count"] = max(0, min(int(partial["fetch_retry_count"]), 3))
     if "fetch_retry_delay_ms" in partial:
@@ -130,8 +162,8 @@ async def save_agent_settings(body: AgentSettingsBody):
             0, min(int(partial["fetch_retry_delay_ms"]), 5000)
         )
 
-    if "tavily_api_key" in partial:
-        hint = tavily_key_hint(partial["tavily_api_key"])
+    if "web_search_api_key" in partial:
+        hint = search_credential_secret_hint("tavily", partial["web_search_api_key"])
         if hint:
             return err(hint)
 
@@ -154,32 +186,6 @@ async def save_agent_settings(body: AgentSettingsBody):
 
     saved = get_store().save_agent_settings(partial)
     return ok(_agent_settings_response(saved), message="设置已保存")
-
-
-class TestTavilyBody(BaseModel):
-    api_key: str | None = None
-    query: str = "transformer attention paper arxiv"
-
-
-@router.post("/agent/test-tavily")
-async def test_tavily(body: TestTavilyBody):
-    merged = get_store().get_agent_settings_merged()
-    key = body.api_key or merged.get("tavily_api_key")
-    if not key:
-        return err("未配置 Tavily API Key")
-    hint = tavily_key_hint(key)
-    if hint:
-        return err(hint)
-    try:
-        data = await tavily_search(key, body.query, max_results=3)
-        hits = len(data.get("results") or [])
-        return ok({"hits": hits, "answer_preview": str(data.get("answer") or "")[:200]})
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            return err("Tavily 返回 401 Unauthorized：Key 无效、已撤销或已过期。")
-        return err(f"Tavily 请求失败: {e}")
-    except httpx.HTTPError as e:
-        return err(f"Tavily 请求失败: {e}")
 
 
 # -------------------- personal --------------------
@@ -226,14 +232,7 @@ async def get_system_overview():
     }
     cap_health: list[dict] = []
     for c in caps:
-        ref = (c.get("primary_ref") or {}) if isinstance(c, dict) else {}
-        kind = str(ref.get("kind") or "")
-        rid = str(ref.get("id") or "")
-        ok_ = True
-        if kind == "credential":
-            ok_ = bool(cred_ok.get(rid))
-        elif kind == "instance":
-            ok_ = bool(inst_ok.get(rid))
+        ok_ = _capability_health_ok(c, cred_ok=cred_ok, inst_ok=inst_ok)
         cap_health.append(
             {
                 "capability_id": c.get("capability_id"),
@@ -312,7 +311,7 @@ async def create_credential(body: CredentialCreateBody):
     cid = uuid.uuid4().hex
     secret = str(body.secret or "")
     if body.type == "tavily" and secret:
-        hint = tavily_key_hint(secret)
+        hint = search_credential_secret_hint("tavily", secret)
         if hint:
             return err(hint)
     # minimal timestamp without importing private helpers
@@ -358,7 +357,7 @@ async def update_credential(credential_id: str, body: CredentialUpdateBody):
     if "secret" in partial:
         sec = str(partial["secret"] or "")
         if c.get("type") == "tavily" and sec:
-            hint = tavily_key_hint(sec)
+            hint = search_credential_secret_hint("tavily", sec)
             if hint:
                 return err(hint)
         c["secret"] = sec
@@ -420,15 +419,15 @@ async def test_credential(credential_id: str, body: CredentialTestBody):
             c["status"] = "fail"
             c["last_verified_at"] = now
             _persist()
-            return err("未配置 Tavily API Key", _credential_test_payload(c))
-        hint = tavily_key_hint(secret)
+            return err("未配置 web_search API Key", _credential_test_payload(c))
+        hint = search_credential_secret_hint("tavily", secret)
         if hint:
             c["status"] = "fail"
             c["last_verified_at"] = now
             _persist()
             return err(hint, _credential_test_payload(c))
         try:
-            data = await tavily_search(secret, body.query, max_results=3)
+            data = await tavily_provider_search(secret, body.query, max_results=3)
             hits = len(data.get("results") or [])
             c["status"] = "ok"
             c["last_verified_at"] = now
@@ -439,16 +438,50 @@ async def test_credential(credential_id: str, body: CredentialTestBody):
             c["last_verified_at"] = now
             _persist()
             if e.response.status_code == 401:
+                label = SEARCH_PROVIDER_LABELS.get("tavily", "tavily")
                 return err(
-                    "Tavily 返回 401 Unauthorized：Key 无效、已撤销或已过期。",
+                    f"{label} 返回 401 Unauthorized：Key 无效、已撤销或已过期。",
                     _credential_test_payload(c),
                 )
-            return err(f"Tavily 请求失败: {e}", _credential_test_payload(c))
+            label = SEARCH_PROVIDER_LABELS.get("tavily", "tavily")
+            return err(f"{label} 请求失败: {e}", _credential_test_payload(c))
         except httpx.HTTPError as e:
             c["status"] = "fail"
             c["last_verified_at"] = now
             _persist()
-            return err(f"Tavily 请求失败: {e}", _credential_test_payload(c))
+            label = SEARCH_PROVIDER_LABELS.get("tavily", "tavily")
+            return err(f"{label} 请求失败: {e}", _credential_test_payload(c))
+
+    if ctype == "brave":
+        if not secret:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            return err("未配置 Brave Search API Key", _credential_test_payload(c))
+        try:
+            from app.agents.tools.providers.brave import search as brave_provider_search
+
+            data = await brave_provider_search(secret, body.query, max_results=3)
+            hits = len(data.get("results") or [])
+            c["status"] = "ok"
+            c["last_verified_at"] = now
+            _persist()
+            return ok(_credential_test_payload(c, ok=True, hits=hits))
+        except httpx.HTTPStatusError as e:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            if e.response.status_code in (401, 403):
+                return err(
+                    "Brave 返回 401/403：Key 无效或未授权。",
+                    _credential_test_payload(c),
+                )
+            return err(f"Brave 请求失败: {e}", _credential_test_payload(c))
+        except httpx.HTTPError as e:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            return err(f"Brave 请求失败: {e}", _credential_test_payload(c))
 
     # Best-effort: for other credential types, treat non-empty secret as "ok".
     if secret:
@@ -632,6 +665,207 @@ async def update_capability(capability_id: str, body: CapabilityUpdateBody):
     return ok(_public_capability(cap), message="能力配置已保存")
 
 
+class WebFetchTestBody(BaseModel):
+    url: str
+    provider: str | None = None
+    pdf_extract_backend: str | None = None
+
+
+class CapabilityTestBody(BaseModel):
+    url: str | None = None
+    query: str | None = None
+    provider: str | None = None
+    pdf_extract_backend: str | None = None
+
+
+async def _web_fetch_test_payload(body: WebFetchTestBody) -> dict[str, Any]:
+    from app.agents.agent_settings import (
+        get_fetch_timeout_sec,
+        get_fetch_api_key,
+        get_pdf_extract_backend,
+        get_web_fetch_provider,
+    )
+    from app.agents.content_pipeline import (
+        clean_html_to_text,
+        extract_main_content,
+        strip_instruction_injections,
+    )
+    from app.agents.tools.pdf_text import PYMUPDF4LLM_LICENSE_NOTE, pymupdf4llm_available
+    from app.agents.tools.web_providers import normalize_fetch_provider, web_fetch_url_with_meta
+
+    url = (body.url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("请提供 http(s) URL")
+
+    provider = normalize_fetch_provider(body.provider)
+    if not body.provider:
+        provider = await get_web_fetch_provider()
+
+    timeout = await get_fetch_timeout_sec()
+    fetch_api_key = await get_fetch_api_key() or None
+    pdf_backend = body.pdf_extract_backend
+    if not pdf_backend:
+        pdf_backend = await get_pdf_extract_backend()
+    fetched = await web_fetch_url_with_meta(
+        url,
+        provider=provider,
+        api_key=fetch_api_key,
+        timeout=timeout,
+        pdf_extract_backend=pdf_backend,
+    )
+    raw = str(fetched.get("text") or "")
+
+    is_pdf = bool(fetched.get("is_pdf"))
+    resolved_pdf_url = fetched.get("resolved_pdf_url")
+    final_url = str(fetched.get("final_url") or url)
+    used_pdf_backend = fetched.get("pdf_extract_backend")
+    extra_note = ""
+    if used_pdf_backend == "pymupdf4llm" and not pymupdf4llm_available():
+        extra_note = "pymupdf4llm 未安装，已回退 pypdf；可选：pip install pymupdf4llm"
+    if is_pdf and raw.strip():
+        text = strip_instruction_injections(raw.strip())
+    else:
+        text = strip_instruction_injections(extract_main_content(clean_html_to_text(raw)))
+    preview = text[:1200] if text else (raw[:1200] if raw else "")
+    title = ""
+    for ln in (raw or "").splitlines()[:40]:
+        s = ln.strip()
+        if s.startswith("# "):
+            title = s[2:].strip()[:200]
+            break
+        if s.startswith("## ") and not title:
+            title = s[3:].strip()[:200]
+
+    return {
+        "ok": bool(text and len(text) >= 80),
+        "provider": provider,
+        "url": url,
+        "final_url": final_url,
+        "resolved_pdf_url": resolved_pdf_url,
+        "is_pdf": is_pdf,
+        "pdf_extract_backend": used_pdf_backend,
+        "pymupdf4llm_license_note": (
+            PYMUPDF4LLM_LICENSE_NOTE if used_pdf_backend == "pymupdf4llm" else None
+        ),
+        "raw_bytes": len(raw or ""),
+        "text_chars": len(text or ""),
+        "title": title,
+        "preview": preview,
+        "note": extra_note or (
+            "PDF 已解析但正文过短"
+            if is_pdf and text and len(text) < 80
+            else ("正文过短" if text and len(text) < 80 else "")
+        ),
+    }
+
+
+@router.post("/system/capabilities/web_fetch/test")
+@router.post("/system/capabilities/web_fetch/test-url")
+async def test_web_fetch(body: WebFetchTestBody):
+    """Probe URL fetch with current or overridden fetch_provider."""
+    try:
+        return ok(await _web_fetch_test_payload(body))
+    except ValueError as e:
+        return err(str(e))
+    except Exception as e:
+        from app.agents.tools.web_providers import normalize_fetch_provider
+
+        provider = normalize_fetch_provider(body.provider)
+        return err(
+            f"抓取失败: {e}",
+            data={"ok": False, "provider": provider, "url": (body.url or "").strip()},
+        )
+
+
+async def _web_search_test_payload(body: CapabilityTestBody) -> dict[str, Any]:
+    from app.agents.agent_settings import get_web_search_api_key, get_web_search_provider
+    from app.agents.tools.web_providers import normalize_search_provider, web_search_query
+
+    query = (body.query or "machine learning survey").strip()
+    provider = normalize_search_provider(body.provider)
+    if not body.provider:
+        provider = await get_web_search_provider()
+    api_key = await get_web_search_api_key() or None
+    if provider in ("tavily", "brave") and not api_key:
+        raise ValueError(f"请先在凭据页配置 {provider} API Key")
+    data = await web_search_query(
+        query,
+        provider=provider,
+        api_key=api_key,
+        max_results=3,
+    )
+    hits = data.get("results") if isinstance(data.get("results"), list) else []
+    return {
+        "ok": bool(hits),
+        "provider": provider,
+        "query": query,
+        "hits": len(hits),
+        "results": hits[:3],
+        "note": f"命中 {len(hits)} 条" if hits else "无命中结果",
+    }
+
+
+@router.post("/system/capabilities/web_search/test")
+async def test_web_search(body: CapabilityTestBody):
+    """Probe search with current or overridden search_provider."""
+    try:
+        return ok(await _web_search_test_payload(body))
+    except ValueError as e:
+        return err(str(e))
+    except Exception as e:
+        from app.agents.tools.web_providers import normalize_search_provider
+
+        provider = normalize_search_provider(body.provider)
+        return err(
+            f"检索失败: {e}",
+            data={"ok": False, "provider": provider, "query": (body.query or "").strip()},
+        )
+
+
 @router.post("/system/capabilities/{capability_id}/test")
-async def test_capability(capability_id: str):
-    return ok({"ok": True, "note": "capability test 暂未实现"})
+async def test_capability(capability_id: str, body: CapabilityTestBody | None = None):
+    body = body or CapabilityTestBody()
+    cap_id = str(capability_id or "").strip()
+
+    if cap_id == "web_fetch":
+        url = (body.url or "").strip()
+        if not url:
+            return err("请提供 url")
+        try:
+            payload = await _web_fetch_test_payload(
+                WebFetchTestBody(
+                    url=url,
+                    provider=body.provider,
+                    pdf_extract_backend=body.pdf_extract_backend,
+                ),
+            )
+            return ok(payload)
+        except ValueError as e:
+            return err(str(e))
+        except Exception as e:
+            from app.agents.tools.web_providers import normalize_fetch_provider
+
+            provider = normalize_fetch_provider(body.provider)
+            return err(
+                f"抓取失败: {e}",
+                data={"ok": False, "provider": provider, "url": url},
+            )
+
+    if cap_id == "web_search":
+        query = (body.query or "machine learning survey").strip()
+        if not query:
+            return err("请提供 query")
+        try:
+            return ok(await _web_search_test_payload(body))
+        except ValueError as e:
+            return err(str(e))
+        except Exception as e:
+            from app.agents.tools.web_providers import normalize_search_provider
+
+            provider = normalize_search_provider(body.provider)
+            return err(
+                f"检索失败: {e}",
+                data={"ok": False, "provider": provider, "query": query},
+            )
+
+    return err(f"不支持测试: {cap_id}")

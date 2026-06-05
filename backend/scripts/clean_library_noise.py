@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 
 os.environ.setdefault("LITPILOT_DATA_DIR", str(ROOT / "data"))
 
-from app.agents.tools.tavily_search import filter_tavily_hits
+from app.agents.tools.search_hits import filter_search_hits
 from app.library.from_run import _sync_exports
 from app.library.store import LibraryStore
 from app.skills.citation_extractor import detect_publisher
@@ -70,7 +70,7 @@ def is_noise_item(item: dict) -> bool:
         return True
 
     # 清理脚本不使用学术白名单收敛（避免误删），仅做噪声过滤
-    if not filter_tavily_hits([{"url": url, "title": title, "snippet": ""}]):
+    if not filter_search_hits([{"url": url, "title": title, "snippet": ""}]):
         return True
 
     avail = item.get("availability") or {}

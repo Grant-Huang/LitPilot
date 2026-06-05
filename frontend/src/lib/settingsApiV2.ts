@@ -174,5 +174,42 @@ export const settingsApiV2 = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  testWebFetchUrl: (body: {
+    url: string;
+    provider?: string;
+    pdf_extract_backend?: string;
+  }) =>
+    apiRequestData<{
+      ok: boolean;
+      provider: string;
+      url: string;
+      final_url?: string;
+      resolved_pdf_url?: string | null;
+      is_pdf?: boolean;
+      pdf_extract_backend?: string | null;
+      raw_bytes: number;
+      text_chars: number;
+      title?: string;
+      preview?: string;
+      note?: string;
+      message?: string;
+    }>("/settings/system/capabilities/web_fetch/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  testWebSearch: (body: { query: string; provider?: string }) =>
+    apiRequestData<{
+      ok: boolean;
+      provider: string;
+      query: string;
+      hits: number;
+      note?: string;
+      results?: Array<{ title?: string; url?: string }>;
+    }>("/settings/system/capabilities/web_search/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 

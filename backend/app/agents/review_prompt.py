@@ -9,7 +9,7 @@ _CITATION_FORMAT_LABELS = {
 MAX_REVIEW_SYSTEM_PROMPT_LEN = 12_000
 
 DEFAULT_REVIEW_SYSTEM_PROMPT = """你是学术文献综述助手。基于提供的多源材料撰写结构化综述。
-材料分栏：[Tavily] 为检索摘要；[网页材料] 为正文摘录；[Citations] 为已抽取的 {fmt_label} 条目。
+材料分栏：[web_search] 为检索摘要；[网页材料] 为正文摘录；[Citations] 为已抽取的 {fmt_label} 条目。
 
 【综述结构与各节内容标准】
 

@@ -20,7 +20,7 @@
 
 ### 分主题检索
 
-≥2 子主题时：**每子主题一轮 Tavily**，URL 去重合并（优先于 query expansion）。
+≥2 子主题时：**每子主题一轮 web_search**，URL 去重合并（优先于 query expansion）。
 
 ### mount
 

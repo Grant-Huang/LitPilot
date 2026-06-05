@@ -11,7 +11,7 @@ export const LITERATURE_PLAN_GRAPH: WorkflowGraphJson = {
       label: "抓取全文",
       kind: "fetch",
       status: "pending",
-      description: "Jina Reader / web_fetch",
+      description: "native 直连 HTTP / web_fetch",
     },
     {
       id: "cite_extract",

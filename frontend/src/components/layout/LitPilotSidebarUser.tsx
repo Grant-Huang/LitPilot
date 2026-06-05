@@ -11,7 +11,7 @@ import {
   SettingOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { useHelpCenter } from "@/contexts/HelpCenterContext";
+import { helpCenterHref } from "@/lib/helpUrl";
 
 const USER_NAME_KEY = "litpilot:user-name";
 const ACTIVE_SESSION_KEY = "litpilot:active-session";
@@ -31,8 +31,6 @@ export function LitPilotSidebarUser() {
       /* ignore */
     }
   }, []);
-
-  const { openHelp } = useHelpCenter();
 
   const handleLogout = useCallback(() => {
     Modal.confirm({
@@ -62,7 +60,9 @@ export function LitPilotSidebarUser() {
       key: "help",
       icon: <QuestionCircleOutlined />,
       label: "帮助中心",
-      onClick: () => openHelp(),
+      onClick: () => {
+        window.open(helpCenterHref(), "_blank", "noopener,noreferrer");
+      },
     },
     {
       key: "info",
@@ -80,7 +80,7 @@ export function LitPilotSidebarUser() {
       key: "settings-admin",
       icon: <SettingOutlined />,
       label: "管理员配置",
-      onClick: () => router.push("/settings/admin"),
+      onClick: () => router.push("/settings/admin/credentials"),
     },
     { type: "divider" },
     {

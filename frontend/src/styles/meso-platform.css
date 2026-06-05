@@ -916,7 +916,16 @@
   font-size: 0.92em;
   padding: 1px 4px;
   border-radius: 4px;
+  font-family: var(--lp-font-mono, ui-monospace, monospace);
   background: var(--color-code-bg);
+  color: var(--color-code-text);
+}
+
+/* 帮助中心白底正文：行内代码用浅底，与 help-center__pre 一致 */
+.help-center__md .litpilot-md-inline {
+  background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
+  color: var(--color-text);
+  border: 1px solid var(--color-border-light);
 }
 
 .litpilot-md-cursor {
@@ -1321,6 +1330,10 @@
   min-height: 38px;
 }
 
+.functional-shell .settings-select option:disabled {
+  color: var(--text-muted, #94a3b8);
+}
+
 /* Settings page */
 .settings-page {
   width: 100%;
@@ -1581,6 +1594,17 @@
   margin: 0;
 }
 
+.settings-cap-field-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.settings-cap-field-note code {
+  font-size: 11px;
+}
+
 .settings-cap-params-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1597,6 +1621,84 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.settings-cap-card__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 2px 0 4px;
+}
+
+.settings-cap-card__title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-web-provider-test__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-web-provider-test__row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-web-provider-test__hits {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.settings-web-provider-test__hits li {
+  margin: 2px 0;
+}
+
+.settings-web-fetch-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-light);
+  background: color-mix(in srgb, var(--color-text) 2%, var(--color-bg));
+}
+
+.settings-web-fetch-test__btn {
+  align-self: flex-start;
+}
+
+.settings-web-fetch-test__result {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.settings-web-fetch-test__result--ok {
+  color: var(--color-accent-dark, var(--color-accent));
+}
+
+.settings-web-fetch-test__meta {
+  margin: 0 0 6px;
+}
+
+.settings-web-fetch-test__preview {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text) 4%, var(--color-bg));
+  border: 1px solid var(--color-border-light);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .settings-prompts__editor {
@@ -1747,37 +1849,47 @@
   color: var(--color-text-secondary);
 }
 
-/* 帮助中心 */
-.help-center-modal .ant-modal-content {
+/* 帮助中心（独立页 /help） */
+.help-center-page {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 96px);
-}
-
-.help-center-modal .ant-modal-body {
-  flex: 1;
+  height: 100%;
   min-height: 0;
-  overflow: hidden;
+  background: var(--color-bg-white, var(--color-bg));
 }
 
-.help-center-modal .ant-modal-header {
-  margin-bottom: 0;
+.help-center-page--loading {
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+.help-center-page__header {
   flex-shrink: 0;
+  padding: 14px 20px 0;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
-.help-center__title {
+.help-center-page__brand {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  margin: 0 0 12px;
+  font-size: 16px;
   font-weight: 600;
+  color: var(--color-text);
 }
 
 .help-center {
   display: grid;
   grid-template-columns: 200px 1fr;
-  height: min(72vh, 640px);
-  min-height: min(420px, 60vh);
-  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.help-center--standalone {
+  min-height: 0;
+  max-height: none;
 }
 
 .help-center__nav {
@@ -2008,10 +2120,34 @@
   color: var(--color-accent);
 }
 
+.settings-cap-card__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-cap-llm-role {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.35;
+}
+
+.settings-cap-llm-role strong {
+  color: var(--color-accent-dark, var(--color-accent));
+  font-weight: 600;
+}
+
+.settings-cap-llm-role__sep {
+  margin: 0 4px;
+  opacity: 0.55;
+}
+
 @media (max-width: 640px) {
   .help-center {
     grid-template-columns: 1fr;
-    height: min(75vh, 640px);
   }
 
   .help-center__nav {
@@ -2103,10 +2239,46 @@
 }
 
 .settings-inline-field__label {
-  flex: 0 0 68px;
+  flex: 0 0 102px;
   margin: 0;
   font-size: 12px;
   color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.settings-inline-field__label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-field-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.settings-field-tip:hover {
+  color: var(--color-accent);
+}
+
+.settings-cap-card__subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.35;
 }
 
 .settings-inline-field__control {

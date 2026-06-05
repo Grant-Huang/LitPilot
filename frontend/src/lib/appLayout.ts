@@ -14,7 +14,13 @@ export function isChatRoute(pathname: string): boolean {
 }
 
 export function isFunctionalRoute(pathname: string): boolean {
-  return pathname === "/settings" || pathname === "/library";
+  return (
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/") ||
+    pathname === "/library" ||
+    pathname === "/help" ||
+    pathname.startsWith("/help/")
+  );
 }
 
 /**

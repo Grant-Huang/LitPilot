@@ -31,7 +31,7 @@ def _clean_chunk(text: str) -> str:
 
 
 def is_polluted_search_query(query: str) -> bool:
-    """Detect router fallback or echoed user brief — unsuitable for Tavily."""
+    """Detect router fallback or echoed user brief — unsuitable for web_search."""
     q = (query or "").strip()
     if not q:
         return False

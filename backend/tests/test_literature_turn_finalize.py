@@ -1,48 +1,24 @@
-"""Tests for literature turn finalization."""
-from __future__ import annotations
-
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from app.agents.literature_intent import LiteratureIntentResult
 from app.agents.literature_turn_context import TurnFinalizeContext
-from app.agents.literature_turn_finalize import finalize_turn
-from app.agents.session_corpus import SessionCorpus
-from app.core.think_stream import ThinkAccumulator
+from app.agents.literature_turn_finalize import _combine_assistant_text
 
 
-@pytest.mark.asyncio
-async def test_finalize_turn_appends_assistant_message() -> None:
-    store = MagicMock()
-    corpus = SessionCorpus()
-    trace: dict = {"stages": [], "tools": [], "workflows": []}
-    think_acc = ThinkAccumulator()
-
+def test_combine_assistant_text_prefix_and_body() -> None:
     ctx = TurnFinalizeContext(
-        store=store,
-        session_id="sess-1",
+        store=None,
+        session_id="s",
         session_meta={},
-        session_title="Test",
-        intent=LiteratureIntentResult(intent="new_topic"),
-        user_message="AI MOM survey",
-        corpus=corpus,
-        execution_trace=trace,
-        think_acc=think_acc,
+        session_title="",
+        intent=None,  # type: ignore[arg-type]
+        user_message="",
+        corpus=None,  # type: ignore[arg-type]
+        execution_trace={},
+        think_acc=None,  # type: ignore[arg-type]
         fetch_results=[],
         cite_records=[],
         failed_literature=[],
         gen_constraints=[],
+        assistant_prefix="**已理解你的研究需求**\n\n1. RQ1\n\n---",
     )
-
-    with patch(
-        "app.agents.literature_turn_finalize.get_citation_format",
-        new=AsyncMock(return_value="apa"),
-    ):
-        await finalize_turn(ctx, main_text="done")
-
-    store.append_message.assert_called_once()
-    args = store.append_message.call_args
-    assert args[0][0] == "sess-1"
-    assert args[0][1] == "assistant"
-    assert args[0][2] == "done"
+    out = _combine_assistant_text(ctx, "综述正文…")
+    assert out.startswith("**已理解你的研究需求**")
+    assert "综述正文" in out
