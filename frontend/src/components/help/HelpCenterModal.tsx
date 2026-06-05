@@ -85,7 +85,13 @@ export function HelpCenterModal({ open, pageId, onClose, onPageChange }: Props) 
       width={920}
       className="help-center-modal"
       destroyOnHidden
-      styles={{ body: { padding: 0 } }}
+      styles={{
+        body: {
+          padding: 0,
+          overflow: "hidden",
+          maxHeight: "min(72vh, 640px)",
+        },
+      }}
     >
       <div className="help-center">
         <nav className="help-center__nav" aria-label="帮助目录">
