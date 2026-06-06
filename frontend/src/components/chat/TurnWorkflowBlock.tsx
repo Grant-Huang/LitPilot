@@ -44,7 +44,39 @@ export function TurnWorkflowBlock({
     [workflow, trace, extensions, hasArtifact, chatText],
   );
 
-  if (!workflow.cards.length) return null;
+  if (!workflow.cards.length) {
+    if (!streaming) return null;
+    return (
+      <div className="litpilot-turn-log litpilot-turn-log--pending">
+        <div className="litpilot-turn-complete litpilot-turn-complete--live">
+          <div className="litpilot-turn-complete__headline">理解研究问题</div>
+        </div>
+        <div className="litpilot-wf-card litpilot-wf-card--running litpilot-wf-card--open litpilot-wf-card--live">
+          <div className="litpilot-wf-card__head">
+            <span className="litpilot-wf-card__title">理解研究问题</span>
+            <span className="litpilot-wf-card__status">进行中</span>
+          </div>
+          <div className="litpilot-wf-card__body">
+            <div className="litpilot-log-lines" role="list">
+              <div
+                className="litpilot-log-line litpilot-log-line--running"
+                role="listitem"
+              >
+                <span className="litpilot-log-line__marker" aria-hidden="true">
+                  <span className="litpilot-log-line__spinner" />
+                </span>
+                <p className="litpilot-log-line__text">
+                  <span className="litpilot-log-line__primary">
+                    正在连接并分析研究问题…
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const showCompletionBar = !workflow.clarifying;
 

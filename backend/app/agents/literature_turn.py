@@ -181,6 +181,17 @@ async def stream_literature_turn(
     ):
         skip_to_generate = True
 
+    think_acc = ThinkAccumulator()
+
+    if not skip_to_generate:
+        yield turn_start(turn_index=user_turns, intent="new_topic")
+        yield ("stage", {"name": "理解研究问题", "state": "active"})
+        async for ev in emit_system_think_line(
+            "正在理解你的研究问题…",
+            accumulator=think_acc,
+        ):
+            yield ev
+
     intent = await route_literature_intent(
         route_message,
         turn_ctx=turn_ctx,
@@ -254,7 +265,6 @@ async def stream_literature_turn(
     outline_obj: LiteratureOutline | None = None
     sub_topics_for_search: list[Any] = []
     execution_trace = new_trace()
-    think_acc = ThinkAccumulator()
     planner_ctx = await load_planner_context()
     working = SessionCorpus()
     review_llm = await get_review_llm()
@@ -378,10 +388,6 @@ async def stream_literature_turn(
                 "use_existing_corpus": intent.use_existing_corpus,
             },
         )
-        yield turn_start(turn_index=user_turns, intent=intent.intent)
-
-        yield ("stage", {"name": "理解研究问题", "state": "active"})
-
         router_result = intent.to_router_result()
         async for ev in stream_understanding_and_route(
             route_message,

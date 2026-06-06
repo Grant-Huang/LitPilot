@@ -45,6 +45,16 @@ function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
   );
 }
 
+function cardHeadMarker(
+  card: WorkflowCard,
+  open: boolean,
+  isRunning: boolean,
+): string | "spinner" {
+  if (isRunning) return "spinner";
+  if (card.state === "done") return open ? "▾" : "✓";
+  return open ? "▾" : "▸";
+}
+
 export function WorkflowCardView({
   card,
   trace,
@@ -57,6 +67,7 @@ export function WorkflowCardView({
   const isRunning = card.state === "running";
   const [manualOpen, setManualOpen] = useState(false);
   const open = forceOpen || locked || isRunning || defaultOpen || manualOpen;
+  const canToggle = !locked && !isRunning && card.state === "done";
 
   const cardSummary = useMemo(() => summarizeWorkflowCard(card), [card]);
 
@@ -72,22 +83,7 @@ export function WorkflowCardView({
         ? "失败"
         : null;
 
-  if (!open && card.state === "done" && !locked) {
-    return (
-      <button
-        type="button"
-        className="litpilot-wf-card litpilot-wf-card--collapsed"
-        onClick={() => setManualOpen(true)}
-        aria-expanded={false}
-      >
-        <span className="litpilot-wf-card__collapsed-mark" aria-hidden="true">
-          ✓
-        </span>
-        <span className="litpilot-wf-card__collapsed-title">{card.title}</span>
-        <span className="litpilot-wf-card__collapsed-summary">{cardSummary}</span>
-      </button>
-    );
-  }
+  const marker = cardHeadMarker(card, open, isRunning);
 
   return (
     <section
@@ -96,9 +92,14 @@ export function WorkflowCardView({
       }${streaming && isRunning ? " litpilot-wf-card--live" : ""}`}
     >
       <div className="litpilot-wf-card__head">
-        {locked || isRunning ? (
-          <span className="litpilot-wf-card__title">{card.title}</span>
-        ) : (
+        <span className="litpilot-wf-card__marker" aria-hidden="true">
+          {marker === "spinner" ? (
+            <span className="litpilot-log-line__spinner" />
+          ) : (
+            marker
+          )}
+        </span>
+        {canToggle ? (
           <button
             type="button"
             className="litpilot-wf-card__title-btn"
@@ -107,8 +108,13 @@ export function WorkflowCardView({
           >
             {card.title}
           </button>
+        ) : (
+          <span className="litpilot-wf-card__title">{card.title}</span>
         )}
-        {statusLabel ? (
+        {!open && cardSummary ? (
+          <span className="litpilot-wf-card__inline-summary">{cardSummary}</span>
+        ) : null}
+        {open && statusLabel ? (
           <span className="litpilot-wf-card__status">{statusLabel}</span>
         ) : null}
       </div>

@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import chat, library, sessions, settings
+from app.api import chat, library, sessions, settings, tasks
 from app.core.response import err, ok
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,7 @@ api_router.include_router(sessions.router)
 api_router.include_router(settings.router)
 api_router.include_router(library.router)
 api_router.include_router(chat.router)
+api_router.include_router(tasks.router)
 
 
 def _health_payload() -> dict:
@@ -51,6 +52,7 @@ def _cors_allow_origins() -> list[str]:
 async def _log_runtime_config() -> None:
     from app.core.config import DATA_DIR
     from app.storage.file_store import get_store
+    from app.tasks.literature_tasks import start_task_sweeper
 
     merged = get_store().get_agent_settings_merged()
     logger.info(
@@ -59,6 +61,14 @@ async def _log_runtime_config() -> None:
         merged.get("fetch_provider"),
         merged.get("max_fetch_urls"),
     )
+    await start_task_sweeper()
+
+
+@app.on_event("shutdown")
+async def _shutdown_task_sweeper() -> None:
+    from app.tasks.literature_tasks import stop_task_sweeper
+
+    await stop_task_sweeper()
 
 
 app.add_middleware(

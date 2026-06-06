@@ -127,9 +127,15 @@ export const settingsApi = {
     }),
 };
 
+export const LIBRARY_LIST_TIMEOUT_MS = 30_000;
+
 export const libraryApi = {
   items: () =>
-    apiRequestData<{ items: LibraryItem[]; total: number }>("/library/items"),
+    apiRequestData<{ items: LibraryItem[]; total: number }>(
+      "/library/items",
+      undefined,
+      LIBRARY_LIST_TIMEOUT_MS,
+    ),
   item: (id: string) =>
     apiRequestData<{ item: LibraryItem; full_text: string }>(
       `/library/items/${encodeURIComponent(id)}`,

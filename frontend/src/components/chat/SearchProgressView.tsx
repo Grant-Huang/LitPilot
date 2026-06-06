@@ -38,7 +38,13 @@ function TopicBlock({
         aria-expanded={open}
       >
         <span className="litpilot-search-topic__marker" aria-hidden="true">
-          {pending ? <span className="litpilot-log-line__spinner" /> : "·"}
+          {pending ? (
+            <span className="litpilot-log-line__spinner" />
+          ) : open ? (
+            "▾"
+          ) : (
+            "▸"
+          )}
         </span>
         <span className="litpilot-search-topic__title">{title}</span>
         <span className="litpilot-search-topic__status">{status}</span>

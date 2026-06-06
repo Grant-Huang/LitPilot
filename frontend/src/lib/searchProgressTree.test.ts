@@ -57,6 +57,7 @@ describe("buildSearchProgressTree", () => {
           pass_index: 1,
           pass_total: 2,
           hits: 5,
+          hits_found: 30,
           hits_taken: 5,
           topic_title: "AI-native MOM 定义",
           source_counts: { openalex: 30 },
@@ -74,7 +75,9 @@ describe("buildSearchProgressTree", () => {
     expect(sourceStatusLabel(tree.topics[0]!.sources[0]!)).toBe(
       "检索完成 · 搜到 30 篇，取 20 篇",
     );
-    expect(topicStatusLabel(tree.topics[0]!)).toBe("检索完成 · 5 篇");
+    expect(topicStatusLabel(tree.topics[0]!)).toBe(
+      "检索完成 · 搜到 30 篇，取 5 篇",
+    );
     expect(topicDisplayTitle(tree.topics[0]!)).toBe("AI-native MOM 定义");
   });
 
@@ -121,8 +124,6 @@ describe("buildSearchProgressTree", () => {
       },
     ];
     const tree = buildSearchProgressTree(extensions);
-    expect(topicStatusLabel(tree.topics[0]!)).toBe(
-      "检索中 · 1/5 源（1 个数据源已完成）",
-    );
+    expect(topicStatusLabel(tree.topics[0]!)).toBe("检索中 · 1/5 源");
   });
 });

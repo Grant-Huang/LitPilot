@@ -24,6 +24,8 @@ export type SearchTopicNode = {
   query: string;
   status: "pending" | "running" | "done";
   hits: number;
+  hitsFound: number;
+  hitsTaken: number;
   sourceTotal: number;
   sourcesDone: number;
   sources: SearchSourceNode[];
@@ -90,6 +92,8 @@ function ensureTopic(
       query,
       status: "pending",
       hits: 0,
+      hitsFound: 0,
+      hitsTaken: 0,
       sourceTotal: SOURCE_ORDER.length,
       sourcesDone: 0,
       sources: defaultSources(),
@@ -120,6 +124,10 @@ function sourceFor(topic: SearchTopicNode, source: string, label?: string): Sear
   }
   if (label) row.label = label;
   return row;
+}
+
+function sumSourceHitsFound(topic: SearchTopicNode): number {
+  return topic.sources.reduce((n, s) => n + (s.hitsFound || 0), 0);
 }
 
 function recountTopic(topic: SearchTopicNode): void {
@@ -246,12 +254,19 @@ export function buildSearchProgressTree(
         String(data.query ?? ""),
       );
       topic.status = "done";
-      topic.hits =
+      const taken =
         typeof data.hits_taken === "number"
           ? data.hits_taken
           : typeof data.hits === "number"
             ? data.hits
-            : topic.hits;
+            : topic.hitsTaken;
+      const found =
+        typeof data.hits_found === "number"
+          ? data.hits_found
+          : sumSourceHitsFound(topic) || taken;
+      topic.hitsTaken = taken;
+      topic.hitsFound = found;
+      topic.hits = taken;
       if (typeof data.duration_ms === "number") topic.durationMs = data.duration_ms;
       const counts = data.source_counts as Record<string, number> | undefined;
       if (counts) {
@@ -295,10 +310,12 @@ export function topicStatusLabel(topic: SearchTopicNode): string {
   const sourcesDone = topic.sourcesDone;
   const sourceTotal = topic.sourceTotal || SOURCE_ORDER.length;
   if (topic.status === "done") {
-    return `检索完成 · ${topic.hits} 篇`;
+    const found = topic.hitsFound || sumSourceHitsFound(topic);
+    const taken = topic.hitsTaken ?? topic.hits;
+    return `检索完成 · 搜到 ${found} 篇，取 ${taken} 篇`;
   }
   if (topic.status === "running") {
-    return `检索中 · ${sourcesDone}/${sourceTotal} 源（${sourcesDone} 个数据源已完成）`;
+    return `检索中 · ${sourcesDone}/${sourceTotal} 源`;
   }
   return "待检索";
 }

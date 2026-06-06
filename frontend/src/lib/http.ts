@@ -1,3 +1,5 @@
+export const DEFAULT_API_TIMEOUT_MS = 15_000;
+
 export type ApiEnvelope<T> = {
   status: "success" | "error";
   data?: T;
@@ -16,20 +18,51 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = path.startsWith("/api") ? path : `/api${path}`;
-  return fetch(url, {
-    cache: "no-store",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
+export function apiTimeoutMessage(ms: number): string {
+  return `请求超时（${Math.round(ms / 1000)} 秒），请检查后端是否已启动或网络是否正常。`;
 }
 
-export async function apiRequestData<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await apiFetch(path, init);
+export async function apiFetch(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+): Promise<Response> {
+  const url = path.startsWith("/api") ? path : `/api${path}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init?.signal;
+  const onUpstreamAbort = () => controller.abort();
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) controller.abort();
+    else upstreamSignal.addEventListener("abort", onUpstreamAbort, { once: true });
+  }
+  try {
+    return await fetch(url, {
+      cache: "no-store",
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError" && !upstreamSignal?.aborted) {
+      throw new ApiError(408, apiTimeoutMessage(timeoutMs));
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+    if (upstreamSignal) upstreamSignal.removeEventListener("abort", onUpstreamAbort);
+  }
+}
+
+export async function apiRequestData<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+): Promise<T> {
+  const res = await apiFetch(path, init, timeoutMs);
   let body: ApiEnvelope<T> | null = null;
   try {
     body = (await res.json()) as ApiEnvelope<T>;

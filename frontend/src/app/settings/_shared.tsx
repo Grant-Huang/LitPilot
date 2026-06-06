@@ -41,6 +41,19 @@ export function SettingsLoading() {
   );
 }
 
+/** Inline list skeleton for settings panels (header stays in FunctionalDocShell). */
+export function SettingsListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="settings-list-skeleton" aria-busy="true" aria-label="加载中">
+      <ul className="functional-page-skeleton__list">
+        {Array.from({ length: rows }, (_, i) => (
+          <li key={i} className="functional-page-skeleton__row" />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function SettingsErrorMsg({ msg }: { msg: string }) {
   if (!msg) return null;
   return (

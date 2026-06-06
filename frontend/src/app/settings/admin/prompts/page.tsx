@@ -6,7 +6,8 @@ import { Spin } from "antd";
 
 import { FieldTip, InlineCheck, InlineField, SettingToolbar, feedbackOk, SettingsListPanel, useUnsavedGuard } from "../_ui";
 
-import { SettingsLoading, errorMessage } from "../../_shared";
+import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
+import { SettingsListSkeleton, errorMessage } from "../../_shared";
 
 import {
   settingsApiV2,
@@ -111,9 +112,9 @@ export default function AdminPromptsPage() {
   useUnsavedGuard(dirty);
 
   useEffect(() => {
-    void Promise.all([settingsApiV2.getSystemCapabilities(), settingsApiV2.getPromptDefaults()])
-      .then(([capRes, defRes]) => {
-        const items = capRes.items || [];
+    void Promise.all([loadAdminBootstrap(), settingsApiV2.getPromptDefaults()])
+      .then(([boot, defRes]) => {
+        const items = boot.caps;
         setCaps(items);
         setMeta(defRes.meta || []);
         setDefaults(defRes.defaults || {});
@@ -154,6 +155,7 @@ export default function AdminPromptsPage() {
           post_refine_mode: postRefineMode,
         },
       });
+      invalidateAdminBootstrap();
       setCaps((prev) => prev.map((c) => (c.capability_id === saved.capability_id ? saved : c)));
       setSavedTemplates({ ...templates });
       setSavedEnablePaperAttributes(enablePaperAttributes);
@@ -192,7 +194,11 @@ export default function AdminPromptsPage() {
   );
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel className="settings-prompts">
+        <SettingsListSkeleton rows={6} />
+      </SettingsListPanel>
+    );
   }
 
   return (

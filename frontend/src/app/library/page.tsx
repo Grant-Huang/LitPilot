@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Spin, message } from "antd";
+import { message } from "antd";
+import { FunctionalPageSkeleton } from "@/components/layout/FunctionalPageSkeleton";
 import { LibraryDetailPane, type LibraryDetailTab } from "@/components/library/LibraryDetailPane";
 import { LiteratureListPanel } from "@/components/library/LiteratureListPanel";
 import { libraryApi } from "@/lib/api";
@@ -16,17 +17,18 @@ export default function LibraryPage() {
   const [detailTab, setDetailTab] = useState<LibraryDetailTab | undefined>();
   const [refreshingMeta, setRefreshingMeta] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
     setLoading(true);
     try {
-      const next = await loadLibraryItems();
+      const next = await loadLibraryItems({ force: opts?.force });
       setItems(next);
       setSelectedId((prev) => {
         if (prev && next.some((i) => i.id === prev)) return prev;
         return next[0]?.id || null;
       });
-    } catch {
-      message.error("加载文献库失败");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      message.error(msg || "加载文献库失败");
     } finally {
       setLoading(false);
     }
@@ -44,12 +46,13 @@ export default function LibraryPage() {
     setRefreshingMeta(true);
     try {
       const stats = await libraryApi.refreshMetadata({ parallel: 4 });
-      await load();
+      await load({ force: true });
       message.success(
         `已刷新 ${stats.updated} 条元数据（跳过 ${stats.skipped} 条）`,
       );
-    } catch {
-      message.error("刷新元数据失败");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      message.error(msg || "刷新元数据失败");
     } finally {
       setRefreshingMeta(false);
     }
@@ -65,8 +68,9 @@ export default function LibraryPage() {
           return next;
         });
         message.success("已删除文献");
-      } catch {
-        message.error("删除失败");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        message.error(msg || "删除失败");
       }
     },
     [],
@@ -74,12 +78,12 @@ export default function LibraryPage() {
 
   if (loading) {
     return (
-      <div
-        className="functional-shell"
-        style={{ alignItems: "center", justifyContent: "center", flex: 1 }}
-      >
-        <Spin size="large" />
-      </div>
+      <FunctionalPageSkeleton
+        title="文献库"
+        subtitle="正在加载文献…"
+        rows={8}
+        className="library-page"
+      />
     );
   }
 

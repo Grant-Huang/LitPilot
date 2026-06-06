@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { UserOutlined } from "@ant-design/icons";
+import { getCachedResource, invalidateCachedResource } from "@/lib/resourceCache";
+import {
+  invalidatePersonalPreferences,
+  PERSONAL_PREFS_CACHE_KEY,
+} from "@/lib/settingsBootstrap";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
 import { FunctionalDocShell } from "@/components/layout/FunctionalDocShell";
 import { InlineField } from "../admin/_ui";
 import {
   errorMessage,
   SettingsErrorMsg,
-  SettingsLoading,
+  SettingsListSkeleton,
   SettingsSuccessMsg,
 } from "../_shared";
 import { buildPersonalNavGroups, PERSONAL_SECTION } from "./_shellConfig";
@@ -25,8 +30,9 @@ export default function PersonalSettingsPage() {
   const [planConfirm, setPlanConfirm] = useState(false);
 
   useEffect(() => {
-    void settingsApiV2
-      .getPersonalPreferences()
+    void getCachedResource(PERSONAL_PREFS_CACHE_KEY, () =>
+      settingsApiV2.getPersonalPreferences(),
+    )
       .then((p) => {
         if (p.citation_format === "apa" || p.citation_format === "acm") {
           setCitationFormat(p.citation_format);
@@ -48,6 +54,7 @@ export default function PersonalSettingsPage() {
         citation_format: citationFormat,
         plan_confirm: planConfirm,
       });
+      invalidatePersonalPreferences();
       setMsgOk(true);
       setMsg("个人偏好已保存");
     } catch (e: unknown) {
@@ -69,7 +76,7 @@ export default function PersonalSettingsPage() {
         contentClassName="settings-doc-content"
         className="functional-doc-shell--loading"
       >
-        <SettingsLoading />
+        <SettingsListSkeleton rows={3} />
       </FunctionalDocShell>
     );
   }

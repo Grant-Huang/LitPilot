@@ -1,16 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { BookOutlined, MessageOutlined } from "@ant-design/icons";
 import { ThreeColumnLayout } from "@meso.ai/ui";
 import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
+import {
+  pendingNavLabel,
+  useAppNavigation,
+} from "@/contexts/AppNavigationContext";
+import { debounce } from "@/lib/debounce";
 import { LitPilotSessionColumn } from "@/integrations/meso/LitPilotSessionColumn";
 import { LitPilotMark, LitPilotWordmark } from "@/components/brand/LitPilotMark";
 import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotSidebarUser } from "@/components/layout/LitPilotSidebarUser";
+import { SidebarTaskBadge } from "@/components/layout/SidebarTaskBadge";
 import { getAppLayoutFlags } from "@/lib/appLayout";
 
 const ARTIFACT_KEY = "litpilot:artifact-visible";
@@ -31,7 +37,7 @@ type Props = { children: React.ReactNode };
 
 export function LitPilotAppShell({ children }: Props) {
   const pathname = usePathname();
-  const router = useRouter();
+  const { pendingHref, navigate, isNavigating } = useAppNavigation();
   const isChat = pathname === "/chat" || pathname.startsWith("/chat/");
   const chatBridge = useChatLayoutBridgeOptional();
   const {
@@ -50,8 +56,13 @@ export function LitPilotAppShell({ children }: Props) {
   const [artifactVisible, setArtifactVisible] = useState(false);
 
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions, pathname]);
+    if (!isChat) return;
+    const run = debounce(() => {
+      void loadSessions();
+    }, 300);
+    run();
+    return () => run.cancel();
+  }, [loadSessions, isChat]);
 
   useEffect(() => {
     if (!isChat) {
@@ -87,33 +98,36 @@ export function LitPilotAppShell({ children }: Props) {
     return () => chatBridge.registerArtifactPanelControl(null);
   }, [isChat, chatBridge, artifactVisible]);
 
-  const navItems = [
-    {
-      id: "chat",
-      label: "综述会话",
-      icon: <MessageOutlined />,
-      active: isChat,
-      onClick: () => router.push("/chat"),
-    },
-    {
-      id: "library",
-      label: "文献库",
-      icon: <BookOutlined />,
-      active: pathname === "/library",
-      onClick: () => router.push("/library"),
-    },
-  ];
+  const navItems = useMemo(
+    () => [
+      {
+        id: "chat",
+        label: pendingNavLabel("/chat", "综述会话", pendingHref),
+        icon: <MessageOutlined />,
+        active: isChat,
+        onClick: () => navigate("/chat"),
+      },
+      {
+        id: "library",
+        label: pendingNavLabel("/library", "文献库", pendingHref),
+        icon: <BookOutlined />,
+        active: pathname === "/library",
+        onClick: () => navigate("/library"),
+      },
+    ],
+    [isChat, navigate, pathname, pendingHref],
+  );
 
   const sessionColumn = (
     <LitPilotSessionColumn
       sessions={sessions}
       activeId={activeSessionId}
       onSelect={(id) => {
-        if (!isChat) router.push("/chat");
+        if (!isChat) navigate("/chat");
         void handleSelectSession(id);
       }}
       onNewSession={() => {
-        if (!isChat) router.push("/chat");
+        if (!isChat) navigate("/chat");
         void handleNewSession();
       }}
       onDelete={handleDeleteSession}
@@ -132,6 +146,7 @@ export function LitPilotAppShell({ children }: Props) {
 
   const layoutExtraClass = [
     "litpilot-branded",
+    isNavigating ? "litpilot-layout--nav-pending" : "",
     isChat && artifactVisible ? "litpilot-layout--artifact-open" : "",
     isChat && chatBridge?.literatureDetailOpen
       ? "litpilot-layout--literature-detail"
@@ -141,7 +156,10 @@ export function LitPilotAppShell({ children }: Props) {
     .join(" ");
 
   return (
-    <div className={layoutExtraClass}>
+    <div
+      className={layoutExtraClass}
+      data-nav-pending={pendingHref ?? undefined}
+    >
       <ThreeColumnLayout
         appName="LitPilot"
         sidebarLogo={
@@ -159,7 +177,12 @@ export function LitPilotAppShell({ children }: Props) {
           </Link>
         }
         navItems={navItems}
-        sidebarFooter={<LitPilotSidebarUser />}
+        sidebarFooter={
+          <>
+            <SidebarTaskBadge />
+            <LitPilotSidebarUser />
+          </>
+        }
         sessionColumn={layoutFlags.showSessionColumn ? sessionColumn : <div />}
         mainHeader={
           <LitPilotBrandLockup

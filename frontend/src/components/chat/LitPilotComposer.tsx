@@ -22,6 +22,7 @@ type LitPilotComposerProps = {
   maxFetchUrls?: number;
   literatureSourceMode?: LiteratureSourceMode;
   streaming: boolean;
+  streamPending?: boolean;
   streamActivityHint?: string | null;
   streamActivityLevel?: "active" | "waiting" | "slow" | null;
   onSend: () => void;
@@ -36,6 +37,7 @@ export function LitPilotComposer({
   maxFetchUrls = 50,
   literatureSourceMode = "merge",
   streaming,
+  streamPending = false,
   streamActivityHint = null,
   streamActivityLevel = null,
   onSend,
@@ -77,7 +79,8 @@ export function LitPilotComposer({
     [handleFile],
   );
 
-  const canSend = Boolean(input.trim()) && !streaming;
+  const isBusy = streaming || streamPending;
+  const canSend = Boolean(input.trim()) && !isBusy;
 
   return (
     <div className="litpilot-composer">
@@ -127,7 +130,7 @@ export function LitPilotComposer({
                 if (canSend) onSend();
               }
             }}
-            disabled={streaming}
+            disabled={isBusy}
           />
           <div className="litpilot-composer__bar">
             <Tooltip
@@ -136,7 +139,7 @@ export function LitPilotComposer({
               <button
                 type="button"
                 className="litpilot-composer__attach"
-                disabled={streaming}
+                disabled={isBusy}
                 aria-label="上传链接列表"
                 onClick={() => fileRef.current?.click()}
               >
@@ -157,14 +160,16 @@ export function LitPilotComposer({
                   : ""
               }`}
             >
-              {streaming
+              {isBusy
                 ? streamActivityHint ||
-                  (streamActivityLevel === "slow"
-                    ? `仍在执行（已等待较久，可停止后重试）`
-                    : "执行中…")
+                  (streamPending && !streaming
+                    ? "准备中…"
+                    : streamActivityLevel === "slow"
+                      ? `仍在执行（已等待较久，可停止后重试）`
+                      : "执行中…")
                 : "Enter 发送 · Shift+Enter 换行"}
             </span>
-            {streaming ? (
+            {isBusy ? (
               <Button size="small" onClick={onAbort} danger>
                 停止
               </Button>

@@ -1,18 +1,21 @@
 "use client";
 
+import { AppNavigationProvider } from "@/contexts/AppNavigationContext";
 import { ChatLayoutBridgeProvider } from "@/contexts/ChatLayoutBridgeContext";
 import { ChatSessionProvider } from "@/contexts/ChatSessionContext";
-import { LiteratureStreamProvider } from "@/contexts/LiteratureStreamContext";
+import { LiteratureTaskProvider } from "@/contexts/LiteratureTaskContext";
 import { LitPilotAppShell } from "./LitPilotAppShell";
 
 export function Chrome({ children }: { children: React.ReactNode }) {
   return (
     <ChatSessionProvider>
-      <LiteratureStreamProvider>
-        <ChatLayoutBridgeProvider>
-          <LitPilotAppShell>{children}</LitPilotAppShell>
-        </ChatLayoutBridgeProvider>
-      </LiteratureStreamProvider>
+      <LiteratureTaskProvider>
+        <AppNavigationProvider>
+          <ChatLayoutBridgeProvider>
+            <LitPilotAppShell>{children}</LitPilotAppShell>
+          </ChatLayoutBridgeProvider>
+        </AppNavigationProvider>
+      </LiteratureTaskProvider>
     </ChatSessionProvider>
   );
 }

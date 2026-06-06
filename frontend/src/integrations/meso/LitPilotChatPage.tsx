@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { message } from "antd";
+import { createInitialStreamState } from "@meso.ai/ui/runtime";
 import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotComposer } from "@/components/chat/LitPilotComposer";
 import { LitPilotMessageList } from "@/components/chat/LitPilotMessageList";
@@ -33,6 +34,7 @@ export function LitPilotChatPage() {
     streamState,
     liveMessages,
     streaming,
+    streamPending,
     streamSettling,
     liveIntent,
     liveProcessText,
@@ -41,7 +43,10 @@ export function LitPilotChatPage() {
     abort,
   } = useLiteratureStream();
 
-  const streamActivity = useStreamActivity(streamState, streaming);
+  const streamActivity = useStreamActivity(
+    streamState,
+    streaming || streamPending,
+  );
   const streamActivityHint = streamActivity
     ? formatStreamActivityHint(streamActivity)
     : null;
@@ -93,10 +98,17 @@ export function LitPilotChatPage() {
   const activeStreaming =
     streaming || streamDone || streamError || streamSettling;
 
+  const pendingStreamState = useMemo(() => {
+    const base = createInitialStreamState();
+    return { ...base, status: "streaming" as const };
+  }, []);
+
   const liveStreaming =
     streaming && !streamSettling
       ? stripWorkflowArtifacts(streamState)
-      : undefined;
+      : streamPending
+        ? pendingStreamState
+        : undefined;
 
   useEffect(() => {
     if (!activeStreaming) return;
@@ -287,7 +299,8 @@ export function LitPilotChatPage() {
           onFetchUrlsChange={setFetchUrls}
           maxFetchUrls={maxFetchUrls}
           literatureSourceMode={literatureSourceMode}
-          streaming={streaming}
+          streaming={streaming || streamPending}
+          streamPending={streamPending}
           streamActivityHint={streamActivityHint}
           streamActivityLevel={streamActivity?.level ?? null}
           onSend={() => void send()}

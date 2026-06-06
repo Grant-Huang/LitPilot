@@ -10,8 +10,9 @@ import {
   isLlmCredential,
   mergeById,
   SettingsErrorMsg,
-  SettingsLoading,
+  SettingsListSkeleton,
 } from "../../_shared";
+import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import { settingsApiV2, type SystemCredential, type SystemInstance } from "@/lib/settingsApiV2";
 
 function mergeInstances(items: SystemInstance[], updated: SystemInstance): SystemInstance[] {
@@ -64,6 +65,7 @@ function InstanceRow({
         credential_id: credentialId,
         model_name: modelName.trim() || instance.model_name,
       });
+      invalidateAdminBootstrap();
       onUpdated(saved);
       setRowMsg("已保存");
     } catch (e: unknown) {
@@ -194,6 +196,7 @@ function CreateInstancePanel({
         model_name: modelName.trim() || "MiniMax-M3",
         default_params: {},
       });
+      invalidateAdminBootstrap();
       onCreated(created);
     } catch (e: unknown) {
       setRowMsg(e instanceof Error ? e.message : String(e));
@@ -269,9 +272,9 @@ export default function AdminInstancesPage() {
     setLoading(true);
     setMsg("");
     try {
-      const [instRes, credRes] = await Promise.all([settingsApiV2.listInstances(), settingsApiV2.listCredentials()]);
-      setItems(instRes.items || []);
-      setCredentials(credRes.items || []);
+      const boot = await loadAdminBootstrap();
+      setItems(boot.instances);
+      setCredentials(boot.credentials);
     } catch (e: unknown) {
       setMsg(errorMessage(e));
     } finally {
@@ -284,7 +287,11 @@ export default function AdminInstancesPage() {
   }, []);
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel>
+        <SettingsListSkeleton rows={4} />
+      </SettingsListPanel>
+    );
   }
 
   return (

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { settingsApiV2, type StorageSettings } from "@/lib/settingsApiV2";
-import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../../_shared";
+import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
+import type { StorageSettings } from "@/lib/settingsApiV2";
+import { SettingsErrorMsg, SettingsListSkeleton, errorMessage } from "../../_shared";
 import { SettingsListPanel } from "../_ui";
 import { StorageSettingsPanel } from "../_storage";
 
@@ -12,15 +13,18 @@ export default function AdminStoragePage() {
   const [storage, setStorage] = useState<StorageSettings | null>(null);
 
   useEffect(() => {
-    void settingsApiV2
-      .getSystemOverview()
-      .then((ov) => setStorage(ov.storage))
+    void loadAdminBootstrap()
+      .then((boot) => setStorage(boot.overview.storage))
       .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel>
+        <SettingsListSkeleton rows={3} />
+      </SettingsListPanel>
+    );
   }
 
   if (!storage) {
@@ -30,7 +34,13 @@ export default function AdminStoragePage() {
   return (
     <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
-      <StorageSettingsPanel storage={storage} onSaved={setStorage} />
+      <StorageSettingsPanel
+        storage={storage}
+        onSaved={(next) => {
+          invalidateAdminBootstrap();
+          setStorage(next);
+        }}
+      />
     </SettingsListPanel>
   );
 }

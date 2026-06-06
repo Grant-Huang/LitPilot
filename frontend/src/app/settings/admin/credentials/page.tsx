@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Spin } from "antd";
+import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import { feedbackOk, InlineField, SettingToolbar, SettingsListPanel, useUnsavedGuard } from "../_ui";
 import {
   entityFromTestError,
@@ -10,7 +11,7 @@ import {
   isLlmCredential,
   mergeById,
   SettingsErrorMsg,
-  SettingsLoading,
+  SettingsListSkeleton,
 } from "../../_shared";
 import { settingsApiV2, type SystemCapability, type SystemCredential } from "@/lib/settingsApiV2";
 import { WebProviderTestPanel } from "./WebProviderTestPanel";
@@ -74,6 +75,7 @@ function CredentialRow({
         body.group_id = groupId.trim();
       }
       const saved = await settingsApiV2.updateCredential(credential.id, body);
+      invalidateAdminBootstrap();
       onUpdated(saved);
       setKeyDraft(null);
       setRowMsg("已保存");
@@ -202,12 +204,9 @@ export default function AdminCredentialsPage() {
   const load = async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);
     try {
-      const [credRes, capRes] = await Promise.all([
-        settingsApiV2.listCredentials(),
-        settingsApiV2.getSystemCapabilities(),
-      ]);
-      setItems(credRes.items || []);
-      setCaps(capRes.items || []);
+      const boot = await loadAdminBootstrap();
+      setItems(boot.credentials);
+      setCaps(boot.caps);
     } catch (e: unknown) {
       setMsg(errorMessage(e));
     } finally {
@@ -220,7 +219,11 @@ export default function AdminCredentialsPage() {
   }, []);
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel>
+        <SettingsListSkeleton rows={4} />
+      </SettingsListPanel>
+    );
   }
 
   const webSearchCap = caps.find((c) => c.capability_id === "web_search");

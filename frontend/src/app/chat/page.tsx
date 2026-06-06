@@ -1,5 +1,10 @@
+import { LiteratureStreamProvider } from "@/contexts/LiteratureStreamContext";
 import { LitPilotChatPage } from "@/integrations/meso/LitPilotChatPage";
 
 export default function ChatPage() {
-  return <LitPilotChatPage />;
+  return (
+    <LiteratureStreamProvider>
+      <LitPilotChatPage />
+    </LiteratureStreamProvider>
+  );
 }

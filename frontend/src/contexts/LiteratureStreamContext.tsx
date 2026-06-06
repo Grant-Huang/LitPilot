@@ -12,8 +12,10 @@ import {
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { toastError } from "@/lib/toastFeedback";
-import { useSSEStream } from "@meso.ai/ui";
+import { useBatchedSSEStream } from "@/hooks/useBatchedSSEStream";
+import { useThrottledRAFState } from "@/hooks/useThrottledRAFState";
 import { useChatSession } from "@/contexts/ChatSessionContext";
+import { useLiteratureTask } from "@/contexts/LiteratureTaskContext";
 import type { LitPilotMessage } from "@/lib/chatTypes";
 import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
@@ -24,12 +26,19 @@ import {
   sessionHasAssistantReply,
 } from "@/lib/streamTurnFinalize";
 import { sessionsApi } from "@/lib/api";
+import { tasksApi } from "@/lib/tasksApi";
 import { clearClarificationUnreadTitle } from "@/lib/clarificationTitle";
+import {
+  isRunningTaskStatus,
+  isTerminalTaskStatus,
+  mapStatusRow,
+} from "@/lib/taskTypes";
 
 type LiteratureStreamContextValue = {
-  streamState: ReturnType<typeof useSSEStream>["state"];
+  streamState: ReturnType<typeof useBatchedSSEStream>["state"];
   liveMessages: LitPilotMessage[];
   streaming: boolean;
+  streamPending: boolean;
   streamSettling: boolean;
   liveIntent: string;
   liveProcessText: string;
@@ -46,6 +55,10 @@ function workflowNeedsChat(intent: string): boolean {
   return intent === "query_corpus" || intent === "clarify" || intent === "plan_confirm";
 }
 
+function taskStreamUrl(taskId: string, since: number): string {
+  return `/api/tasks/${encodeURIComponent(taskId)}/stream?since=${since}`;
+}
+
 export function LiteratureStreamProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isChat = pathname === "/chat" || pathname.startsWith("/chat/");
@@ -57,29 +70,100 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     setActiveSessionId,
     clearMessages,
   } = useChatSession();
+  const {
+    activeTask,
+    setActiveTask,
+    registerEventSeq,
+    refreshFromServer,
+    clearTask,
+  } = useLiteratureTask();
 
-  const { state: streamState, start, abort, reset } = useSSEStream(
-    "/api/chat/literature/execute",
+  const { state: streamState, start, abort, reset } = useBatchedSSEStream(
+    "/api/tasks/idle/stream",
   );
 
+  const {
+    state: liveTextState,
+    update: updateLiveText,
+    commitNow: commitLiveText,
+  } = useThrottledRAFState({
+    liveIntent: "new_topic",
+    liveProcessText: "",
+    liveChatText: "",
+  });
+  const liveIntent = liveTextState.liveIntent;
+  const liveProcessText = liveTextState.liveProcessText;
+  const liveChatText = liveTextState.liveChatText;
+
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
+  const [streamPending, setStreamPending] = useState(false);
   const [streamSettling, setStreamSettling] = useState(false);
-  const [liveIntent, setLiveIntent] = useState("new_topic");
-  const [liveProcessText, setLiveProcessText] = useState("");
-  const [liveChatText, setLiveChatText] = useState("");
   const streamStartedRef = useRef(false);
   const streamFinalizeRef = useRef(false);
   const turnGenerationRef = useRef(0);
   const turnSessionRef = useRef<string | null>(null);
-  /** SSE extension.session 下发的权威 session_id */
   const streamSessionRef = useRef<string | null>(null);
   const pendingUserTextRef = useRef<string | null>(null);
   const extensionHandledRef = useRef(0);
   const prevActiveSessionRef = useRef<string | null>(null);
+  const connectedTaskIdRef = useRef<string | null>(null);
+  const reconnectingRef = useRef(false);
+
+  const resetStreamLocalState = useCallback(
+    (sessionId: string | null = activeSessionId) => {
+      streamStartedRef.current = false;
+      streamFinalizeRef.current = false;
+      turnSessionRef.current = sessionId;
+      streamSessionRef.current = sessionId;
+      pendingUserTextRef.current = null;
+      extensionHandledRef.current = 0;
+      connectedTaskIdRef.current = null;
+      setStreamSettling(false);
+      setStreamPending(false);
+      setLiveMessages([]);
+      commitLiveText({
+        liveIntent: "new_topic",
+        liveProcessText: "",
+        liveChatText: "",
+      });
+    },
+    [activeSessionId, commitLiveText],
+  );
+
+  const connectTaskStream = useCallback(
+    async (taskId: string, since: number, preserveState: boolean) => {
+      connectedTaskIdRef.current = taskId;
+      streamStartedRef.current = true;
+      setStreamPending(false);
+      await start({
+        url: taskStreamUrl(taskId, since),
+        method: "GET",
+        preserveState,
+        onEventApplied: (_event, index) => {
+          registerEventSeq(since + index);
+        },
+      });
+      void refreshFromServer();
+    },
+    [registerEventSeq, refreshFromServer, start],
+  );
 
   const streaming = streamState.status === "streaming";
   const streamDone = streamState.status === "done";
   const streamError = streamState.status === "error";
+
+  useEffect(() => {
+    if (streamState.status === "streaming") {
+      setStreamPending(false);
+    }
+  }, [streamState.status]);
+
+  useEffect(() => {
+    if (streamState.status === "error" || streamState.status === "done") {
+      setStreamPending(false);
+      void refreshFromServer();
+    }
+  }, [streamState.status, refreshFromServer]);
 
   useEffect(() => {
     const prev = prevActiveSessionRef.current;
@@ -90,18 +174,72 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       abort();
     }
     reset();
-    streamStartedRef.current = false;
-    streamFinalizeRef.current = false;
-    turnSessionRef.current = activeSessionId;
-    streamSessionRef.current = activeSessionId;
-    pendingUserTextRef.current = null;
-    extensionHandledRef.current = 0;
-    setStreamSettling(false);
-    setLiveMessages([]);
-    setLiveIntent("new_topic");
-    setLiveProcessText("");
-    setLiveChatText("");
-  }, [activeSessionId, streaming, abort, reset]);
+    resetStreamLocalState(activeSessionId);
+  }, [activeSessionId, streaming, abort, reset, resetStreamLocalState]);
+
+  useEffect(() => {
+    return () => {
+      abort();
+    };
+  }, [abort]);
+
+  useEffect(() => {
+    if (isChat) return;
+    if (streamState.status === "streaming") {
+      abort();
+    }
+  }, [isChat, streamState.status, abort]);
+
+  useEffect(() => {
+    if (activeTask?.status !== "cancelled") return;
+    abort();
+    reset();
+    resetStreamLocalState(activeSessionId);
+    clearTask();
+  }, [activeTask?.status, abort, reset, resetStreamLocalState, activeSessionId, clearTask]);
+
+  useEffect(() => {
+    if (!isChat || !activeTask) return;
+    if (activeTask.sessionId !== activeSessionId) return;
+
+    if (
+      isTerminalTaskStatus(activeTask.status) &&
+      !streaming &&
+      !streamSettling
+    ) {
+      void (async () => {
+        await loadSessions();
+        await handleSelectSession(activeTask.sessionId);
+      })();
+      return;
+    }
+
+    if (!isRunningTaskStatus(activeTask.status)) return;
+    if (streaming || reconnectingRef.current) return;
+    if (connectedTaskIdRef.current === activeTask.taskId && streamStartedRef.current) {
+      return;
+    }
+
+    reconnectingRef.current = true;
+    void connectTaskStream(activeTask.taskId, activeTask.lastEventSeq, activeTask.lastEventSeq > 0)
+      .catch((e: unknown) => {
+        if (e instanceof Error && e.name === "AbortError") return;
+        const msg = e instanceof Error ? e.message : String(e);
+        toastError(msg || "重连任务流失败");
+      })
+      .finally(() => {
+        reconnectingRef.current = false;
+      });
+  }, [
+    isChat,
+    activeTask,
+    activeSessionId,
+    streaming,
+    streamSettling,
+    connectTaskStream,
+    loadSessions,
+    handleSelectSession,
+  ]);
 
   useEffect(() => {
     if (!streamStartedRef.current || !(streamDone || streamError)) return;
@@ -166,6 +304,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
             });
           }
         }
+        await refreshFromServer();
       } finally {
         if (turnGenerationRef.current !== turnGen) return;
         reset();
@@ -174,6 +313,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         streamSessionRef.current = null;
         pendingUserTextRef.current = null;
         streamFinalizeRef.current = false;
+        connectedTaskIdRef.current = null;
         setStreamSettling(false);
         setLiveMessages([]);
       }
@@ -187,6 +327,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     loadSessions,
     activeSessionId,
     handleSelectSession,
+    refreshFromServer,
   ]);
 
   useEffect(() => {
@@ -209,15 +350,21 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         }
       }
       if (name === "turn_start" && typeof data.intent === "string") {
-        setLiveIntent(data.intent);
-        setLiveProcessText("");
-        setLiveChatText("");
+        updateLiveText((prev) => ({
+          ...prev,
+          liveIntent: data.intent as string,
+          liveProcessText: "",
+          liveChatText: "",
+        }));
       }
       if (name === "process_text" && typeof data.delta === "string") {
-        setLiveProcessText((prev) => prev + data.delta);
+        updateLiveText((prev) => ({
+          ...prev,
+          liveProcessText: prev.liveProcessText + data.delta,
+        }));
       }
       if (name === "literature_intent" && typeof data.intent === "string") {
-        setLiveIntent(data.intent);
+        updateLiveText((prev) => ({ ...prev, liveIntent: data.intent as string }));
       }
       if (name === "literature_brief_assessment") {
         const rq = Array.isArray(data.core_research_questions)
@@ -232,21 +379,29 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           kw ? `关键词：${kw}` : "",
           hint ? `检索 hint：${hint}` : "",
         ].filter(Boolean);
-        if (parts.length) setLiveProcessText((prev) => (prev ? prev : parts.join("\n")));
+        if (parts.length) {
+          updateLiveText((prev) => ({
+            ...prev,
+            liveProcessText: prev.liveProcessText || parts.join("\n"),
+          }));
+        }
       }
       handleLiteratureExtensionEvent(name, data, extCtx);
     }
     extensionHandledRef.current = log.length;
-  }, [streamState.extensionLog, streamState.textContent, isChat, setActiveSessionId, loadSessions]);
+  }, [streamState.extensionLog, streamState.textContent, isChat, setActiveSessionId, loadSessions, updateLiveText]);
 
   useEffect(() => {
     if (streamState.status !== "streaming") return;
     const text = streamState.textContent ?? "";
     if (!text) return;
     if (workflowNeedsChat(liveIntent)) {
-      setLiveChatText(text.slice(0, 800));
+      updateLiveText((prev) => ({
+        ...prev,
+        liveChatText: text.slice(0, 800),
+      }));
     }
-  }, [streamState.textContent, streamState.status, liveIntent]);
+  }, [streamState.textContent, streamState.status, liveIntent, updateLiveText]);
 
   useEffect(() => {
     const pending = pendingUserTextRef.current;
@@ -293,6 +448,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       streamSessionRef.current = sessionId;
       clearClarificationUnreadTitle();
       pendingUserTextRef.current = trimmed;
+      setStreamPending(true);
       setLiveMessages([
         {
           id: `pending-user-${Date.now()}`,
@@ -302,19 +458,26 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       ]);
       reset();
       streamStartedRef.current = true;
-      setLiveIntent("new_topic");
-      setLiveProcessText("");
-      setLiveChatText("");
+      commitLiveText({
+        liveIntent: "new_topic",
+        liveProcessText: "",
+        liveChatText: "",
+      });
 
       try {
-        await start({
-          method: "POST",
-          body: {
-            message: trimmed,
-            session_id: sessionId ?? undefined,
-            ...(fetchUrls.length ? { fetch_urls: fetchUrls } : {}),
-          },
+        const row = await tasksApi.create({
+          message: trimmed,
+          session_id: sessionId ?? undefined,
+          ...(fetchUrls.length ? { fetch_urls: fetchUrls } : {}),
         });
+        const task = {
+          ...mapStatusRow(row),
+          startedAt: Date.now(),
+          lastEventSeq: 0,
+          notified: false,
+        };
+        setActiveTask(task);
+        await connectTaskStream(row.task_id, 0, false);
       } catch (e: unknown) {
         if (e instanceof Error && e.name === "AbortError") return;
         const errText = e instanceof Error ? e.message : String(e);
@@ -331,8 +494,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         turnSessionRef.current = null;
         streamSessionRef.current = null;
         streamFinalizeRef.current = false;
+        connectedTaskIdRef.current = null;
         setStreamSettling(false);
+        setStreamPending(false);
         reset();
+        clearTask();
       }
     },
     [
@@ -343,7 +509,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       loadSessions,
       clearMessages,
       reset,
-      start,
+      commitLiveText,
+      setActiveTask,
+      connectTaskStream,
+      clearTask,
     ],
   );
 
@@ -360,6 +529,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       streamState,
       liveMessages,
       streaming,
+      streamPending,
       streamSettling,
       liveIntent,
       liveProcessText,
@@ -372,6 +542,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       streamState,
       liveMessages,
       streaming,
+      streamPending,
       streamSettling,
       liveIntent,
       liveProcessText,

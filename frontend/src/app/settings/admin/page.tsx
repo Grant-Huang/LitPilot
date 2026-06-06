@@ -7,10 +7,11 @@ import {
   formatCapabilityParams,
   resolveCapabilityRefLabel,
 } from "@/lib/capabilityFormat";
+import { loadAdminBootstrap } from "@/lib/settingsBootstrap";
 import { settingsApiV2, type StorageSettings } from "@/lib/settingsApiV2";
 import { SettingsListPanel } from "./_ui";
 import { storageBackendLabel } from "./_storage";
-import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../_shared";
+import { SettingsErrorMsg, SettingsListSkeleton, errorMessage } from "../_shared";
 
 type Overview = Awaited<ReturnType<typeof settingsApiV2.getSystemOverview>>;
 type Capability = Awaited<ReturnType<typeof settingsApiV2.getSystemCapabilities>>["items"][number];
@@ -41,19 +42,13 @@ export default function AdminSettingsPage() {
   const [storage, setStorage] = useState<StorageSettings | null>(null);
 
   useEffect(() => {
-    void Promise.all([
-      settingsApiV2.getSystemOverview(),
-      settingsApiV2.getSystemCapabilities().then((r) => r.items || []),
-      settingsApiV2.listCredentials().then((r) => r.items || []),
-      settingsApiV2.listInstances().then((r) => r.items || []),
-    ])
-      .then(([ov, c, cred, inst]) => {
-        const overviewData = ov as Overview;
-        setOverview(overviewData);
-        setStorage(overviewData.storage);
-        setCaps(c as Capability[]);
-        setCredentials(cred as Credential[]);
-        setInstances(inst as Instance[]);
+    void loadAdminBootstrap()
+      .then((boot) => {
+        setOverview(boot.overview);
+        setStorage(boot.overview.storage);
+        setCaps(boot.caps);
+        setCredentials(boot.credentials);
+        setInstances(boot.instances);
       })
       .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
@@ -88,7 +83,11 @@ export default function AdminSettingsPage() {
   }, [caps, credentials, instances]);
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel>
+        <SettingsListSkeleton rows={6} />
+      </SettingsListPanel>
+    );
   }
 
   const storageRow = storage ? storageStatus(storage) : null;

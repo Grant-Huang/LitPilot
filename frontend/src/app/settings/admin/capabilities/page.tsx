@@ -20,7 +20,8 @@ import {
   searchProviderNeedsCredential,
   searchProviderOptions,
 } from "@/lib/webProviderOptions";
-import { SettingsErrorMsg, SettingsLoading, errorMessage } from "../../_shared";
+import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
+import { SettingsErrorMsg, SettingsListSkeleton, errorMessage } from "../../_shared";
 import { toastError } from "@/lib/toastFeedback";
 import {
   settingsApiV2,
@@ -101,6 +102,7 @@ function CapabilityCard({
         primary_ref,
         params,
       });
+      invalidateAdminBootstrap();
       onSaved(saved);
       setRowMsg("已保存");
     } catch (e: unknown) {
@@ -607,15 +609,11 @@ export default function AdminCapabilitiesPage() {
   const [instances, setInstances] = useState<SystemInstance[]>([]);
 
   useEffect(() => {
-    void Promise.all([
-      settingsApiV2.getSystemCapabilities(),
-      settingsApiV2.listCredentials(),
-      settingsApiV2.listInstances(),
-    ])
-      .then(([capRes, credRes, instRes]) => {
-        setCaps(capRes.items || []);
-        setCredentials(credRes.items || []);
-        setInstances(instRes.items || []);
+    void loadAdminBootstrap()
+      .then((boot) => {
+        setCaps(boot.caps);
+        setCredentials(boot.credentials);
+        setInstances(boot.instances);
       })
       .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
@@ -628,7 +626,11 @@ export default function AdminCapabilitiesPage() {
   );
 
   if (loading) {
-    return <SettingsLoading />;
+    return (
+      <SettingsListPanel>
+        <SettingsListSkeleton rows={5} />
+      </SettingsListPanel>
+    );
   }
 
   return (

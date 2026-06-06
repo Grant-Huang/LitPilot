@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Dropdown, Modal, message } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -12,14 +12,18 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import { helpCenterHref } from "@/lib/helpUrl";
+import {
+  pendingNavLabel,
+  useAppNavigation,
+} from "@/contexts/AppNavigationContext";
 
 const USER_NAME_KEY = "litpilot:user-name";
 const ACTIVE_SESSION_KEY = "litpilot:active-session";
 const ARTIFACT_KEY = "litpilot:artifact-visible";
 
 export function LitPilotSidebarUser() {
-  const router = useRouter();
   const pathname = usePathname();
+  const { pendingHref, navigate } = useAppNavigation();
   const [userName, setUserName] = useState("研究员");
   const [infoOpen, setInfoOpen] = useState(false);
 
@@ -47,13 +51,13 @@ export function LitPilotSidebarUser() {
         }
         message.success("已退出");
         if (pathname !== "/chat") {
-          router.push("/chat");
+          navigate("/chat");
         } else {
           window.location.reload();
         }
       },
     });
-  }, [pathname, router]);
+  }, [pathname, navigate]);
 
   const menuItems: MenuProps["items"] = [
     {
@@ -73,14 +77,14 @@ export function LitPilotSidebarUser() {
     {
       key: "settings-personal",
       icon: <SettingOutlined />,
-      label: "个人设置",
-      onClick: () => router.push("/settings/personal"),
+      label: pendingNavLabel("/settings/personal", "个人设置", pendingHref),
+      onClick: () => navigate("/settings/personal"),
     },
     {
       key: "settings-admin",
       icon: <SettingOutlined />,
-      label: "管理员配置",
-      onClick: () => router.push("/settings/admin"),
+      label: pendingNavLabel("/settings/admin", "管理员配置", pendingHref),
+      onClick: () => navigate("/settings/admin"),
     },
     { type: "divider" },
     {
