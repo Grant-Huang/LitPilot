@@ -6,6 +6,7 @@ import type {
 import {
   fetchProviderNeedsCredential,
   searchProviderNeedsCredential,
+  searchProviderOptionalCredential,
 } from "@/lib/webProviderOptions";
 
 type PrimaryRef = { kind?: string; id?: string } | null | undefined;
@@ -91,7 +92,7 @@ export function formatCapabilityParams(
 ): string {
   const p = params || {};
   if (capId === "web_search") {
-    const prov = String(p.search_provider ?? "native");
+    const prov = String(p.search_provider ?? "multi_academic");
     return `${prov} · 检索 ${Number(p.search_max_results ?? 8)} · 重试 ${Number(p.search_retry_count ?? 0)}`;
   }
   if (capId === "web_fetch") {
@@ -112,7 +113,7 @@ export function capabilityNeedsCredentialRef(
 ): boolean {
   const p = params ?? cap.params ?? {};
   if (cap.capability_id === "web_search") {
-    return searchProviderNeedsCredential(String(p.search_provider ?? "native"));
+    return searchProviderNeedsCredential(String(p.search_provider ?? "multi_academic"));
   }
   if (cap.capability_id === "web_fetch") {
     return fetchProviderNeedsCredential(String(p.fetch_provider ?? "native"));
@@ -135,20 +136,32 @@ export function capabilityRefOptions(
     };
   }
   if (cap.capability_id === "web_search") {
-    const provider = String(cap.params?.search_provider ?? "native");
-    if (!searchProviderNeedsCredential(provider)) {
-      return { kind: "", items: [] };
+    const provider = String(cap.params?.search_provider ?? "multi_academic");
+    if (searchProviderNeedsCredential(provider)) {
+      const credType = provider === "brave" ? "brave" : "tavily";
+      return {
+        kind: "credential",
+        items: credentials
+          .filter((c) => String(c.type || "") === credType)
+          .map((c) => ({
+            id: c.id,
+            label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置"}`,
+          })),
+      };
     }
-    const credType = provider === "brave" ? "brave" : "tavily";
-    return {
-      kind: "credential",
-      items: credentials
-        .filter((c) => String(c.type || "") === credType)
-        .map((c) => ({
-          id: c.id,
-          label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置"}`,
-        })),
-    };
+    const optional = searchProviderOptionalCredential(provider);
+    if (optional) {
+      return {
+        kind: "credential",
+        items: credentials
+          .filter((c) => String(c.type || "") === optional)
+          .map((c) => ({
+            id: c.id,
+            label: `${c.name} · ${c.has_secret ? c.masked_secret : "未配置（可选）"}`,
+          })),
+      };
+    }
+    return { kind: "", items: [] };
   }
   if (cap.capability_id === "web_fetch") {
     const provider = String(cap.params?.fetch_provider ?? "native");
@@ -173,8 +186,9 @@ export function capabilityRefLabel(
   params?: Record<string, unknown>,
 ): string {
   if (capId === "web_search") {
-    const p = String(params?.search_provider ?? "native");
+    const p = String(params?.search_provider ?? "multi_academic");
     if (p === "brave" || p === "tavily") return "web_search 凭据";
+    if (searchProviderOptionalCredential(p)) return "Semantic Scholar Key（可选）";
     return "凭据";
   }
   if (capId === "web_fetch") {

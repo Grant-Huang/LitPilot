@@ -15,12 +15,13 @@ from typing import Any
 from app.agents.tools.pdf_text import normalize_pdf_extract_backend
 from app.agents.tools.providers import brave as brave_provider
 from app.agents.tools.providers import jina as jina_provider
+from app.agents.tools.providers import multi_academic as multi_academic_provider
 from app.agents.tools.providers import native_fetch as native_fetch_provider
 from app.agents.tools.providers import native_search as native_search_provider
 from app.agents.tools.providers import openalex as openalex_provider
 from app.agents.tools.providers import tavily as tavily_provider
 FETCH_PROVIDERS = frozenset({"jina", "native"})
-SEARCH_PROVIDERS = frozenset({"tavily", "brave", "openalex", "native"})
+SEARCH_PROVIDERS = frozenset({"tavily", "brave", "openalex", "native", "multi_academic"})
 
 
 def normalize_fetch_provider(raw: str | None) -> str:
@@ -29,8 +30,8 @@ def normalize_fetch_provider(raw: str | None) -> str:
 
 
 def normalize_search_provider(raw: str | None) -> str:
-    p = (raw or "native").strip().lower()
-    return p if p in SEARCH_PROVIDERS else "native"
+    p = (raw or "multi_academic").strip().lower()
+    return p if p in SEARCH_PROVIDERS else "multi_academic"
 
 
 SEARCH_PROVIDER_LABELS: dict[str, str] = {
@@ -38,6 +39,7 @@ SEARCH_PROVIDER_LABELS: dict[str, str] = {
     "brave": "Brave Search",
     "openalex": "OpenAlex",
     "native": "native (DDG)",
+    "multi_academic": "multi_academic (arXiv+OA+SS)",
 }
 
 FETCH_PROVIDER_LABELS: dict[str, str] = {
@@ -144,6 +146,15 @@ async def web_search_query(
     exclude_domains: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     p = normalize_search_provider(provider)
+    if p == "multi_academic":
+        s2_key = await _resolve_s2_api_key(None)
+        return await multi_academic_provider.search(
+            query,
+            max_results=max_results,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            s2_api_key=s2_key or "",
+        )
     if p == "openalex":
         return await openalex_provider.search(
             query,

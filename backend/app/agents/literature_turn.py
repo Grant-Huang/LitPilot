@@ -183,7 +183,11 @@ async def stream_literature_turn(
 
     search_api_key = await get_web_search_api_key()
     search_provider = await get_web_search_provider()
-    if _intent_needs_web_search(intent) and search_provider not in ("openalex", "native"):
+    if _intent_needs_web_search(intent) and search_provider not in (
+        "openalex",
+        "native",
+        "multi_academic",
+    ):
         if not search_api_key:
             from app.agents.tools.web_providers import search_provider_display
 

@@ -289,5 +289,5 @@ def test_ensure_default_capabilities_backfills_web_search_and_fetch(
     web_fetch = next(
         c for c in store.list_system_capabilities() if c["capability_id"] == "web_fetch"
     )
-    assert web_search["primary_ref"]["id"] == cred_templates["tavily"]
+    assert web_search["primary_ref"]["id"] == cred_templates["semantic_scholar"]
     assert web_fetch["primary_ref"]["id"] == cred_templates["jina"]

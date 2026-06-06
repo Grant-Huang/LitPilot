@@ -203,7 +203,7 @@ def test_ensure_capability_param_defaults_backfills(store: FileStore) -> None:
     assert params["include_domains"] == list(ACADEMIC_SEARCH_DOMAINS)
     assert params["exclude_domains"] == list(DEFAULT_EXCLUDE_DOMAINS)
     assert params["search_depth"] == "advanced"
-    assert params["search_provider"] == "native"
+    assert params["search_provider"] == "multi_academic"
 
 
 def test_cap_params_merge_override_params(store: FileStore) -> None:

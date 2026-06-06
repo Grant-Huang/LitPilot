@@ -13,14 +13,14 @@ const base: LibraryItem = {
   display_index: 5,
   title: "https://example.com/paper",
   authors: [],
-  url: "https://example.com/paper.pdf",
+  url: "https://example.com/research-paper.pdf",
   availability: {},
   citations: { apa: "[5] Author (2024). Title." },
 };
 
 describe("libraryDisplay", () => {
   it("resolveDisplayTitle from url path", () => {
-    expect(resolveDisplayTitle(base)).toBe("paper");
+    expect(resolveDisplayTitle(base)).toBe("research paper");
   });
 
   it("formatCitationForList renumbers", () => {

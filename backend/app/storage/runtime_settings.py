@@ -15,7 +15,7 @@ from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUD
 
 WEB_SEARCH_PARAM_DEFAULTS: dict[str, Any] = {
 
-    "search_provider": "native",
+    "search_provider": "multi_academic",
 
     "search_max_results": 8,
 
@@ -250,6 +250,15 @@ def _credential_secret(credentials: list[dict[str, Any]], cred_id: str | None) -
     return str(cred.get("secret") or "")
 
 
+def _credential_secret_by_type(credentials: list[dict[str, Any]], cred_type: str) -> str:
+    for cred in credentials:
+        if str(cred.get("type") or "") == cred_type:
+            secret = str(cred.get("secret") or "").strip()
+            if secret:
+                return secret
+    return ""
+
+
 
 
 
@@ -305,7 +314,7 @@ def build_runtime_settings(
 
     fetch_provider = str(fetch.get("fetch_provider") or "native").strip().lower()
 
-    search_provider = str(web.get("search_provider") or "native").strip().lower()
+    search_provider = str(web.get("search_provider") or "multi_academic").strip().lower()
 
     fetch_cred_id = str(fetch_ref.get("id") or "") if fetch_ref.get("kind") == "credential" else ""
 
@@ -343,13 +352,19 @@ def build_runtime_settings(
 
     brave_key = search_cred_secret if search_cred_type == "brave" else ""
 
+    s2_api_key = search_cred_secret if search_cred_type == "semantic_scholar" else ""
+
     if search_provider == "tavily" and not search_api_key:
 
-        search_api_key = search_cred_secret if search_cred_type != "brave" else ""
+        search_api_key = _credential_secret_by_type(credentials, "tavily")
 
     if search_provider == "brave" and not brave_key:
 
-        brave_key = search_cred_secret
+        brave_key = _credential_secret_by_type(credentials, "brave")
+
+    if search_provider == "multi_academic" and not s2_api_key:
+
+        s2_api_key = _credential_secret_by_type(credentials, "semantic_scholar")
 
 
 
@@ -386,6 +401,8 @@ def build_runtime_settings(
         ),
 
         "search_provider": search_provider,
+
+        "s2_api_key": s2_api_key,
 
         "fetch_provider": fetch_provider,
 

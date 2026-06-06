@@ -18,6 +18,12 @@ export function searchProviderNeedsCredential(provider: string): boolean {
   return p === "tavily" || p === "brave";
 }
 
+export function searchProviderOptionalCredential(provider: string): string | null {
+  const p = provider.trim().toLowerCase();
+  if (p === "multi_academic") return "semantic_scholar";
+  return null;
+}
+
 export function fetchProviderNeedsCredential(provider: string): boolean {
   return provider.trim().toLowerCase() === "jina";
 }
@@ -35,6 +41,11 @@ export function searchProviderOptions(
       value: "brave",
       label: "Brave Search（需 API Key，通用）",
       disabled: !hasCredentialSecret(credentials, "brave"),
+    },
+    {
+      value: "multi_academic",
+      label: "multi_academic（arXiv+CrossRef+PMC+OpenAlex+SS，无需 Key）",
+      disabled: false,
     },
     {
       value: "openalex",

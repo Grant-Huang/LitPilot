@@ -55,7 +55,11 @@ async def get_web_search_api_key() -> str:
 
 
 async def get_s2_api_key() -> str:
-    """Optional Semantic Scholar Graph API key (SEMANTIC_SCHOLAR_API_KEY)."""
+    """Semantic Scholar Graph API key (settings credential or SEMANTIC_SCHOLAR_API_KEY)."""
+    s = await get_merged_settings()
+    key = str(s.get("s2_api_key") or "").strip()
+    if key:
+        return key
     return str(os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")).strip()
 
 

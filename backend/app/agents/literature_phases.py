@@ -109,6 +109,7 @@ async def stream_search_phase(
     pass_total: int = 1,
     emit_stage_lifecycle: bool = True,
     search_provider: str | None = None,
+    emit_pass_hits: bool = False,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.tools.web_providers import normalize_search_provider
 
@@ -233,6 +234,15 @@ async def stream_search_phase(
         out["answer"] = answer
         out["tool_hit_count"] = len(hits)
         out["hits_before_corpus"] = pre_corpus_hit_count
+        if emit_pass_hits and hits:
+            yield (
+                "literature_search_pass_hits",
+                {
+                    "hits": out["hits"],
+                    "pass_index": pass_index,
+                    "pass_total": pass_total,
+                },
+            )
     except Exception:
         search_failed = True
         if not upload_urls:
@@ -369,6 +379,11 @@ async def stream_expanded_search_phase(
         ans = str(pass_out.get("answer") or "").strip()
         if ans:
             answers.append(ans)
+
+        yield (
+            "literature_search_pass_hits",
+            {"hits": pass_hits, "pass_index": idx, "pass_total": total},
+        )
 
     merge_cap = search_max_results if search_max_results > 0 else None
     pass_hit_counts = [len(h) for h in hits_lists]

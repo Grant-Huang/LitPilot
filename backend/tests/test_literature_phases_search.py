@@ -155,3 +155,42 @@ async def test_expanded_search_all_corpus_dupes_does_not_raise() -> None:
             pass
 
     assert out.get("hits") == []
+
+
+@pytest.mark.asyncio
+async def test_single_search_emits_pass_hits_for_pipeline() -> None:
+    """单 query 检索完成后应 yield pass_hits，供流水线 fetch 消费。"""
+    from app.agents.literature_phases import stream_search_phase
+
+    async def _empty_narrate(*_args, **_kwargs):
+        return
+        yield  # pragma: no cover — async generator
+
+    mock_search = AsyncMock(return_value=_fake_search_result(3))
+    events: list[tuple[str, dict]] = []
+    think_acc = ThinkAccumulator()
+
+    with patch("app.agents.literature_phases.cached_web_search", mock_search):
+        with patch("app.agents.literature_phases.narrate_phase_stream", _empty_narrate):
+            async for ev in stream_search_phase(
+                user_message="topic",
+                query="AI-native MOM survey",
+                search_api_key="",
+                search_max_results=8,
+                search_retry_count=0,
+                fetch_retry_delay_ms=0,
+                source_mode="merge",
+                upload_count=0,
+                skip_web_search=False,
+                upload_urls=[],
+                think_acc=think_acc,
+                planner_ctx=None,
+                execution_trace={},
+                emit_pass_hits=True,
+            ):
+                events.append(ev)
+
+    pass_hits = [ev for ev in events if ev[0] == "literature_search_pass_hits"]
+    assert len(pass_hits) == 1
+    assert len(pass_hits[0][1].get("hits") or []) == 3
+    assert pass_hits[0][1].get("pass_total") == 1

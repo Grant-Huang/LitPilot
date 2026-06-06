@@ -29,6 +29,7 @@ from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
 from app.agents.literature_turn_graph import sync_graph_node, sync_graph_nodes
 from app.agents.literature_turn_helpers import resolve_search_queries
+from app.agents.pipelined_fetch import PipelinedFetchCoordinator
 from app.agents.search_expansion import expand_search_queries
 from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
@@ -96,6 +97,9 @@ class RetrievalPipelineContext:
     outline_obj: LiteratureOutline | None = None
     sub_topics_for_search: list[Any] = field(default_factory=list)
     search_hit_exclusions: list[str] = field(default_factory=list)
+    pipelined_fetch_results: list[tuple[dict[str, str], str, str | None]] = field(
+        default_factory=list
+    )
     early_return: bool = False
 
 
@@ -203,8 +207,24 @@ async def run_retrieval_pipeline(
                 if len(expanded_queries) == 1:
                     query = expanded_queries[0]
 
-            if len(expanded_queries) > 1:
-                async for ev in stream_expanded_search_phase(
+            fetch_cap_early = effective_fetch_cap(ctx.max_fetch_urls, ctx.upload_urls)
+            pipe_coord: PipelinedFetchCoordinator | None = None
+            if run_fetch and not skip_web_search:
+                pipe_coord = PipelinedFetchCoordinator(
+                    fetch_api_key=ctx.fetch_api_key,
+                    llm=ctx.planner_llm,
+                    parallel=ctx.parallel,
+                    timeout_sec=float(ctx.timeout_sec),
+                    fetch_retry_count=ctx.fetch_retry_count,
+                    fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
+                    fetch_provider=ctx.fetch_provider,
+                    max_urls=fetch_cap_early,
+                    corpus=_search_phase_corpus(ctx),
+                )
+
+            use_expanded = len(expanded_queries) > 1
+            if use_expanded:
+                search_stream = stream_expanded_search_phase(
                     user_message=ctx.route_message,
                     queries=expanded_queries,
                     search_api_key=ctx.search_api_key or "",
@@ -227,10 +247,9 @@ async def run_retrieval_pipeline(
                     search_enable_junk_filter=ctx.search_enable_junk_filter,
                     exclude_title_substrings=ctx.search_hit_exclusions,
                     search_provider=ctx.search_provider,
-                ):
-                    yield ev
+                )
             else:
-                async for ev in stream_search_phase(
+                search_stream = stream_search_phase(
                     user_message=ctx.route_message,
                     query=query,
                     search_api_key=ctx.search_api_key or "",
@@ -253,8 +272,26 @@ async def run_retrieval_pipeline(
                     search_enable_junk_filter=ctx.search_enable_junk_filter,
                     exclude_title_substrings=ctx.search_hit_exclusions,
                     search_provider=ctx.search_provider,
-                ):
-                    yield ev
+                    emit_pass_hits=pipe_coord is not None,
+                )
+
+            async for ev in search_stream:
+                if pipe_coord and ev[0] == "literature_search_pass_hits":
+                    n = pipe_coord.enqueue_pass_hits(list(ev[1].get("hits") or []))
+                    if n:
+                        pass_label = (
+                            f"第 {ev[1].get('pass_index')}/{ev[1].get('pass_total')} 轮"
+                            if use_expanded
+                            else "单轮"
+                        )
+                        async for think_ev in emit_system_think_line(
+                            f"⟦sys⟧检索{pass_label}命中 {n} 篇，已加入后台 fetch 队列。⟦/sys⟧",
+                            accumulator=ctx.think_acc,
+                        ):
+                            yield think_ev
+                yield ev
+            if pipe_coord:
+                ctx.pipelined_fetch_results = await pipe_coord.finalize()
         except ValueError as e:
             raw = str(e)
             if "allowed_domains and blocked_domains" in raw:
@@ -344,6 +381,17 @@ async def run_retrieval_pipeline(
             or not working.has_url(str(h.get("url") or ""))
         ]
 
+        pre_fetched_urls = {
+            str(h.get("url") or "")
+            for h, md, err in ctx.pipelined_fetch_results
+            if md and not err
+        }
+        if pre_fetched_urls:
+            fetch_hits = [
+                h for h in fetch_hits
+                if str(h.get("url") or "") not in pre_fetched_urls
+            ]
+
         yield (
             "literature_source",
             {
@@ -357,8 +405,19 @@ async def run_retrieval_pipeline(
             },
         )
 
-        if fetch_hits:
+        if fetch_hits or ctx.pipelined_fetch_results:
             fetch_out: dict[str, Any] = {}
+            if ctx.pipelined_fetch_results:
+                for hit, md, err in ctx.pipelined_fetch_results:
+                    working.fetch_results.append((hit, md or "", err))
+                    working.fetch_hits.append(hit)
+                    working.register_url(str(hit.get("url") or ""))
+                    if md and not err:
+                        block = md[: ctx.max_source_chars]
+                        if not block.lstrip().startswith("##"):
+                            header = hit.get("title") or hit.get("url") or ""
+                            block = f"## [网页材料] {header}\n\n{block}"
+                        working.sources_md.append(block)
             async for ev in stream_fetch_phase(
                 user_message=ctx.user_message,
                 fetch_hits=fetch_hits,

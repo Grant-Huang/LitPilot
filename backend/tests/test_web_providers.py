@@ -44,10 +44,10 @@ def test_pdf_bytes_to_text_pypdf_minimal() -> None:
 def test_normalize_providers() -> None:
     assert normalize_fetch_provider("native") == "native"
     assert normalize_fetch_provider("unknown") == "native"
-    assert normalize_search_provider("openalex") == "openalex"
+    assert normalize_search_provider("multi_academic") == "multi_academic"
     assert normalize_search_provider("native") == "native"
     assert normalize_search_provider("brave") == "brave"
-    assert normalize_search_provider("") == "native"
+    assert normalize_search_provider("") == "multi_academic"
 
 
 def test_validate_search_domains_xor() -> None:
@@ -228,8 +228,13 @@ async def test_native_web_search_parses_html(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_native_fetch_sbc_ojs_pdf() -> None:
+async def test_native_fetch_sbc_ojs_pdf(monkeypatch) -> None:
     url = "https://sol.sbc.org.br/index.php/webmedia/article/view/38018"
+
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.pdf_bytes_to_text",
+        lambda raw, backend="pypdf": "x" * 600,
+    )
     result = await fetch_bytes(url, timeout=90.0)
     assert result.resolved_pdf_url and "article/download" in result.resolved_pdf_url
     if result.is_pdf:
@@ -252,6 +257,10 @@ async def test_native_fetch_s2_resolves_doi_ojs_pdf(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.agents.tools.source_resolve.fetch_s2_paper_record",
         fake_s2_record,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.pdf_bytes_to_text",
+        lambda raw, backend="pypdf": "y" * 600,
     )
     result = await fetch_bytes(s2_url, timeout=90.0)
     assert result.is_pdf

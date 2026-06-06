@@ -457,6 +457,42 @@ async def test_credential(credential_id: str, body: CredentialTestBody):
             label = SEARCH_PROVIDER_LABELS.get("tavily", "tavily")
             return err(f"{label} 请求失败: {e}", _credential_test_payload(c))
 
+    if ctype == "semantic_scholar":
+        if not secret:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            return err("未配置 Semantic Scholar API Key", _credential_test_payload(c))
+        try:
+            from app.agents.tools.providers.academic import semantic_scholar as ss_provider
+
+            rows = await ss_provider.search(
+                body.query or "transformer attention",
+                limit=3,
+                min_year=2017,
+                api_key=secret,
+            )
+            hits = len(rows)
+            c["status"] = "ok"
+            c["last_verified_at"] = now
+            _persist()
+            return ok(_credential_test_payload(c, ok=True, hits=hits))
+        except httpx.HTTPStatusError as e:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            if e.response.status_code == 429:
+                return err(
+                    "Semantic Scholar 429：请稍后重试或检查 Key 配额。",
+                    _credential_test_payload(c),
+                )
+            return err(f"Semantic Scholar 请求失败: {e}", _credential_test_payload(c))
+        except httpx.HTTPError as e:
+            c["status"] = "fail"
+            c["last_verified_at"] = now
+            _persist()
+            return err(f"Semantic Scholar 请求失败: {e}", _credential_test_payload(c))
+
     if ctype == "brave":
         if not secret:
             c["status"] = "fail"

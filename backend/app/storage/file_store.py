@@ -542,6 +542,8 @@ class FileStore:
             self._save_config_list(self.system_instances_path, instances)
 
         # capabilities (bindings + system params)
+        from app.storage.runtime_settings import WEB_SEARCH_PARAM_DEFAULTS
+
         capabilities: list[dict[str, Any]] = []
 
         def cap(
@@ -590,15 +592,15 @@ class FileStore:
         cap(
             "web_search",
             "web_search",
-            primary_ref={"kind": "credential", "id": cred_by_key.get("tavily")},
+            primary_ref={
+                "kind": "credential",
+                "id": cred_by_key.get("semantic_scholar") or cred_by_key.get("tavily"),
+            },
             params={
+                **WEB_SEARCH_PARAM_DEFAULTS,
+                "search_provider": "multi_academic",
                 "search_max_results": int(legacy.get("search_max_results") or 8),
                 "search_retry_count": int(legacy.get("search_retry_count") or 0),
-                "include_domains": list(ACADEMIC_SEARCH_DOMAINS),
-                "exclude_domains": list(DEFAULT_EXCLUDE_DOMAINS),
-                "search_depth": "advanced",
-                "enforce_domain_filter": True,
-                "enable_junk_filter": True,
             },
         )
         cap(
@@ -702,6 +704,7 @@ class FileStore:
         review_id = self._instance_id_by_name("review-main")
         orch_id = self._instance_id_by_name("orchestrator") or review_id
         tavily_id = self._credential_id_by_type("tavily")
+        ss_id = self._credential_id_by_type("semantic_scholar")
         jina_id = self._credential_id_by_type("jina")
         prompt_defaults = deploy_settings()
 
@@ -736,10 +739,14 @@ class FileStore:
                 "capability_id": "web_search",
                 "label": "web_search",
                 "enabled": True,
-                "primary_ref": {"kind": "credential", "id": tavily_id} if tavily_id else None,
+                "primary_ref": {
+                    "kind": "credential",
+                    "id": ss_id or tavily_id,
+                } if (ss_id or tavily_id) else None,
                 "override_params": {},
                 "params": {
                     **WEB_SEARCH_PARAM_DEFAULTS,
+                    "search_provider": "multi_academic",
                     "search_max_results": int(
                         legacy.get("search_max_results")
                         or legacy.get("tavily_max_results")
@@ -1016,7 +1023,7 @@ class FileStore:
             "orchestrator": inst_by_key.get("orchestrator"),
         }
         cap_cred_by_capability = {
-            "web_search": cred_by_key.get("tavily"),
+            "web_search": cred_by_key.get("semantic_scholar") or cred_by_key.get("tavily"),
             "web_fetch": cred_by_key.get("jina"),
         }
         for cap in caps:
@@ -1099,6 +1106,7 @@ class FileStore:
         if changed:
             self._save_config_list(self.system_capabilities_path, caps)
         self._ensure_brave_credential()
+        self._ensure_semantic_scholar_credential()
         self._ensure_provider_capability_labels()
 
     def _ensure_provider_capability_labels(self) -> None:
@@ -1131,6 +1139,29 @@ class FileStore:
                 "id": uuid.uuid4().hex,
                 "type": "brave",
                 "name": "Brave Search · default",
+                "secret": "",
+                "base_url": "",
+                "group_id": "",
+                "status": "unknown",
+                "last_verified_at": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        self._save_config_list(self.system_credentials_path, creds)
+
+    def _ensure_semantic_scholar_credential(self) -> None:
+        creds = self._load_config_list(self.system_credentials_path)
+        if any(str(c.get("type") or "") == "semantic_scholar" for c in creds):
+            return
+        from datetime import datetime, timezone as _tz
+
+        now = datetime.now(_tz.utc).isoformat()
+        creds.append(
+            {
+                "id": uuid.uuid4().hex,
+                "type": "semantic_scholar",
+                "name": "Semantic Scholar · default",
                 "secret": "",
                 "base_url": "",
                 "group_id": "",

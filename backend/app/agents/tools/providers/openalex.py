@@ -93,6 +93,7 @@ async def search(
             "url": page_url,
             "title": _openalex_title(work),
             "snippet": _work_snippet(work),
+            "source": "OpenAlex",
         })
 
     if include_domains:

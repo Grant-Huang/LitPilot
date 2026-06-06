@@ -7,7 +7,7 @@ export const CAP_TIPS = {
     "仅使用对话中用户提供的链接，跳过网络检索。适合已有明确文献列表的场景。",
 
   search_provider:
-    "检索后端：native 用 DuckDuckGo HTML（无需 Key）；OpenAlex 学术索引（无需 Key）；Tavily/Brave 需凭据页配置 API Key。",
+    "检索后端：multi_academic 并行 arXiv/CrossRef/PMC/OpenAlex/Semantic Scholar（默认，无需 Key）；可在凭据页配置 Semantic Scholar Key 提升 SS 配额；Tavily/Brave 需 API Key。",
   search_depth_basic: "basic：更快、结果较少。",
   search_depth_advanced: "advanced：更深检索（仅 Tavily），结果更全、更慢。",
   enforce_domain_filter:

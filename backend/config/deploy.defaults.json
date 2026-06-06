@@ -45,6 +45,12 @@
       "name": "LLM · minimax_cn · primary",
       "base_url": "https://api.minimax.chat/v1",
       "group_id": ""
+    },
+    {
+      "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f04",
+      "key": "semantic_scholar",
+      "type": "semantic_scholar",
+      "name": "Semantic Scholar · default"
     }
   ],
   "instances": [

@@ -39,7 +39,9 @@ describe("capabilityFormat", () => {
       params: { search_max_results: 10, search_retry_count: 1 },
     } as SystemCapability;
     expect(resolveCapabilityRefLabel(cap, creds, insts)).toBe("Tavily Key");
-    expect(formatCapabilityParams("web_search", cap.params)).toBe("检索 10 · 重试 1");
+    expect(formatCapabilityParams("web_search", cap.params)).toBe(
+      "multi_academic · 检索 10 · 重试 1",
+    );
   });
 
   it("builds ref options by capability id", () => {
