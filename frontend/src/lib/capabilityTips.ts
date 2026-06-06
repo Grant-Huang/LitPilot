@@ -2,9 +2,15 @@
 
 export const CAP_TIPS = {
   literature_source_merge:
-    "合并：用户粘贴的 URL 与 web_search 检索结果一起进入抓取队列。仅用户列表：只用用户提供的链接，不调用 web_search。",
+    "合并：用户粘贴的 URL 与 web_search 检索结果一起进入抓取队列；用户链接会优先开始抓取，并与检索并行。",
   literature_source_user_only:
     "仅使用对话中用户提供的链接，跳过网络检索。适合已有明确文献列表的场景。",
+  merge_search_budget_full:
+    "full：merge 模式下检索条数不受额外限制（仍受 web_search 检索条数上限约束）。",
+  merge_search_budget_lite:
+    "lite：当用户链接 ≥10 条时，将检索命中上限压至 20，把 fetch 预算留给用户链接。",
+  search_parallel:
+    "多 query 扩展检索时的并行轮数（1=串行）；仅影响 literature 多轮检索，不增加单 query 并发。",
 
   search_provider:
     "检索后端：multi_academic 并行 arXiv/CrossRef/PMC/OpenAlex/Semantic Scholar（默认，无需 Key）；可在凭据页配置 Semantic Scholar Key 提升 SS 配额；Tavily/Brave 需 API Key。",

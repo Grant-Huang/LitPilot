@@ -72,6 +72,16 @@ async def get_session_review(session_id: str):
     return ok(review)
 
 
+@router.get("/{session_id}/review/{filename}")
+async def get_session_review_version(session_id: str, filename: str):
+    if not get_store().get_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    review = get_store().get_review_by_filename(session_id, filename)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review version not found")
+    return ok(review)
+
+
 @router.get("/{session_id}/matrix")
 async def get_session_matrix(session_id: str):
     if not get_store().get_session(session_id):

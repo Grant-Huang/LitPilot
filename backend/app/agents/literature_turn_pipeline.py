@@ -27,9 +27,10 @@ from app.agents.literature_router import LiteratureRouterResult
 from app.agents.literature_source import should_skip_web_search
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
+from app.core.stream_events import chat_text
 from app.agents.literature_turn_graph import sync_graph_node, sync_graph_nodes
 from app.agents.literature_turn_helpers import resolve_search_queries
-from app.agents.pipelined_fetch import PipelinedFetchCoordinator
+from app.agents.fetch_coordinator import FetchCoordinator
 from app.agents.search_expansion import expand_search_queries
 from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
@@ -97,6 +98,9 @@ class RetrievalPipelineContext:
     outline_obj: LiteratureOutline | None = None
     sub_topics_for_search: list[Any] = field(default_factory=list)
     search_hit_exclusions: list[str] = field(default_factory=list)
+    search_parallel: int = 1
+    search_degraded: bool = False
+    fetch_coord_metrics: dict[str, Any] = field(default_factory=dict)
     pipelined_fetch_results: list[tuple[dict[str, str], str, str | None]] = field(
         default_factory=list
     )
@@ -142,14 +146,17 @@ async def run_retrieval_pipeline(
             ctx.hits = user_url_hits(retry_urls)
             run_fetch = True
         else:
-            yield ("text", {"delta": "没有可重试的失败链接。"})
+            msg = "没有可重试的失败链接。"
+            yield chat_text(msg)
             upsert_stage(ctx.execution_trace, "完成", "done")
             ctx.finalize_ctx.corpus = working
             ctx.finalize_ctx.fetch_results = []
             ctx.finalize_ctx.cite_records = []
             ctx.finalize_ctx.failed_literature = working.failed_literature
             ctx.finalize_ctx.intent = intent
-            await finalize_turn(ctx.finalize_ctx, main_text="没有可重试的失败链接。")
+            ctx.finalize_ctx.chat_text = msg
+            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
+            yield end_ev
             yield ("stage", {"name": "完成", "state": "done"})
             ctx.early_return = True
             return
@@ -208,9 +215,9 @@ async def run_retrieval_pipeline(
                     query = expanded_queries[0]
 
             fetch_cap_early = effective_fetch_cap(ctx.max_fetch_urls, ctx.upload_urls)
-            pipe_coord: PipelinedFetchCoordinator | None = None
+            pipe_coord: FetchCoordinator | None = None
             if run_fetch and not skip_web_search:
-                pipe_coord = PipelinedFetchCoordinator(
+                pipe_coord = FetchCoordinator(
                     fetch_api_key=ctx.fetch_api_key,
                     llm=ctx.planner_llm,
                     parallel=ctx.parallel,
@@ -218,9 +225,20 @@ async def run_retrieval_pipeline(
                     fetch_retry_count=ctx.fetch_retry_count,
                     fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
                     fetch_provider=ctx.fetch_provider,
-                    max_urls=fetch_cap_early,
+                    fetch_cap=fetch_cap_early,
+                    upload_urls=ctx.upload_urls if ctx.source_mode == "merge" else None,
                     corpus=_search_phase_corpus(ctx),
                 )
+                if ctx.upload_urls and ctx.source_mode == "merge":
+                    user_started = pipe_coord.start_user_urls(ctx.upload_urls)
+                    if user_started:
+                        yield (
+                            "literature_fetch_user_start",
+                            {
+                                "count": user_started,
+                                "urls": ctx.upload_urls[:user_started],
+                            },
+                        )
 
             use_expanded = len(expanded_queries) > 1
             if use_expanded:
@@ -247,6 +265,7 @@ async def run_retrieval_pipeline(
                     search_enable_junk_filter=ctx.search_enable_junk_filter,
                     exclude_title_substrings=ctx.search_hit_exclusions,
                     search_provider=ctx.search_provider,
+                    search_parallel=ctx.search_parallel,
                 )
             else:
                 search_stream = stream_search_phase(
@@ -291,7 +310,10 @@ async def run_retrieval_pipeline(
                             yield think_ev
                 yield ev
             if pipe_coord:
-                ctx.pipelined_fetch_results = await pipe_coord.finalize()
+                pipe_coord.mark_search_ended()
+                coord_result = await pipe_coord.finalize()
+                ctx.pipelined_fetch_results = coord_result.results
+                ctx.fetch_coord_metrics = coord_result.metrics.to_dict()
         except ValueError as e:
             raw = str(e)
             if "allowed_domains and blocked_domains" in raw:
@@ -301,13 +323,15 @@ async def run_retrieval_pipeline(
                 )
             else:
                 fail_msg = raw
-            yield ("text", {"delta": fail_msg})
+            yield chat_text(fail_msg)
             ctx.finalize_ctx.corpus = working
             ctx.finalize_ctx.fetch_results = []
             ctx.finalize_ctx.cite_records = []
             ctx.finalize_ctx.failed_literature = working.failed_literature
             ctx.finalize_ctx.intent = intent
-            await finalize_turn(ctx.finalize_ctx, main_text=fail_msg)
+            ctx.finalize_ctx.chat_text = fail_msg
+            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=fail_msg)
+            yield end_ev
             ctx.early_return = True
             return
         except Exception as e:
@@ -316,13 +340,15 @@ async def run_retrieval_pipeline(
             search_label = search_provider_display(ctx.search_provider)
             if not ctx.upload_urls:
                 fail_msg = f"{search_label} 检索不可用（{e}）。请检查能力绑定与凭据；本次会话已终止。"
-                yield ("text", {"delta": fail_msg})
+                yield chat_text(fail_msg)
                 ctx.finalize_ctx.corpus = working
                 ctx.finalize_ctx.fetch_results = []
                 ctx.finalize_ctx.cite_records = []
                 ctx.finalize_ctx.failed_literature = working.failed_literature
                 ctx.finalize_ctx.intent = intent
-                await finalize_turn(ctx.finalize_ctx, main_text=fail_msg)
+                ctx.finalize_ctx.chat_text = fail_msg
+                _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=fail_msg)
+                yield end_ev
                 ctx.early_return = True
                 return
             async for ev in emit_system_think_line(
@@ -330,6 +356,7 @@ async def run_retrieval_pipeline(
                 accumulator=ctx.think_acc,
             ):
                 yield ev
+            ctx.search_degraded = True
 
         ctx.hits = list(search_out.get("hits") or [])
         ctx.answer = str(search_out.get("answer") or "")
@@ -366,6 +393,7 @@ async def run_retrieval_pipeline(
                 hits=[],
                 user_urls=ctx.upload_urls,
                 fetch_cap=fetch_cap,
+                skip_reason="search_failed" if ctx.search_degraded else None,
             )
         else:
             build_result = build_fetch_queue(
@@ -373,6 +401,7 @@ async def run_retrieval_pipeline(
                 hits=ctx.hits,
                 user_urls=ctx.upload_urls,
                 fetch_cap=fetch_cap,
+                skip_reason="search_failed" if ctx.search_degraded else None,
             )
         fetch_hits = [
             h
@@ -402,6 +431,8 @@ async def run_retrieval_pipeline(
                 "total_fetch": len(fetch_hits),
                 "fetch_provider": ctx.fetch_provider,
                 "fetch_cap": fetch_cap,
+                "skip_reason": build_result.skip_reason,
+                "fetch_metrics": ctx.fetch_coord_metrics or None,
             },
         )
 
@@ -483,14 +514,16 @@ async def run_retrieval_pipeline(
             async for ev in emit_system_think_line(msg, accumulator=ctx.think_acc):
                 yield ev
             if intent.defer_generate:
-                yield ("text", {"delta": msg})
+                yield chat_text(msg)
                 upsert_stage(ctx.execution_trace, "完成", "done")
                 ctx.finalize_ctx.corpus = working
                 ctx.finalize_ctx.fetch_results = []
                 ctx.finalize_ctx.cite_records = []
                 ctx.finalize_ctx.failed_literature = working.failed_literature
                 ctx.finalize_ctx.intent = intent
-                await finalize_turn(ctx.finalize_ctx, main_text=msg)
+                ctx.finalize_ctx.chat_text = msg
+                _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
+                yield end_ev
                 yield ("stage", {"name": "完成", "state": "done"})
                 ctx.early_return = True
                 return

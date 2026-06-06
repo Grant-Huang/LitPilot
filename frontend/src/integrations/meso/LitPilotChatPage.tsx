@@ -31,6 +31,9 @@ export function LitPilotChatPage() {
     liveMessages,
     streaming,
     streamSettling,
+    liveIntent,
+    liveProcessText,
+    liveChatText,
     send: sendStream,
     abort,
   } = useLiteratureStream();
@@ -240,6 +243,9 @@ export function LitPilotChatPage() {
           <LitPilotMessageList
             messages={historyMessages}
             streaming={liveStreaming}
+            liveIntent={liveIntent}
+            liveProcessText={liveProcessText}
+            liveChatText={liveChatText}
             scrollContainerRef={chatScrollRef}
             scrollResetKey={activeSessionId}
             emptyStateAlign="top"
@@ -253,7 +259,7 @@ export function LitPilotChatPage() {
                     className="litpilot-chat-welcome__brand"
                   />
                   <p style={{ color: "var(--color-text-muted)" }}>
-                    描述研究主题，系统将检索文献并生成 APA / ACM 格式综述。执行过程中会在此显示阶段、思考与工具调用进度。
+                    描述研究主题，左侧显示执行过程，综述与矩阵在右侧 Artifact 面板查看。
                   </p>
                 </div>
               ) : null

@@ -17,6 +17,8 @@ export type FailedLiteratureMeta = {
   kind: string;
 };
 
+import type { TurnWorkflow } from "@/lib/turnWorkflow";
+
 export type ChatMessage = {
   role: string;
   content: string;
@@ -26,6 +28,10 @@ export type ChatMessage = {
     thinkContent?: string;
     failed_literature?: FailedLiteratureMeta[];
     execution_trace?: ExecutionTrace;
+    turn_workflow?: TurnWorkflow;
+    delivery?: "chat" | "process";
+    artifact_kind?: "review" | "matrix";
+    intent?: string;
   };
 };
 
@@ -89,6 +95,7 @@ export const sessionsApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  get: (id: string) => apiRequestData<SessionMeta & { review_versions?: unknown[] }>(`/sessions/${id}`),
   messages: (id: string) =>
     apiRequestData<ChatMessage[]>(`/sessions/${id}/messages`),
   review: (id: string) =>
@@ -97,6 +104,12 @@ export const sessionsApi = {
       content: string;
       updated_at?: string;
     } | null>(`/sessions/${id}/review`),
+  reviewVersion: (id: string, filename: string) =>
+    apiRequestData<{
+      filename: string;
+      content: string;
+      updated_at?: string;
+    }>(`/sessions/${id}/review/${encodeURIComponent(filename)}`),
   matrix: (id: string) =>
     apiRequestData<{
       filename: string;

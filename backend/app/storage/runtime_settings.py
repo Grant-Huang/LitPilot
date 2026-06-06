@@ -35,6 +35,18 @@ WEB_SEARCH_PARAM_DEFAULTS: dict[str, Any] = {
 
     "expansion_count": 3,
 
+    "search_parallel": 2,
+
+}
+
+
+
+LITERATURE_SOURCE_PARAM_DEFAULTS: dict[str, Any] = {
+
+    "literature_source_mode": "merge",
+
+    "merge_search_budget": "full",
+
 }
 
 
@@ -282,7 +294,7 @@ def build_runtime_settings(
 
     orch = _cap_params(capabilities, "orchestrator", ORCHESTRATOR_PARAM_DEFAULTS)
 
-    source = _cap_params(capabilities, "literature_source", {"literature_source_mode": "merge"})
+    source = _cap_params(capabilities, "literature_source", LITERATURE_SOURCE_PARAM_DEFAULTS)
 
     prompts = _cap_params(capabilities, "prompts", PROMPTS_PARAM_DEFAULTS)
 
@@ -439,6 +451,10 @@ def build_runtime_settings(
         "max_fetch_urls": int(fetch.get("max_fetch_urls") or 5),
 
         "literature_source_mode": str(source.get("literature_source_mode") or "merge"),
+
+        "merge_search_budget": str(source.get("merge_search_budget") or "full"),
+
+        "search_parallel": int(web.get("search_parallel") or 1),
 
         "search_retry_count": int(web.get("search_retry_count") or 0),
 

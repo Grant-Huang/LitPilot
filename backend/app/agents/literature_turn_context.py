@@ -25,3 +25,6 @@ class TurnFinalizeContext:
     failed_literature: list[dict[str, str]]
     gen_constraints: list[str]
     assistant_prefix: str = ""
+    process_text: str = ""
+    chat_text: str = ""
+    turn_index: int = 1

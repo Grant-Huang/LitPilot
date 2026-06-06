@@ -3,17 +3,15 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   type RefObject,
 } from "react";
 import { ChatBubble } from "@meso.ai/ui";
 import type { StreamState } from "@meso.ai/ui";
 import type { LitPilotMessage } from "@/lib/chatTypes";
-import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
-import { LitPilotAssistantTurn } from "./LitPilotAssistantTurn";
-import { LitPilotProcessTrace } from "./LitPilotProcessTrace";
 import { renderSimpleMarkdown } from "@/lib/simpleMarkdown";
+import { LitPilotAssistantTurn } from "./LitPilotAssistantTurn";
+import { LitPilotLiveTurn } from "./LitPilotLiveTurn";
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
@@ -26,6 +24,9 @@ function isNearScrollBottom(el: HTMLElement): boolean {
 export type LitPilotMessageListProps = {
   messages: LitPilotMessage[];
   streaming?: StreamState;
+  liveIntent?: string;
+  liveProcessText?: string;
+  liveChatText?: string;
   emptyState?: React.ReactNode;
   emptyStateAlign?: "center" | "top";
   /** Scrollable ancestor (e.g. `.litpilot-chat-scroll`). */
@@ -37,6 +38,9 @@ export type LitPilotMessageListProps = {
 export function LitPilotMessageList({
   messages,
   streaming,
+  liveIntent = "new_topic",
+  liveProcessText = "",
+  liveChatText = "",
   emptyState,
   emptyStateAlign = "center",
   scrollContainerRef,
@@ -86,14 +90,6 @@ export function LitPilotMessageList({
     prevMessageCountRef.current = messages.length;
   }, [messages]);
 
-  const liveTrace = useMemo(
-    () =>
-      streaming && streaming.status !== "idle"
-        ? collectExecutionTraceFromStream(streaming)
-        : null,
-    [streaming],
-  );
-
   useEffect(() => {
     if (!stickToBottomRef.current) return;
     const streamingActive = streaming?.status === "streaming";
@@ -102,12 +98,6 @@ export function LitPilotMessageList({
 
   const hasContent =
     messages.length > 0 || (streaming && streaming.status !== "idle");
-
-  const showLiveThink =
-    Boolean(liveTrace?.thinkContent) &&
-    streaming &&
-    streaming.status !== "idle" &&
-    !streaming.textContent?.trim();
 
   return (
     <div className="meso-message-list litpilot-message-list">
@@ -131,35 +121,19 @@ export function LitPilotMessageList({
               role={m.role}
               content={m.content}
               timestamp={m.timestamp}
-              markdown={m.role === "assistant"}
-              renderMarkdown={renderSimpleMarkdown}
+              markdown={m.role === "assistant" && !m.extras}
+              renderMarkdown={m.role === "user" ? undefined : renderSimpleMarkdown}
             />
           ),
         )}
 
         {streaming && streaming.status !== "idle" && (
-          <div className="meso-message-list__live litpilot-message-list__live">
-            {liveTrace && (
-              <LitPilotProcessTrace
-                trace={liveTrace}
-                thinkStreaming={
-                  showLiveThink &&
-                  streaming.status === "streaming" &&
-                  !streaming.thinkDone
-                }
-              />
-            )}
-
-            {(streaming.textContent || streaming.status === "streaming") && (
-              <ChatBubble
-                role="assistant"
-                content={streaming.textContent}
-                streaming={streaming.status === "streaming"}
-                markdown
-                renderMarkdown={renderSimpleMarkdown}
-              />
-            )}
-          </div>
+          <LitPilotLiveTurn
+            streaming={streaming}
+            liveIntent={liveIntent}
+            liveProcessText={liveProcessText}
+            liveChatText={liveChatText}
+          />
         )}
 
         <div ref={bottomRef} />

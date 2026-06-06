@@ -1,5 +1,6 @@
 from app.agents.literature_source import (
     build_fetch_hits,
+    effective_merge_search_max_results,
     normalize_literature_source_mode,
     should_skip_web_search,
 )
@@ -50,3 +51,25 @@ def test_build_web_search_only() -> None:
     r = build_fetch_hits("merge", search_hits, [], max_urls=5)
     assert len(r.hits) == 1
     assert r.hits[0]["source"] == "web_search"
+
+
+def test_effective_merge_search_max_results_lite() -> None:
+    uploads = [f"https://u.com/{i}" for i in range(12)]
+    assert effective_merge_search_max_results(
+        40,
+        source_mode="merge",
+        upload_urls=uploads,
+        budget="lite",
+    ) == 20
+    assert effective_merge_search_max_results(
+        40,
+        source_mode="merge",
+        upload_urls=["https://u.com/1"],
+        budget="lite",
+    ) == 40
+    assert effective_merge_search_max_results(
+        40,
+        source_mode="user_only",
+        upload_urls=uploads,
+        budget="lite",
+    ) == 40

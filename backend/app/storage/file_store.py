@@ -620,7 +620,8 @@ class FileStore:
             "literature_source",
             "文献来源策略",
             primary_ref=None,
-            params={"literature_source_mode": str(legacy.get("literature_source_mode") or "merge")},
+            params={"literature_source_mode": str(legacy.get("literature_source_mode") or "merge"),
+                    "merge_search_budget": "full"},
         )
         prompt_defaults = deploy_settings()
         cap(
@@ -1064,6 +1065,7 @@ class FileStore:
     def _ensure_capability_param_defaults(self) -> None:
         """Backfill new capability params on existing v2 installs."""
         from app.storage.runtime_settings import (
+            LITERATURE_SOURCE_PARAM_DEFAULTS,
             ORCHESTRATOR_PARAM_DEFAULTS,
             PROMPTS_PARAM_DEFAULTS,
             WEB_FETCH_PARAM_DEFAULTS,
@@ -1078,6 +1080,7 @@ class FileStore:
             "web_fetch": WEB_FETCH_PARAM_DEFAULTS,
             "orchestrator": ORCHESTRATOR_PARAM_DEFAULTS,
             "prompts": PROMPTS_PARAM_DEFAULTS,
+            "literature_source": LITERATURE_SOURCE_PARAM_DEFAULTS,
         }
         changed = False
         for cap in caps:
@@ -1611,6 +1614,24 @@ class FileStore:
         if not files:
             return None
         path = files[-1]
+        return {
+            "filename": path.name,
+            "content": path.read_text(encoding="utf-8"),
+            "updated_at": datetime.fromtimestamp(
+                path.stat().st_mtime, tz=timezone.utc
+            ).isoformat(),
+        }
+
+    def get_review_by_filename(
+        self, session_id: str, filename: str
+    ) -> dict[str, Any] | None:
+        if ".." in filename or "/" in filename or "\\" in filename:
+            return None
+        if not filename.startswith("review-") or not filename.endswith(".md"):
+            return None
+        path = self.root / "artifacts" / session_id / filename
+        if not path.is_file():
+            return None
         return {
             "filename": path.name,
             "content": path.read_text(encoding="utf-8"),

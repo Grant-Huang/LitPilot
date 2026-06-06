@@ -1,6 +1,7 @@
 """Reusable literature workflow phase runners for multi-turn sessions."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
@@ -317,6 +318,7 @@ async def stream_expanded_search_phase(
     search_enable_junk_filter: bool = True,
     exclude_title_substrings: list[str] | None = None,
     search_provider: str | None = None,
+    search_parallel: int = 1,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.search_merge import merge_search_hits
 
@@ -338,10 +340,12 @@ async def stream_expanded_search_phase(
             "queries": clean_queries,
             "per_query_max_results": per_query_max,
             "total_passes": total,
+            "search_parallel": max(1, search_parallel),
         },
     )
 
-    for idx, query in enumerate(clean_queries, start=1):
+    async def _run_pass(idx: int, query: str) -> tuple[int, list[tuple[str, dict[str, Any]]], dict[str, Any]]:
+        collected: list[tuple[str, dict[str, Any]]] = []
         pass_out: dict[str, Any] = {}
         async for ev in stream_search_phase(
             user_message=user_message,
@@ -370,20 +374,68 @@ async def stream_expanded_search_phase(
             emit_stage_lifecycle=idx == 1 or idx == total,
             search_provider=search_provider,
         ):
-            yield ev
-        pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
-        raw_total += len(pass_hits)
-        raw_before_corpus += int(pass_out.get("hits_before_corpus") or len(pass_hits))
-        tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
-        hits_lists.append(pass_hits)
-        ans = str(pass_out.get("answer") or "").strip()
-        if ans:
-            answers.append(ans)
+            collected.append(ev)
+        return idx, collected, pass_out
 
-        yield (
-            "literature_search_pass_hits",
-            {"hits": pass_hits, "pass_index": idx, "pass_total": total},
-        )
+    pass_results: dict[int, dict[str, Any]] = {}
+    parallel = max(1, min(int(search_parallel or 1), total))
+
+    if parallel > 1 and total > 1:
+        sem = asyncio.Semaphore(parallel)
+
+        async def _bounded(idx: int, query: str) -> tuple[int, list[tuple[str, dict[str, Any]]], dict[str, Any]]:
+            async with sem:
+                return await _run_pass(idx, query)
+
+        tasks = [
+            asyncio.create_task(_bounded(idx, query))
+            for idx, query in enumerate(clean_queries, start=1)
+        ]
+        for fut in asyncio.as_completed(tasks):
+            idx, collected, pass_out = await fut
+            for ev in collected:
+                yield ev
+            pass_results[idx] = pass_out
+            pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
+            yield (
+                "literature_search_pass_hits",
+                {"hits": pass_hits, "pass_index": idx, "pass_total": total},
+            )
+        hits_lists = []
+        answers = []
+        raw_total = 0
+        raw_before_corpus = 0
+        tool_hit_total = 0
+        for idx in range(1, total + 1):
+            pass_out = pass_results.get(idx) or {}
+            pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
+            raw_total += len(pass_hits)
+            raw_before_corpus += int(pass_out.get("hits_before_corpus") or len(pass_hits))
+            tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
+            hits_lists.append(pass_hits)
+            ans = str(pass_out.get("answer") or "").strip()
+            if ans:
+                answers.append(ans)
+    else:
+        for idx, query in enumerate(clean_queries, start=1):
+            idx, collected, pass_out = await _run_pass(idx, query)
+            for ev in collected:
+                yield ev
+            pass_results[idx] = pass_out
+            pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
+            raw_total += len(pass_hits)
+            raw_before_corpus += int(pass_out.get("hits_before_corpus") or len(pass_hits))
+            tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
+            hits_lists.append(pass_hits)
+            ans = str(pass_out.get("answer") or "").strip()
+            if ans:
+                answers.append(ans)
+            yield (
+                "literature_search_pass_hits",
+                {"hits": pass_hits, "pass_index": idx, "pass_total": total},
+            )
+
+    del pass_results
 
     merge_cap = search_max_results if search_max_results > 0 else None
     pass_hit_counts = [len(h) for h in hits_lists]
@@ -603,140 +655,147 @@ async def stream_fetch_phase(
     )
     recent_fetch_labels: list[str] = []
 
-    async for hit, ctx_md, err in iter_fetch_sources_parallel(
-        fetch_hits,
-        api_key=fetch_api_key or None,
-        llm=llm,
-        parallel=parallel,
-        timeout_per_url=timeout_sec,
-        max_urls=fetch_cap,
-        retry_count=fetch_retry_count,
-        retry_delay_ms=fetch_retry_delay_ms,
-        fetch_provider=fetch_provider,
-    ):
-        idx = fetch_idx
-        fetch_idx += 1
-        url = hit["url"]
-        delta.fetch_results.append((hit, ctx_md or "", err))
-        delta.fetch_hits.append(hit)
-        delta.register_url(url)
+    upload_queue = [h for h in fetch_hits if str(h.get("source") or "") == "upload"]
+    search_queue = [h for h in fetch_hits if str(h.get("source") or "") != "upload"]
+    ordered_queues = [upload_queue, search_queue] if upload_queue else [fetch_hits]
 
-        child_id = f"fetch_{idx}"
-        child_meta = {
-            "url": url,
-            "title": hit.get("title") or "",
-            "provider": fetch_provider,
-        }
-        async for ev in emitter.yield_begin(
-            child_id, name="web_fetch", parent_id="fetch", metadata=child_meta
+    for queue in ordered_queues:
+        if not queue:
+            continue
+        async for hit, ctx_md, err in iter_fetch_sources_parallel(
+            queue,
+            api_key=fetch_api_key or None,
+            llm=llm,
+            parallel=parallel,
+            timeout_per_url=timeout_sec,
+            max_urls=fetch_cap,
+            retry_count=fetch_retry_count,
+            retry_delay_ms=fetch_retry_delay_ms,
+            fetch_provider=fetch_provider,
         ):
-            yield ev
+            idx = fetch_idx
+            fetch_idx += 1
+            url = hit["url"]
+            delta.fetch_results.append((hit, ctx_md or "", err))
+            delta.fetch_hits.append(hit)
+            delta.register_url(url)
 
-        display_title = resolve_fetch_display_title(hit, ctx_md or "")
-        if ctx_md:
-            fetch_ok += 1
-            block = ctx_md[:max_source_chars]
-            if not block.lstrip().startswith("##"):
-                header = display_title or hit.get("title") or url
-                block = f"## [网页材料] {header}\n\n{block}"
-            delta.sources_md.append(block)
-            char_count = len(ctx_md)
-            preview = f"已抓取正文（约 {char_count} 字）"
-            async for ev in emit_tool_event(
-                lambda p, i=idx: f"{p}_{i}",
-                "web_fetch",
-                {"url": url, "title": display_title, "char_count": char_count, "provider": fetch_provider},
-                preview,
-                trace=execution_trace,
-            ):
-                yield ev
-            append_workflow(
-                execution_trace,
-                node_id=child_id,
-                name="web_fetch",
-                state="done",
-                title=display_title,
-                url=url,
-                char_count=char_count,
-            )
-            child_meta["title"] = display_title
-            child_meta["char_count"] = char_count
-            async for ev in emitter.yield_finish(
-                child_id, "done", name="web_fetch", parent_id="fetch", metadata=child_meta
-            ):
-                yield ev
-        else:
-            fetch_failed += 1
-            try:
-                from urllib.parse import urlparse
-
-                host = urlparse(url).netloc
-                if host and host not in failed_hosts:
-                    failed_hosts.append(host)
-            except Exception:
-                pass
-            snippet = hit.get("snippet") or ""
-            err_msg = err or "抓取失败"
-            delta.failed_literature.append(
-                {
-                    "url": url,
-                    "title": display_title or str(hit.get("title") or ""),
-                    "reason": err_msg,
-                    "kind": "抓取网页",
-                }
-            )
-            fail_header = display_title or hit.get("title") or url
-            delta.sources_md.append(
-                f"## [网页材料] {fail_header}\n\n(抓取失败: {err_msg})\n\n{snippet}\n"
-            )
-            async for ev in emit_tool_event(
-                lambda p, i=idx: f"{p}_{i}",
-                "web_fetch",
-                {"url": url, "title": display_title, "provider": fetch_provider},
-                "",
-                error=err_msg,
-                trace=execution_trace,
-            ):
-                yield ev
-            append_workflow(
-                execution_trace,
-                node_id=child_id,
-                name="web_fetch",
-                state="error",
-                title=display_title,
-                url=url,
-                error=err_msg,
-            )
-            async for ev in emitter.yield_finish(
-                child_id,
-                "error",
-                name="web_fetch",
-                parent_id="fetch",
-                metadata={**child_meta, "error": err_msg},
+            child_id = f"fetch_{idx}"
+            child_meta = {
+                "url": url,
+                "title": hit.get("title") or "",
+                "provider": fetch_provider,
+            }
+            async for ev in emitter.yield_begin(
+                child_id, name="web_fetch", parent_id="fetch", metadata=child_meta
             ):
                 yield ev
 
-        label = display_title or (hit.get("title") or "").strip() or url
-        recent_fetch_labels.append(label[:60])
-        if len(recent_fetch_labels) > 5:
-            recent_fetch_labels.pop(0)
-        if fetch_throttle and fetch_throttle.note_completed():
-            progress_ctx = format_fetch_progress_context(
-                total=len(fetch_hits),
-                completed=fetch_idx,
-                ok=fetch_ok,
-                failed=fetch_failed,
-                recent_labels=recent_fetch_labels,
-            )
-            async for ev in narrate_phase_stream(
-                "D",
-                user_message,
-                progress_ctx,
-                think_acc=think_acc,
-                ctx=planner_ctx,
-            ):
-                yield ev
-            fetch_throttle.mark_narrated()
+            display_title = resolve_fetch_display_title(hit, ctx_md or "")
+            if ctx_md:
+                fetch_ok += 1
+                block = ctx_md[:max_source_chars]
+                if not block.lstrip().startswith("##"):
+                    header = display_title or hit.get("title") or url
+                    block = f"## [网页材料] {header}\n\n{block}"
+                delta.sources_md.append(block)
+                char_count = len(ctx_md)
+                preview = f"已抓取正文（约 {char_count} 字）"
+                async for ev in emit_tool_event(
+                    lambda p, i=idx: f"{p}_{i}",
+                    "web_fetch",
+                    {"url": url, "title": display_title, "char_count": char_count, "provider": fetch_provider},
+                    preview,
+                    trace=execution_trace,
+                ):
+                    yield ev
+                append_workflow(
+                    execution_trace,
+                    node_id=child_id,
+                    name="web_fetch",
+                    state="done",
+                    title=display_title,
+                    url=url,
+                    char_count=char_count,
+                )
+                child_meta["title"] = display_title
+                child_meta["char_count"] = char_count
+                async for ev in emitter.yield_finish(
+                    child_id, "done", name="web_fetch", parent_id="fetch", metadata=child_meta
+                ):
+                    yield ev
+            else:
+                fetch_failed += 1
+                try:
+                    from urllib.parse import urlparse
+
+                    host = urlparse(url).netloc
+                    if host and host not in failed_hosts:
+                        failed_hosts.append(host)
+                except Exception:
+                    pass
+                snippet = hit.get("snippet") or ""
+                err_msg = err or "抓取失败"
+                delta.failed_literature.append(
+                    {
+                        "url": url,
+                        "title": display_title or str(hit.get("title") or ""),
+                        "reason": err_msg,
+                        "kind": "抓取网页",
+                    }
+                )
+                fail_header = display_title or hit.get("title") or url
+                delta.sources_md.append(
+                    f"## [网页材料] {fail_header}\n\n(抓取失败: {err_msg})\n\n{snippet}\n"
+                )
+                async for ev in emit_tool_event(
+                    lambda p, i=idx: f"{p}_{i}",
+                    "web_fetch",
+                    {"url": url, "title": display_title, "provider": fetch_provider},
+                    "",
+                    error=err_msg,
+                    trace=execution_trace,
+                ):
+                    yield ev
+                append_workflow(
+                    execution_trace,
+                    node_id=child_id,
+                    name="web_fetch",
+                    state="error",
+                    title=display_title,
+                    url=url,
+                    error=err_msg,
+                )
+                async for ev in emitter.yield_finish(
+                    child_id,
+                    "error",
+                    name="web_fetch",
+                    parent_id="fetch",
+                    metadata={**child_meta, "error": err_msg},
+                ):
+                    yield ev
+
+            label = display_title or (hit.get("title") or "").strip() or url
+            recent_fetch_labels.append(label[:60])
+            if len(recent_fetch_labels) > 5:
+                recent_fetch_labels.pop(0)
+            if fetch_throttle and fetch_throttle.note_completed():
+                progress_ctx = format_fetch_progress_context(
+                    total=len(fetch_hits),
+                    completed=fetch_idx,
+                    ok=fetch_ok,
+                    failed=fetch_failed,
+                    recent_labels=recent_fetch_labels,
+                )
+                async for ev in narrate_phase_stream(
+                    "D",
+                    user_message,
+                    progress_ctx,
+                    think_acc=think_acc,
+                    ctx=planner_ctx,
+                ):
+                    yield ev
+                fetch_throttle.mark_narrated()
 
     async for ev in sync_graph_node(emitter, graph, graph_artifact_id, "fetch", "done"):
         yield ev
@@ -863,17 +922,22 @@ def build_fetch_queue(
     hits: list[dict[str, str]],
     user_urls: list[str],
     fetch_cap: int,
+    skip_reason: str | None = None,
 ):
     from app.agents.literature_source import build_fetch_hits
 
     if user_urls and not hits:
-        return build_fetch_hits(
+        result = build_fetch_hits(
             "user_only",
             [],
             user_urls,
             max_urls=fetch_cap,
         )
-    return build_fetch_hits(source_mode, hits, user_urls, max_urls=fetch_cap)
+    else:
+        result = build_fetch_hits(source_mode, hits, user_urls, max_urls=fetch_cap)
+    if skip_reason and not result.skip_reason:
+        result.skip_reason = skip_reason
+    return result
 
 
 def user_url_hits(urls: list[str]) -> list[dict[str, str]]:

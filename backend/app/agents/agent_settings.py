@@ -155,6 +155,34 @@ async def get_search_max_results() -> int:
 
 
 
+SEARCH_PARALLEL_CAP = 4
+
+
+
+
+
+async def get_search_parallel() -> int:
+
+    n = int((await get_merged_settings()).get("search_parallel") or 1)
+
+    return max(1, min(n, SEARCH_PARALLEL_CAP))
+
+
+
+
+
+async def get_merge_search_budget() -> str:
+
+    from app.agents.literature_source import normalize_merge_search_budget
+
+    raw = (await get_merged_settings()).get("merge_search_budget") or "full"
+
+    return normalize_merge_search_budget(str(raw))
+
+
+
+
+
 MAX_FETCH_URLS_CAP = 50
 
 

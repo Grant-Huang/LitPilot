@@ -28,6 +28,11 @@ def hit_from_url(url: str) -> dict[str, str]:
     }
 
 
+MergeSearchBudget = Literal["full", "lite"]
+MERGE_SEARCH_LITE_THRESHOLD = 10
+MERGE_SEARCH_LITE_CAP = 20
+
+
 @dataclass
 class FetchBuildResult:
     hits: list[dict[str, str]]
@@ -36,6 +41,31 @@ class FetchBuildResult:
     skipped_web_search: bool
     mode: LiteratureSourceMode
     used_user_only: bool
+    skip_reason: str | None = None
+
+
+def normalize_merge_search_budget(raw: str | None) -> MergeSearchBudget:
+    v = str(raw or "full").strip().lower()
+    return "lite" if v == "lite" else "full"
+
+
+def effective_merge_search_max_results(
+    base_max: int,
+    *,
+    source_mode: str | None,
+    upload_urls: list[str],
+    budget: str | None,
+    lite_threshold: int = MERGE_SEARCH_LITE_THRESHOLD,
+    lite_cap: int = MERGE_SEARCH_LITE_CAP,
+) -> int:
+    """When merge + many user URLs + lite budget, cap search hits."""
+    if normalize_literature_source_mode(source_mode) != "merge":
+        return base_max
+    if normalize_merge_search_budget(budget) != "lite":
+        return base_max
+    if len(upload_urls) < lite_threshold:
+        return base_max
+    return min(base_max, lite_cap)
 
 
 def build_fetch_hits(
@@ -59,6 +89,7 @@ def build_fetch_hits(
             skipped_web_search=True,
             mode=norm,
             used_user_only=True,
+            skip_reason="user_only",
         )
 
     if norm == "merge" and user_urls:

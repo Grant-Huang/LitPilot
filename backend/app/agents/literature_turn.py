@@ -15,6 +15,7 @@ from app.agents.agent_settings import (
     get_fetch_api_key,
     get_literature_source_mode,
     get_max_fetch_urls,
+    get_merge_search_budget,
     get_max_source_chars,
     get_outline_mode,
     get_post_refine_mode,
@@ -26,6 +27,7 @@ from app.agents.agent_settings import (
     get_search_exclude_domains,
     get_search_include_domains,
     get_search_max_results,
+    get_search_parallel,
     get_search_retry_count,
     get_search_depth,
     get_web_fetch_provider,
@@ -65,6 +67,7 @@ from app.agents.workflow_graph import (
     build_literature_graph_legacy,
 )
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
+from app.core.stream_events import chat_text, process_text, turn_start
 from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.schemas.literature_outline import LiteratureOutline
@@ -135,10 +138,10 @@ async def stream_literature_turn(
             meta_patch["resume_mode"] = None
             store.patch_session_meta(session_id, meta_patch)
             abort_msg = "已按你的要求取消本轮操作。"
-            yield ("text", {"delta": abort_msg})
+            yield chat_text(abort_msg)
             execution_trace = new_trace()
             think_acc = ThinkAccumulator()
-            await finalize_turn(
+            _, end_ev = await finalize_turn(
                 TurnFinalizeContext(
                     store=store,
                     session_id=session_id,
@@ -153,9 +156,11 @@ async def stream_literature_turn(
                     cite_records=[],
                     failed_literature=[],
                     gen_constraints=list(session_meta.get("gen_constraints") or []),
+                    chat_text=abort_msg,
                 ),
                 main_text=abort_msg,
             )
+            yield end_ev
             yield ("stage", {"name": "完成", "state": "done"})
             return
         if pending_gate.kind == "first_turn":
@@ -201,6 +206,8 @@ async def stream_literature_turn(
                 return
 
     search_max_results = await get_search_max_results()
+    merge_search_budget = await get_merge_search_budget()
+    search_parallel = await get_search_parallel()
     max_fetch_urls = await get_max_fetch_urls()
     source_mode = await get_literature_source_mode()
     search_retry_count = await get_search_retry_count()
@@ -222,6 +229,15 @@ async def stream_literature_turn(
         upload_urls = sanitize_fetch_urls(intent.new_urls + upload_urls)
     if clar_state.extra_urls:
         upload_urls = sanitize_fetch_urls(clar_state.extra_urls + upload_urls)
+
+    from app.agents.literature_source import effective_merge_search_max_results
+
+    search_max_results = effective_merge_search_max_results(
+        search_max_results,
+        source_mode=source_mode,
+        upload_urls=upload_urls,
+        budget=merge_search_budget,
+    )
 
     graph_artifact_id = _new_id("wf")
     emitter = WorkflowNodeEmitter(graph_artifact_id)
@@ -268,6 +284,7 @@ async def stream_literature_turn(
         cite_records=cite_records,
         failed_literature=failed_literature,
         gen_constraints=gen_constraints,
+        turn_index=user_turns,
     )
 
     if clar_state.search_relax_domain:
@@ -280,25 +297,29 @@ async def stream_literature_turn(
         outline_obj = LiteratureOutline.from_dict(store.load_outline(session_id))
         if not working.sources_md and not working.fetch_hits:
             fail_msg = "没有可用的文献材料，无法继续撰写。请先完成检索与抓取。"
-            yield ("text", {"delta": fail_msg})
+            yield chat_text(fail_msg)
             finalize_ctx.corpus = working
             finalize_ctx.fetch_results = []
             finalize_ctx.cite_records = []
             finalize_ctx.failed_literature = list(working.failed_literature)
             finalize_ctx.intent = intent
-            await finalize_turn(finalize_ctx, main_text=fail_msg)
+            finalize_ctx.chat_text = fail_msg
+            _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
+            yield end_ev
             store.patch_session_meta(session_id, {"resume_mode": None})
             yield ("stage", {"name": "完成", "state": "done"})
             return
         if not outline_obj or not outline_obj.sections:
             fail_msg = "未找到可确认的大纲。请重新描述研究主题或关闭「计划确认」后重试。"
-            yield ("text", {"delta": fail_msg})
+            yield chat_text(fail_msg)
             finalize_ctx.corpus = working
             finalize_ctx.fetch_results = []
             finalize_ctx.cite_records = []
             finalize_ctx.failed_literature = list(working.failed_literature)
             finalize_ctx.intent = intent
-            await finalize_turn(finalize_ctx, main_text=fail_msg)
+            finalize_ctx.chat_text = fail_msg
+            _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
+            yield end_ev
             store.patch_session_meta(session_id, {"resume_mode": None})
             yield ("stage", {"name": "完成", "state": "done"})
             return
@@ -340,6 +361,7 @@ async def stream_literature_turn(
                 "use_existing_corpus": intent.use_existing_corpus,
             },
         )
+        yield turn_start(turn_index=user_turns, intent=intent.intent)
         yield ("stage", {"name": "继续撰写", "state": "done"})
         upsert_stage(execution_trace, "继续撰写", "done")
     else:
@@ -353,6 +375,7 @@ async def stream_literature_turn(
                 "use_existing_corpus": intent.use_existing_corpus,
             },
         )
+        yield turn_start(turn_index=user_turns, intent=intent.intent)
 
         yield ("stage", {"name": "理解研究问题", "state": "active"})
 
@@ -420,7 +443,10 @@ async def stream_literature_turn(
             rq_msg = format_brief_assessment_message(brief_assessment)
             if rq_msg:
                 finalize_ctx.assistant_prefix = rq_msg
-                yield ("text", {"delta": rq_msg})
+                finalize_ctx.process_text = rq_msg
+                for para in rq_msg.split("\n\n"):
+                    if para.strip():
+                        yield process_text(para.strip() + "\n\n")
             yield (
                 "literature_brief_assessment",
                 {
@@ -495,14 +521,16 @@ async def stream_literature_turn(
 
                 action, targets = parse_manage_command(user_message, session_id)
             main_text = execute_manage_library(action, targets, session_id)
-            yield ("text", {"delta": main_text})
+            yield chat_text(main_text)
             upsert_stage(execution_trace, "完成", "done")
             finalize_ctx.corpus = corpus
             finalize_ctx.fetch_results = []
             finalize_ctx.cite_records = []
             finalize_ctx.failed_literature = corpus.failed_literature
             finalize_ctx.intent = intent
-            await finalize_turn(finalize_ctx, main_text=main_text)
+            finalize_ctx.chat_text = main_text
+            _, end_ev = await finalize_turn(finalize_ctx, main_text=main_text)
+            yield end_ev
             yield ("stage", {"name": "完成", "state": "done"})
             return
 
@@ -568,6 +596,7 @@ async def stream_literature_turn(
             sub_topics_for_search=sub_topics_for_search,
             search_provider=search_provider,
             fetch_provider=fetch_provider,
+            search_parallel=search_parallel,
         )
         async for ev in run_retrieval_pipeline(pipe_ctx):
             yield ev
@@ -586,13 +615,15 @@ async def stream_literature_turn(
 
     if not skip_to_generate and not working.sources_md and not working.fetch_hits:
         fail_msg = "没有可用的文献材料。请先提供研究问题或文献链接。"
-        yield ("text", {"delta": fail_msg})
+        yield chat_text(fail_msg)
         finalize_ctx.corpus = working
         finalize_ctx.fetch_results = fetch_results
         finalize_ctx.cite_records = cite_records
         finalize_ctx.failed_literature = failed_literature
         finalize_ctx.intent = intent
-        await finalize_turn(finalize_ctx, main_text=fail_msg)
+        finalize_ctx.chat_text = fail_msg
+        _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
+        yield end_ev
         return
 
     if intent.defer_generate:
@@ -600,14 +631,16 @@ async def stream_literature_turn(
             f"已补充/更新文献语料（共 {working.source_block_count()} 个材料块）。"
             " 按你的要求暂未生成综述；需要时请说明写作要求。"
         )
-        yield ("text", {"delta": summary})
+        yield chat_text(summary)
         upsert_stage(execution_trace, "完成", "done")
         finalize_ctx.corpus = working
         finalize_ctx.fetch_results = fetch_results
         finalize_ctx.cite_records = cite_records
         finalize_ctx.failed_literature = failed_literature
         finalize_ctx.intent = intent
-        lib_result = await finalize_turn(finalize_ctx, main_text=summary)
+        finalize_ctx.chat_text = summary
+        lib_result, end_ev = await finalize_turn(finalize_ctx, main_text=summary)
+        yield end_ev
         yield (
             "extension",
             {"name": "library_updated", "version": "1.0", "data": lib_result},

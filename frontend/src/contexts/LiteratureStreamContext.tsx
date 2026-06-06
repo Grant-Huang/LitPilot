@@ -30,8 +30,10 @@ type LiteratureStreamContextValue = {
   streamState: ReturnType<typeof useSSEStream>["state"];
   liveMessages: LitPilotMessage[];
   streaming: boolean;
-  /** 流已结束，正在等待助手消息落库并刷新会话 */
   streamSettling: boolean;
+  liveIntent: string;
+  liveProcessText: string;
+  liveChatText: string;
   send: (text: string, fetchUrls: string[]) => Promise<void>;
   abort: () => void;
   resetStreamUi: () => void;
@@ -39,6 +41,10 @@ type LiteratureStreamContextValue = {
 
 const LiteratureStreamContext =
   createContext<LiteratureStreamContextValue | null>(null);
+
+function workflowNeedsChat(intent: string): boolean {
+  return intent === "query_corpus" || intent === "clarify" || intent === "plan_confirm";
+}
 
 export function LiteratureStreamProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -58,6 +64,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
   const [streamSettling, setStreamSettling] = useState(false);
+  const [liveIntent, setLiveIntent] = useState("new_topic");
+  const [liveProcessText, setLiveProcessText] = useState("");
+  const [liveChatText, setLiveChatText] = useState("");
   const streamStartedRef = useRef(false);
   const streamFinalizeRef = useRef(false);
   const turnGenerationRef = useRef(0);
@@ -81,7 +90,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     const sid =
       streamSessionRef.current || turnSessionRef.current || activeSessionId;
     const pendingUser = pendingUserTextRef.current;
-    const snapshotText = streamState.textContent?.trim() ?? "";
     const trace = collectExecutionTraceFromStream(streamState);
     const hasTrace =
       trace.stages.length > 0 ||
@@ -104,7 +112,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
               ]
             : [];
       const placeholderContent =
-        snapshotText ||
+        liveChatText.trim() ||
         (streamError ? "请求失败，请查看提示或重试。" : "（正在保存回答…）");
       return [
         ...baseUsers,
@@ -151,6 +159,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     streamDone,
     streamError,
     streamState,
+    liveChatText,
     reset,
     loadSessions,
     activeSessionId,
@@ -167,22 +176,54 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     };
     for (let i = extensionHandledRef.current; i < log.length; i += 1) {
       const ext = log[i];
-      if (ext.payload.name === "session" && streamStartedRef.current) {
-        const sid = (ext.payload.data as Record<string, unknown> | undefined)
-          ?.session_id;
+      const name = ext.payload.name;
+      const data = (ext.payload.data ?? {}) as Record<string, unknown>;
+      if (name === "session" && streamStartedRef.current) {
+        const sid = data.session_id;
         if (typeof sid === "string" && sid) {
           streamSessionRef.current = sid;
           turnSessionRef.current = sid;
         }
       }
-      handleLiteratureExtensionEvent(
-        ext.payload.name,
-        ext.payload.data as Record<string, unknown> | undefined,
-        extCtx,
-      );
+      if (name === "turn_start" && typeof data.intent === "string") {
+        setLiveIntent(data.intent);
+        setLiveProcessText("");
+        setLiveChatText("");
+      }
+      if (name === "process_text" && typeof data.delta === "string") {
+        setLiveProcessText((prev) => prev + data.delta);
+      }
+      if (name === "literature_intent" && typeof data.intent === "string") {
+        setLiveIntent(data.intent);
+      }
+      if (name === "literature_brief_assessment") {
+        const rq = Array.isArray(data.core_research_questions)
+          ? (data.core_research_questions as string[]).join("；")
+          : "";
+        const kw = Array.isArray(data.keywords)
+          ? (data.keywords as string[]).join("、")
+          : "";
+        const hint = typeof data.search_query_hint === "string" ? data.search_query_hint : "";
+        const parts = [
+          rq ? `RQ：${rq}` : "",
+          kw ? `关键词：${kw}` : "",
+          hint ? `检索 hint：${hint}` : "",
+        ].filter(Boolean);
+        if (parts.length) setLiveProcessText((prev) => (prev ? prev : parts.join("\n")));
+      }
+      handleLiteratureExtensionEvent(name, data, extCtx);
     }
     extensionHandledRef.current = log.length;
-  }, [streamState.extensionLog, isChat, setActiveSessionId, loadSessions]);
+  }, [streamState.extensionLog, streamState.textContent, isChat, setActiveSessionId, loadSessions]);
+
+  useEffect(() => {
+    if (streamState.status !== "streaming") return;
+    const text = streamState.textContent ?? "";
+    if (!text) return;
+    if (workflowNeedsChat(liveIntent)) {
+      setLiveChatText(text.slice(0, 800));
+    }
+  }, [streamState.textContent, streamState.status, liveIntent]);
 
   useEffect(() => {
     const pending = pendingUserTextRef.current;
@@ -238,6 +279,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       ]);
       reset();
       streamStartedRef.current = true;
+      setLiveIntent("new_topic");
+      setLiveProcessText("");
+      setLiveChatText("");
 
       try {
         await start({
@@ -294,6 +338,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       liveMessages,
       streaming,
       streamSettling,
+      liveIntent,
+      liveProcessText,
+      liveChatText,
       send,
       abort,
       resetStreamUi,
@@ -303,6 +350,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       liveMessages,
       streaming,
       streamSettling,
+      liveIntent,
+      liveProcessText,
+      liveChatText,
       send,
       abort,
       resetStreamUi,

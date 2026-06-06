@@ -36,6 +36,11 @@ from app.agents.synthesis_matrix_prompt import (
     build_synthesis_matrix_user_prompt,
 )
 from app.agents.workflow_emitter import WorkflowNodeEmitter
+from app.core.stream_events import (
+    artifact_stream_delta,
+    chat_text,
+    clamp_corpus_answer,
+)
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.llm.base import LLMMessage
 from app.schemas.literature_outline import LiteratureOutline
@@ -119,13 +124,13 @@ async def _stream_query_corpus(
             temperature=0.3,
         ):
             main_parts.append(chunk)
-            yield ("text", {"delta": chunk})
+            yield chat_text(chunk)
     except Exception as e:
         _log.exception("query_corpus streaming failed")
         err_line = f"\n\n（生成失败：{e}。请检查 LLM 配置或稍后重试。）"
         main_parts.append(err_line)
-        yield ("text", {"delta": err_line})
-    main_text = "".join(main_parts) or "（未能生成回答，请换种问法。）"
+        yield chat_text(err_line)
+    main_text = clamp_corpus_answer("".join(main_parts) or "（未能生成回答，请换种问法。）")
     upsert_stage(ctx.execution_trace, "文献问答", "done")
     upsert_stage(ctx.execution_trace, "完成", "done")
     ctx.finalize_ctx.corpus = ctx.working
@@ -133,7 +138,9 @@ async def _stream_query_corpus(
     ctx.finalize_ctx.cite_records = ctx.cite_records
     ctx.finalize_ctx.failed_literature = ctx.failed_literature
     ctx.finalize_ctx.intent = ctx.intent
-    await finalize_turn(ctx.finalize_ctx, main_text=main_text)
+    ctx.finalize_ctx.chat_text = main_text
+    _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=main_text)
+    yield end_ev
     yield ("stage", {"name": "完成", "state": "done"})
 
 
@@ -163,6 +170,7 @@ async def _stream_synthesis_matrix(
         gen_directives=ctx.intent.gen_directives or ctx.user_message,
         base_template=matrix_template,
     )
+    matrix_art_id = new_id("matrix")
     matrix_parts: list[str] = []
     try:
         async for chunk in ctx.llm.chat_stream(
@@ -172,7 +180,11 @@ async def _stream_synthesis_matrix(
             temperature=0.25,
         ):
             matrix_parts.append(chunk)
-            yield ("text", {"delta": chunk})
+            yield artifact_stream_delta(
+                matrix_art_id,
+                chunk,
+                lang=SYNTHESIS_MATRIX_LANG,
+            )
     except Exception:
         _log.exception("synthesis matrix streaming failed")
 
@@ -187,19 +199,23 @@ async def _stream_synthesis_matrix(
             )
             matrix_text = (resp.content or "").strip()
             if matrix_text:
-                yield ("text", {"delta": matrix_text})
+                yield artifact_stream_delta(
+                    matrix_art_id,
+                    matrix_text,
+                    lang=SYNTHESIS_MATRIX_LANG,
+                )
         except Exception:
             _log.exception("synthesis matrix fallback failed")
             matrix_text = ""
     if not matrix_text.strip():
         matrix_text = "（矩阵生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
-        yield ("text", {"delta": matrix_text})
+        yield artifact_stream_delta(matrix_art_id, matrix_text, lang=SYNTHESIS_MATRIX_LANG)
 
     main_text = append_compliance_footer(matrix_text)
     if main_text != matrix_text:
         tail = main_text[len(matrix_text) :]
         if tail:
-            yield ("text", {"delta": tail})
+            yield artifact_stream_delta(matrix_art_id, tail, lang=SYNTHESIS_MATRIX_LANG)
 
     async for ev in sync_graph_node(
         ctx.emitter,
@@ -222,16 +238,12 @@ async def _stream_synthesis_matrix(
         yield ev
 
     _, version_id = ctx.store.save_matrix_artifact(ctx.session_id, main_text)
-    art_id = new_id("matrix")
-    yield (
-        "artifact",
-        {
-            "id": art_id,
-            "lang": SYNTHESIS_MATRIX_LANG,
-            "delta": main_text,
-            "done": True,
-            "version_id": version_id,
-        },
+    yield artifact_stream_delta(
+        matrix_art_id,
+        "",
+        lang=SYNTHESIS_MATRIX_LANG,
+        version_id=version_id,
+        done=True,
     )
 
     async for ev in sync_graph_node(
@@ -248,7 +260,8 @@ async def _stream_synthesis_matrix(
     ctx.finalize_ctx.cite_records = ctx.cite_records
     ctx.finalize_ctx.failed_literature = ctx.failed_literature
     ctx.finalize_ctx.intent = ctx.intent
-    lib_result = await finalize_turn(ctx.finalize_ctx, main_text=main_text)
+    lib_result, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=main_text)
+    yield end_ev
     yield (
         "extension",
         {"name": "library_updated", "version": "1.0", "data": lib_result},
@@ -262,6 +275,8 @@ async def _stream_review(
     cite_ok: int,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     raw_main = ""
+    review_art_id = new_id("review")
+    version_id: str | None = None
     last_wf_node = "outline" if ctx.use_outline_path and ctx.outline_obj else "cite_extract"
     outline_obj = ctx.outline_obj
 
@@ -333,6 +348,8 @@ async def _stream_review(
                 ):
                     yield ev
                 section_parts.append((section, reuse_body))
+                if reuse_body.strip():
+                    yield artifact_stream_delta(review_art_id, reuse_body + "\n\n")
                 prior = (prior + "\n" + reuse_body)[-1500:]
                 prev_node = section.id
                 last_wf_node = section.id
@@ -373,13 +390,13 @@ async def _stream_review(
                     is_refine=sec_is_refine,
                 ):
                     sec_parts.append(chunk)
-                    yield ("text", {"delta": chunk})
+                    yield artifact_stream_delta(review_art_id, chunk)
             except Exception:
                 _log.exception("section %s streaming failed", section.id)
             sec_body = "".join(sec_parts)
             if not sec_body.strip():
                 sec_body = f"（章节「{section.title}」生成为空。）\n"
-                yield ("text", {"delta": sec_body})
+                yield artifact_stream_delta(review_art_id, sec_body)
             section_parts.append((section, sec_body))
             prior = (prior + "\n" + sec_body)[-1500:]
             async for ev in sync_graph_node(
@@ -448,7 +465,7 @@ async def _stream_review(
                 temperature=0.35,
             ):
                 main_parts.append(chunk)
-                yield ("text", {"delta": chunk})
+                yield artifact_stream_delta(review_art_id, chunk)
         except Exception:
             _log.exception("review streaming failed")
 
@@ -463,13 +480,13 @@ async def _stream_review(
                 )
                 raw_main = (resp.content or "").strip()
                 if raw_main:
-                    yield ("text", {"delta": raw_main})
+                    yield artifact_stream_delta(review_art_id, raw_main)
             except Exception:
                 _log.exception("review non-stream fallback failed")
                 raw_main = ""
             if not raw_main.strip():
                 raw_main = "（综述生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
-                yield ("text", {"delta": raw_main})
+                yield artifact_stream_delta(review_art_id, raw_main)
 
         async for ev in sync_graph_node(
             ctx.emitter, ctx.graph, ctx.graph_artifact_id, "generate", "done"
@@ -526,7 +543,7 @@ async def _stream_review(
     if main_text != raw_main:
         tail = main_text[len(raw_main) :]
         if tail:
-            yield ("text", {"delta": tail})
+            yield artifact_stream_delta(review_art_id, tail)
 
     async for ev in sync_graph_node(
         ctx.emitter,
@@ -539,16 +556,11 @@ async def _stream_review(
         yield ev
 
     _, version_id = ctx.store.save_review_artifact(ctx.session_id, main_text)
-    art_id = new_id("review")
-    yield (
-        "artifact",
-        {
-            "id": art_id,
-            "lang": "markdown",
-            "delta": main_text,
-            "done": True,
-            "version_id": version_id,
-        },
+    yield artifact_stream_delta(
+        review_art_id,
+        "",
+        version_id=version_id,
+        done=True,
     )
 
     async for ev in sync_graph_node(
@@ -567,9 +579,10 @@ async def _stream_review(
     ctx.finalize_ctx.cite_records = ctx.cite_records
     ctx.finalize_ctx.failed_literature = ctx.failed_literature
     ctx.finalize_ctx.intent = ctx.intent
-    lib_result = await finalize_turn(
+    lib_result, end_ev = await finalize_turn(
         ctx.finalize_ctx, main_text=main_text, is_review=True
     )
+    yield end_ev
     yield (
         "extension",
         {"name": "library_updated", "version": "1.0", "data": lib_result},

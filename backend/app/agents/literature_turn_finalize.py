@@ -8,6 +8,8 @@ from app.agents.execution_trace import upsert_stage
 from app.agents.literature_clarification import ClarificationGate, format_gate_message
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.session_corpus import save_session_corpus
+from app.agents.turn_workflow import build_turn_workflow_meta
+from app.core.stream_events import chat_text, turn_end
 from app.library.from_run import upsert_library_from_run
 
 
@@ -24,7 +26,7 @@ async def finalize_turn(
     *,
     main_text: str,
     is_review: bool = False,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], tuple[str, dict[str, Any]]]:
     save_session_corpus(ctx.store, ctx.session_id, ctx.corpus)
 
     patch: dict[str, Any] = {
@@ -52,19 +54,47 @@ async def finalize_turn(
     if think_text:
         ctx.execution_trace["thinkContent"] = think_text
 
-    main_text = _combine_assistant_text(ctx, main_text)
+    stored_body = _combine_assistant_text(ctx, main_text)
+    if is_review:
+        persist_text = ctx.chat_text.strip() or "综述已更新，请查看右侧 Artifact。"
+    elif ctx.intent.intent == "query_corpus":
+        persist_text = stored_body
+        ctx.chat_text = stored_body
+    else:
+        persist_text = ctx.chat_text.strip() or stored_body
+        if ctx.process_text.strip() and not ctx.chat_text.strip():
+            persist_text = ctx.process_text.strip()[:200] + "…" if len(ctx.process_text) > 200 else ctx.process_text.strip()
+
+    turn_wf = build_turn_workflow_meta(
+        ctx.execution_trace,
+        intent=ctx.intent.intent,
+        process_text=ctx.process_text,
+        chat_text=ctx.chat_text or (stored_body if ctx.intent.intent == "query_corpus" else ""),
+    )
 
     msg_meta: dict[str, Any] = {
         "execution_trace": ctx.execution_trace,
         "intent": ctx.intent.intent,
+        "turn_workflow": turn_wf,
+        "delivery": (
+            "chat"
+            if ctx.intent.intent == "query_corpus" or ctx.chat_text.strip()
+            else "process"
+        ),
     }
+    if is_review:
+        msg_meta["artifact_kind"] = "review"
     if think_text:
         msg_meta["think"] = think_text
     if ctx.failed_literature:
         msg_meta["failed_literature"] = ctx.failed_literature
     msg_meta["library_item_ids"] = lib_result.get("item_ids") or []
-    ctx.store.append_message(ctx.session_id, "assistant", main_text, meta=msg_meta)
-    return lib_result
+    ctx.store.append_message(ctx.session_id, "assistant", persist_text, meta=msg_meta)
+    end_ev = turn_end(
+        turn_index=ctx.turn_index,
+        summary=str(turn_wf.get("summary") or ctx.intent.intent),
+    )
+    return lib_result, end_ev
 
 
 async def yield_clarification_pause(
@@ -78,7 +108,8 @@ async def yield_clarification_pause(
         save_session_corpus(ctx.store, ctx.session_id, ctx.corpus)
     msg = format_gate_message(gate)
     yield ("literature_clarification", gate.to_sse_payload())
-    yield ("text", {"delta": msg})
+    yield chat_text(msg)
+    ctx.chat_text = msg
     meta_patch: dict[str, Any] = {
         "pending_gate": gate.to_dict(),
         "gate_resolved": dict(gate_resolved),
@@ -88,5 +119,6 @@ async def yield_clarification_pause(
     ctx.store.patch_session_meta(ctx.session_id, meta_patch)
     upsert_stage(ctx.execution_trace, "等待澄清", "done")
     yield ("stage", {"name": "等待澄清", "state": "done"})
-    await finalize_turn(ctx, main_text=msg)
+    _, end_ev = await finalize_turn(ctx, main_text=msg)
+    yield end_ev
     yield ("stage", {"name": "完成", "state": "done"})

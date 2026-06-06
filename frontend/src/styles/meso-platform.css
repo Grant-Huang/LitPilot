@@ -3532,6 +3532,113 @@ a.library-badge--action:hover {
   gap: 6px;
 }
 
+.litpilot-artifact-pane__version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+  font-size: 12px;
+}
+
+.litpilot-artifact-pane__version-row select {
+  flex: 1;
+  max-width: 240px;
+}
+
+.litpilot-turn-wf {
+  border: 1px solid var(--color-border-light);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  background: var(--color-bg-subtle);
+}
+
+.litpilot-turn-wf__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.litpilot-turn-wf__cards {
+  padding: 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.litpilot-wf-card {
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.litpilot-wf-card__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.litpilot-wf-card__title {
+  flex: 1;
+  font-weight: 500;
+}
+
+.litpilot-wf-card__status {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.litpilot-wf-card__body {
+  padding: 0 10px 8px 28px;
+}
+
+.litpilot-wf-card__body-text {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.litpilot-wf-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 0;
+  color: var(--color-text-muted);
+}
+
+.litpilot-wf-step__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 6px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.litpilot-wf-card--running .litpilot-wf-card__status {
+  color: var(--color-accent);
+}
+
+.litpilot-wf-card--error .litpilot-wf-card__status {
+  color: var(--color-danger, #c0392b);
+}
+
 .litpilot-artifact-pane__ref-btn {
   border: 1px solid var(--color-border-light);
   background: var(--color-bg-subtle);

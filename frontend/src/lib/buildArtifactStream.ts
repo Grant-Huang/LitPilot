@@ -44,12 +44,7 @@ export function streamStateWithMatrix(content: string): StreamState {
 
 export function streamHasArtifactPane(state: StreamState | null): boolean {
   if (!state) return false;
-  if (state.workflowRunOrder.length > 0) return true;
   const hiddenInline = new Set(["workflow-graph", "literature-outline+json"]);
-  const hasGraph = state.artifactOrder.some(
-    (id) => state.artifacts[id]?.lang === "workflow-graph",
-  );
-  if (hasGraph) return true;
   return state.artifactOrder.some((id) => {
     const art = state.artifacts[id];
     return !hiddenInline.has(art?.lang ?? "") && Boolean(art?.content?.trim());

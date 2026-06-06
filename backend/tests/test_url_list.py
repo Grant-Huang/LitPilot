@@ -1,5 +1,7 @@
 from app.agents.url_list import (
+    canonical_url_keys,
     display_title_from_url,
+    filter_hits_excluding_keys,
     merge_fetch_hits,
     parse_url_list_file,
     resolve_fetch_display_title,
@@ -81,3 +83,15 @@ def test_resolve_fetch_display_title_snippet_fallback() -> None:
         resolve_fetch_display_title(hit, "")
         == "A long enough snippet line for display"
     )
+
+
+def test_filter_hits_excluding_keys() -> None:
+    keys = canonical_url_keys(["https://u.com/1"])
+    hits = [
+        {"url": "https://u.com/1", "title": "dup"},
+        {"url": "https://t.com/1", "title": "keep"},
+    ]
+    kept, skipped = filter_hits_excluding_keys(hits, keys)
+    assert skipped == 1
+    assert len(kept) == 1
+    assert kept[0]["url"] == "https://t.com/1"

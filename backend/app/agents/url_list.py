@@ -245,3 +245,38 @@ def effective_fetch_cap(base_max: int, extra_urls: list[str]) -> int:
     if not extra_urls:
         return min(base_max, MAX_FETCH_URLS_CAP)
     return min(max(base_max, len(extra_urls)), MAX_FETCH_URLS_CAP)
+
+
+def canonical_url_keys(urls: list[str]) -> set[str]:
+    from app.library.canonical import canonical_key, normalize_url
+
+    keys: set[str] = set()
+    for raw in urls:
+        url = str(raw or "").strip()
+        if not url:
+            continue
+        key = canonical_key(url=url) or normalize_url(url) or url
+        keys.add(key)
+    return keys
+
+
+def filter_hits_excluding_keys(
+    hits: list[dict[str, str]],
+    exclude_keys: set[str],
+) -> tuple[list[dict[str, str]], int]:
+    if not exclude_keys:
+        return [dict(h) for h in hits], 0
+    from app.library.canonical import canonical_key, normalize_url
+
+    kept: list[dict[str, str]] = []
+    skipped = 0
+    for hit in hits:
+        url = str(hit.get("url") or "").strip()
+        if not url:
+            continue
+        key = canonical_key(url=url) or normalize_url(url) or url
+        if key in exclude_keys:
+            skipped += 1
+            continue
+        kept.append(dict(hit))
+    return kept, skipped

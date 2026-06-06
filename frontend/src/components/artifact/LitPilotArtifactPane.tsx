@@ -3,26 +3,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArtifactPanel } from "@meso.ai/ui";
 import type { StreamState } from "@meso.ai/ui";
-import { WorkflowArtifactPanel } from "@/components/workflow/WorkflowArtifactPanel";
 import { downloadTextFile } from "@/lib/buildArtifactStream";
-import { LITERATURE_PLAN_GRAPH } from "@/lib/literaturePlanGraph";
 import { renderSimpleMarkdown } from "@/lib/simpleMarkdown";
-import {
-  findWorkflowArtifact,
-  WORKFLOW_GRAPH_LANG,
-} from "@/lib/workflowGraph";
-import { graphForPipelineDisplay } from "@/lib/pipelineDisplayGraph";
-import { mergeWorkflowRunsIntoGraph } from "@/lib/workflowGraphLive";
-import { workflowRunsFromStream } from "@/lib/workflowRuns";
-import { findOutlineArtifact, LITERATURE_OUTLINE_LANG } from "@/lib/literatureOutline";
+import { LITERATURE_OUTLINE_LANG, findOutlineArtifact } from "@/lib/literatureOutline";
 import { LiteratureOutlineView } from "@/components/artifact/LiteratureOutlineView";
 import { LiteratureArtifactView } from "@/components/library/LiteratureArtifactView";
 import { findItemByDisplayIndex } from "@/lib/resolveLibraryItem";
 import { reviewMarkdownForDisplay } from "@/lib/reviewDisplay";
 import type { LibraryItem } from "@/lib/libraryTypes";
+import { sessionsApi } from "@/lib/api";
 
-type MainTab = "pipeline" | "outline" | "review" | "literature";
+type MainTab = "outline" | "review" | "literature";
 type ReviewMode = "render" | "source";
+
+type ReviewVersion = {
+  id: string;
+  filename: string;
+  created_at?: string;
+};
 
 type Props = {
   streamState: StreamState;
@@ -49,6 +47,23 @@ function extractReviewRefIndices(text: string): number[] {
   return out.sort((a, b) => a - b);
 }
 
+function listReviewArtifacts(streamState: StreamState) {
+  const items: Array<{ id: string; art: StreamState["artifacts"][string] }> = [];
+  for (const id of streamState.artifactOrder) {
+    const art = streamState.artifacts[id];
+    if (!art || art.lang === LITERATURE_OUTLINE_LANG) continue;
+    const lang = art.lang.toLowerCase();
+    if (
+      lang === "markdown" ||
+      lang.endsWith("/markdown") ||
+      lang.endsWith("+markdown")
+    ) {
+      items.push({ id, art });
+    }
+  }
+  return items;
+}
+
 export function LitPilotArtifactPane({
   streamState,
   reviewFilename = "review-latest.md",
@@ -58,78 +73,80 @@ export function LitPilotArtifactPane({
   activeSessionId,
   onLiteratureDetailOpen,
 }: Props) {
-  const workflowRuns = workflowRunsFromStream(streamState);
-  const workflow = findWorkflowArtifact(
-    streamState.artifacts,
-    streamState.artifactOrder,
-  );
-
   const outlineArtifact = useMemo(
     () => findOutlineArtifact(streamState.artifacts, streamState.artifactOrder),
     [streamState.artifacts, streamState.artifactOrder],
   );
 
-  const reviewArtifact = useMemo(() => {
-    for (let i = streamState.artifactOrder.length - 1; i >= 0; i -= 1) {
-      const id = streamState.artifactOrder[i];
-      const art = streamState.artifacts[id];
-      if (!art || art.lang === WORKFLOW_GRAPH_LANG) continue;
-      if (art.lang === LITERATURE_OUTLINE_LANG) continue;
-      const lang = art.lang.toLowerCase();
-      if (
-        lang === "markdown" ||
-        lang.endsWith("/markdown") ||
-        lang.endsWith("+markdown")
-      ) {
-        return { id, art };
-      }
-    }
-    return null;
-  }, [streamState.artifacts, streamState.artifactOrder]);
-
-  const runId =
-    workflow?.id ??
-    workflowRuns[workflowRuns.length - 1]?.run_id ??
-    "literature-agent";
-
-  const baseGraph = workflow?.graph ?? LITERATURE_PLAN_GRAPH;
-  const liveGraph = graphForPipelineDisplay(
-    mergeWorkflowRunsIntoGraph(baseGraph, runId, workflowRuns),
+  const reviewArtifacts = useMemo(
+    () => listReviewArtifacts(streamState),
+    [streamState.artifacts, streamState.artifactOrder],
   );
 
-  const showPipeline = workflowRuns.length > 0 || Boolean(workflow);
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
+  const [savedVersions, setSavedVersions] = useState<ReviewVersion[]>([]);
+  const [savedReviewContent, setSavedReviewContent] = useState<string | null>(null);
+
+  const reviewArtifact = useMemo(() => {
+    if (selectedReviewId) {
+      const hit = reviewArtifacts.find((r) => r.id === selectedReviewId);
+      if (hit) return hit;
+    }
+    return reviewArtifacts[reviewArtifacts.length - 1] ?? null;
+  }, [reviewArtifacts, selectedReviewId]);
+
+  const selectedSavedVersion = useMemo(
+    () => savedVersions.find((v) => v.id === selectedReviewId) ?? null,
+    [savedVersions, selectedReviewId],
+  );
+
   const showOutline = Boolean(outlineArtifact);
-  const showReview = Boolean(reviewArtifact?.art.content?.trim());
+  const activeReviewContent =
+    selectedSavedVersion && savedReviewContent != null
+      ? savedReviewContent
+      : (reviewArtifact?.art.content ?? "");
+  const showReview = Boolean(activeReviewContent.trim());
   const showLiterature = libraryItems.length > 0;
 
-  const [mainTab, setMainTab] = useState<MainTab>("pipeline");
+  const [mainTab, setMainTab] = useState<MainTab>("review");
   const [reviewMode, setReviewMode] = useState<ReviewMode>("render");
   const reviewAutoOpenedRef = useRef(false);
   const literatureAutoOpenedRef = useRef(false);
-
   const outlineAutoOpenedRef = useRef(false);
-  const pipelineAutoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setSavedVersions([]);
+      return;
+    }
+    void sessionsApi.get(activeSessionId).then((meta) => {
+      const versions = (meta?.review_versions ?? []) as ReviewVersion[];
+      setSavedVersions(Array.isArray(versions) ? versions : []);
+    }).catch(() => setSavedVersions([]));
+  }, [activeSessionId, reviewArtifacts.length]);
+
+  useEffect(() => {
+    if (!activeSessionId || !selectedSavedVersion) {
+      setSavedReviewContent(null);
+      return;
+    }
+    void sessionsApi
+      .reviewVersion(activeSessionId, selectedSavedVersion.filename)
+      .then((row) => setSavedReviewContent(row.content))
+      .catch(() => setSavedReviewContent(null));
+  }, [activeSessionId, selectedSavedVersion]);
 
   useEffect(() => {
     reviewAutoOpenedRef.current = false;
     literatureAutoOpenedRef.current = false;
     outlineAutoOpenedRef.current = false;
-    pipelineAutoOpenedRef.current = false;
-  }, [reviewArtifact?.id, outlineArtifact?.id, workflow?.id]);
-
-  /** 编排完成后 workflow-graph 到达时默认展示流程 Tab */
-  useEffect(() => {
-    if (showPipeline && workflow && !pipelineAutoOpenedRef.current) {
-      setMainTab("pipeline");
-      pipelineAutoOpenedRef.current = true;
-    }
-  }, [showPipeline, workflow]);
+  }, [reviewArtifact?.id, outlineArtifact?.id]);
 
   useEffect(() => {
-    if (showReview && !showPipeline && !reviewArtifact?.art.done) {
+    if (showReview && !reviewArtifact?.art.done) {
       setMainTab("review");
     }
-  }, [showReview, showPipeline, reviewArtifact?.art.done]);
+  }, [showReview, reviewArtifact?.art.done]);
 
   useEffect(() => {
     if (showOutline && outlineArtifact?.done && !outlineAutoOpenedRef.current) {
@@ -138,7 +155,6 @@ export function LitPilotArtifactPane({
     }
   }, [showOutline, outlineArtifact?.done, outlineArtifact?.id]);
 
-  /** 综述完成后默认展开文献 Tab（文献库晚于 SSE 到达时也会补切一次） */
   useEffect(() => {
     const reviewDone = showReview && Boolean(reviewArtifact?.art.done);
     if (!reviewDone) return;
@@ -151,7 +167,6 @@ export function LitPilotArtifactPane({
       reviewAutoOpenedRef.current = true;
       return;
     }
-
     if (showLiterature && !literatureAutoOpenedRef.current) {
       setMainTab("literature");
       literatureAutoOpenedRef.current = true;
@@ -170,7 +185,6 @@ export function LitPilotArtifactPane({
       }
       return;
     }
-
     if (!showLiterature && !reviewAutoOpenedRef.current) {
       setMainTab("review");
       reviewAutoOpenedRef.current = true;
@@ -200,8 +214,9 @@ export function LitPilotArtifactPane({
   const artifactFilename = isMatrixArtifact
     ? "matrix-latest.md"
     : reviewFilename;
-  const reviewContent = reviewArtifact?.art.content ?? "";
-  const reviewStreaming = reviewArtifact ? !reviewArtifact.art.done : false;
+  const reviewContent = activeReviewContent;
+  const reviewStreaming =
+    reviewArtifact && !selectedSavedVersion ? !reviewArtifact.art.done : false;
   const reviewRefIndices = extractReviewRefIndices(reviewContent);
 
   const displayReview = useMemo(
@@ -214,10 +229,10 @@ export function LitPilotArtifactPane({
     [reviewContent, isMatrixArtifact, showLiterature, reviewArtifact?.art.done],
   );
 
-  if (!showPipeline && !showOutline && !showReview && !showLiterature) {
+  if (!showOutline && !showReview && !showLiterature) {
     return (
       <p className="litpilot-artifact-pane__empty">
-        执行文献综述后，可在此查看执行流程、章节大纲与生成的综述。
+        执行文献综述后，可在此查看章节大纲、生成的综述与文献库。
       </p>
     );
   }
@@ -238,6 +253,17 @@ export function LitPilotArtifactPane({
   const literatureDetailOpen =
     mainTab === "literature" && Boolean(selectedLibraryId);
 
+  const versionOptions = [
+    ...reviewArtifacts.map((r, idx) => ({
+      id: r.id,
+      label: `流式 v${idx + 1}${r.art.done ? "" : " · 生成中"}`,
+    })),
+    ...savedVersions.map((v, idx) => ({
+      id: v.id,
+      label: `已保存 v${savedVersions.length - idx}`,
+    })),
+  ];
+
   return (
     <div
       className={`litpilot-artifact-pane${
@@ -246,19 +272,6 @@ export function LitPilotArtifactPane({
     >
       <div className="litpilot-artifact-pane__toolbar">
         <div className="litpilot-artifact-pane__tabs" role="tablist">
-          {showPipeline && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mainTab === "pipeline"}
-              className={`litpilot-artifact-pane__tab${
-                mainTab === "pipeline" ? " litpilot-artifact-pane__tab--active" : ""
-              }`}
-              onClick={() => setMainTab("pipeline")}
-            >
-              流程
-            </button>
-          )}
           {showOutline && (
             <button
               type="button"
@@ -333,6 +346,23 @@ export function LitPilotArtifactPane({
 
       {mainTab === "review" && showReview && (
         <>
+          {versionOptions.length > 1 ? (
+            <div className="litpilot-artifact-pane__version-row">
+              <label htmlFor="review-version">版本</label>
+              <select
+                id="review-version"
+                className="input"
+                value={selectedReviewId ?? reviewArtifact?.id ?? ""}
+                onChange={(e) => setSelectedReviewId(e.target.value || null)}
+              >
+                {versionOptions.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <p className="litpilot-artifact-pane__file-hint">
             文件：<code>{artifactFilename}</code>
           </p>
@@ -355,16 +385,6 @@ export function LitPilotArtifactPane({
       )}
 
       <div className="litpilot-artifact-pane__body">
-        {mainTab === "pipeline" && showPipeline && (
-          <WorkflowArtifactPanel
-            graph={liveGraph}
-            workflowRuns={workflowRuns}
-            stages={streamState.stages.map((s) => ({
-              name: s.name,
-              state: s.state,
-            }))}
-          />
-        )}
         {mainTab === "outline" && showOutline && outlineArtifact && (
           <LiteratureOutlineView
             outline={outlineArtifact.outline}

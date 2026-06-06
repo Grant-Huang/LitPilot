@@ -67,10 +67,17 @@ async def iter_fetch_sources_parallel(
     retry_count: int = 0,
     retry_delay_ms: int = 500,
     fetch_provider: str | None = None,
+    prioritize_upload: bool = False,
 ) -> AsyncIterator[tuple[dict[str, str], str, str | None]]:
-    """每完成一篇即 yield，顺序为完成先后（便于 SSE 逐条展示）。"""
+    """每完成一篇即 yield；prioritize_upload 时先完成全部 upload 再处理检索命中。"""
     sem = asyncio.Semaphore(max(1, parallel))
     subset = hits[:max_urls]
+    if prioritize_upload and len(subset) > 1:
+        upload_hits = [h for h in subset if str(h.get("source") or "") == "upload"]
+        other_hits = [h for h in subset if str(h.get("source") or "") != "upload"]
+        ordered = upload_hits + other_hits
+    else:
+        ordered = subset
 
     tasks = [
         asyncio.create_task(
@@ -85,7 +92,7 @@ async def iter_fetch_sources_parallel(
                 sem=sem,
             )
         )
-        for h in subset
+        for h in ordered
     ]
     try:
         for finished in asyncio.as_completed(tasks):
@@ -163,6 +170,7 @@ async def fetch_sources_parallel(
     retry_count: int = 0,
     retry_delay_ms: int = 500,
     fetch_provider: str | None = None,
+    prioritize_upload: bool = False,
 ) -> list[tuple[dict[str, str], str, str | None]]:
     return [
         item
@@ -176,5 +184,6 @@ async def fetch_sources_parallel(
             retry_count=retry_count,
             retry_delay_ms=retry_delay_ms,
             fetch_provider=fetch_provider,
+            prioritize_upload=prioritize_upload,
         )
     ]
