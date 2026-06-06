@@ -1010,8 +1010,9 @@
   font-size: 11px;
 }
 
-/* 功能页（设置、文献库）：占满主区并内部滚动 */
-.meso-main__content:has(> .functional-shell) {
+/* 功能页（设置、文献库、帮助）：占满主区并内部滚动 */
+.meso-main__content:has(> .functional-shell),
+.meso-main__content:has(> .functional-doc-shell) {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1039,17 +1040,6 @@
   gap: 12px;
 }
 
-.settings-admin-page__header {
-  padding-bottom: 0;
-}
-
-.settings-admin-page__head-card {
-  gap: 12px;
-}
-
-.settings-admin-page__inner {
-  max-width: 920px;
-}
 
 .settings-admin-loading {
   display: flex;
@@ -1059,6 +1049,7 @@
 }
 
 .functional-shell .card,
+.functional-doc-shell .card,
 .functional-card {
   background: var(--color-bg-white);
   border: 1px solid var(--color-border-light);
@@ -1264,13 +1255,15 @@
   word-break: break-all;
 }
 
-.functional-shell .label {
+.functional-shell .label,
+.functional-doc-shell .label {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-secondary);
 }
 
-.functional-shell .input {
+.functional-shell .input,
+.functional-doc-shell .input {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--color-border);
@@ -1281,12 +1274,14 @@
   box-sizing: border-box;
 }
 
-.functional-shell .input:focus {
+.functional-shell .input:focus,
+.functional-doc-shell .input:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.functional-shell .btn-primary {
+.functional-shell .btn-primary,
+.functional-doc-shell .btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1300,12 +1295,14 @@
   cursor: pointer;
 }
 
-.functional-shell .btn-primary:disabled {
+.functional-shell .btn-primary:disabled,
+.functional-doc-shell .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.functional-shell .btn-secondary {
+.functional-shell .btn-secondary,
+.functional-doc-shell .btn-secondary {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1318,19 +1315,23 @@
   cursor: pointer;
 }
 
-.functional-shell .btn-secondary:disabled {
+.functional-shell .btn-secondary:disabled,
+.functional-doc-shell .btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .functional-shell select.input,
-.functional-shell .settings-select {
+.functional-shell .settings-select,
+.functional-doc-shell select.input,
+.functional-doc-shell .settings-select {
   appearance: auto;
   cursor: pointer;
   min-height: 38px;
 }
 
-.functional-shell .settings-select option:disabled {
+.functional-shell .settings-select option:disabled,
+.functional-doc-shell .settings-select option:disabled {
   color: var(--text-muted, #94a3b8);
 }
 
@@ -2013,28 +2014,30 @@
   color: var(--color-text-secondary);
 }
 
-/* 帮助中心（独立页 /help） */
-.help-center-page {
+/* 功能文档壳层：帮助中心 / 设置页共用布局 */
+.functional-doc-shell {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--color-bg-white, var(--color-bg));
 }
 
-.help-center-page--loading {
+.functional-doc-shell--loading {
   align-items: center;
   justify-content: center;
   min-height: 240px;
 }
 
-.help-center-page__header {
+.functional-doc-shell__header {
   flex-shrink: 0;
   padding: 14px 20px 0;
   border-bottom: 1px solid var(--color-border-light);
 }
 
-.help-center-page__brand {
+.functional-doc-shell__brand {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2044,34 +2047,28 @@
   color: var(--color-text);
 }
 
-.help-center {
+.functional-doc-shell__body {
   display: grid;
   grid-template-columns: 200px 1fr;
   flex: 1;
   min-height: 0;
 }
 
-.help-center--standalone {
-  min-height: 0;
-  max-height: none;
-}
-
-.help-center__nav {
+.functional-doc-shell__nav {
   border-right: 1px solid var(--color-border-light);
   padding: 12px 10px;
   overflow-y: auto;
   min-height: 0;
   background: color-mix(in srgb, var(--color-text) 2%, var(--color-bg));
-  scrollbar-color: color-mix(in srgb, var(--color-text) 22%, var(--color-bg))
-    transparent;
+  scrollbar-color: color-mix(in srgb, var(--color-text) 22%, var(--color-bg)) transparent;
   scrollbar-width: thin;
 }
 
-.help-center__nav-group {
+.functional-doc-shell__nav-group {
   margin-bottom: 14px;
 }
 
-.help-center__nav-cat {
+.functional-doc-shell__nav-cat {
   display: block;
   font-size: 10px;
   font-weight: 600;
@@ -2081,13 +2078,13 @@
   padding: 0 8px 6px;
 }
 
-.help-center__nav-list {
+.functional-doc-shell__nav-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.help-center__nav-item {
+.functional-doc-shell__nav-item {
   display: block;
   width: 100%;
   text-align: left;
@@ -2099,48 +2096,73 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
+  text-decoration: none;
 }
 
-.help-center__nav-item:hover {
+.functional-doc-shell__nav-item:hover {
   background: var(--nav-hover-bg);
   color: var(--color-text);
 }
 
-.help-center__nav-item--active {
+.functional-doc-shell__nav-item--active {
   background: var(--nav-active-bg);
   color: var(--color-accent-dark, var(--color-accent));
   font-weight: 600;
 }
 
-.help-center__main {
+.functional-doc-shell__main {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 16px 20px 20px;
   overflow-y: auto;
-  scrollbar-color: color-mix(in srgb, var(--color-text) 22%, var(--color-bg))
-    transparent;
+  scrollbar-color: color-mix(in srgb, var(--color-text) 22%, var(--color-bg)) transparent;
   scrollbar-width: thin;
 }
 
-.help-center__page-header {
+.functional-doc-shell__page-header {
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--color-border-light);
 }
 
-.help-center__page-title {
+.functional-doc-shell__page-title {
   margin: 0 0 6px;
   font-size: 18px;
   font-weight: 600;
 }
 
-.help-center__page-summary {
+.functional-doc-shell__page-summary {
   margin: 0;
   font-size: 13px;
   color: var(--color-text-muted);
 }
 
+.functional-doc-shell__content {
+  min-width: 0;
+}
+
+.settings-doc-content {
+  max-width: 920px;
+}
+
+.settings-personal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-personal-panel__check {
+  margin-top: 4px;
+}
+
+.settings-personal-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* 帮助中心正文（Markdown 渲染专用） */
 .help-center__body {
   font-size: 13px;
   line-height: 1.6;
@@ -2310,11 +2332,11 @@
 }
 
 @media (max-width: 640px) {
-  .help-center {
+  .functional-doc-shell__body {
     grid-template-columns: 1fr;
   }
 
-  .help-center__nav {
+  .functional-doc-shell__nav {
     border-right: none;
     border-bottom: 1px solid var(--color-border-light);
     max-height: 140px;
@@ -2478,7 +2500,8 @@
   }
 }
 
-.functional-shell .btn-sm {
+.functional-shell .btn-sm,
+.functional-doc-shell .btn-sm {
   padding: 4px 12px;
   font-size: 12px;
   min-height: 28px;

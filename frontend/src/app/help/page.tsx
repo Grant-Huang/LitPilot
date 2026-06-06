@@ -35,7 +35,7 @@ export default function HelpPage() {
   return (
     <Suspense
       fallback={
-        <div className="help-center-page help-center-page--loading">
+        <div className="functional-doc-shell functional-doc-shell--loading">
           <Spin />
         </div>
       }

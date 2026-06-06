@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { UserOutlined } from "@ant-design/icons";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
+import { FunctionalDocShell } from "@/components/layout/FunctionalDocShell";
 import { InlineField } from "../admin/_ui";
 import {
   errorMessage,
@@ -9,6 +11,7 @@ import {
   SettingsLoading,
   SettingsSuccessMsg,
 } from "../_shared";
+import { buildPersonalNavGroups, PERSONAL_SECTION } from "./_shellConfig";
 
 type CitationFormat = "apa" | "acm";
 
@@ -57,28 +60,37 @@ export default function PersonalSettingsPage() {
 
   if (loading) {
     return (
-      <div
-        className="functional-shell"
-        style={{ alignItems: "center", justifyContent: "center", flex: 1 }}
+      <FunctionalDocShell
+        brandIcon={<UserOutlined aria-hidden />}
+        brandTitle="个人设置"
+        navGroups={buildPersonalNavGroups()}
+        pageTitle={PERSONAL_SECTION.title}
+        pageSummary={PERSONAL_SECTION.summary}
+        contentClassName="settings-doc-content"
+        className="functional-doc-shell--loading"
       >
         <SettingsLoading />
-      </div>
+      </FunctionalDocShell>
     );
   }
 
   return (
-    <div className="functional-shell">
-      <div className="card settings-section" style={{ maxWidth: 920 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>个人设置</h2>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-            仅影响本机个人偏好，不包含系统级密钥与能力配置。
-          </p>
-        </div>
-
+    <FunctionalDocShell
+      brandIcon={<UserOutlined aria-hidden />}
+      brandTitle="个人设置"
+      navGroups={buildPersonalNavGroups()}
+      pageTitle={PERSONAL_SECTION.title}
+      pageSummary={PERSONAL_SECTION.summary}
+      contentClassName="settings-doc-content"
+    >
+      <div className="card settings-section settings-personal-panel">
         {msgOk ? <SettingsSuccessMsg msg={msg} /> : <SettingsErrorMsg msg={msg} />}
 
-        <InlineField label="参考文献格式" htmlFor="citation-format">
+        <InlineField
+          label="参考文献格式"
+          htmlFor="citation-format"
+          tip="影响引用抽取与综述参考文献章节格式。"
+        >
           <select
             id="citation-format"
             className="input settings-select"
@@ -88,22 +100,19 @@ export default function PersonalSettingsPage() {
             <option value="apa">APA</option>
             <option value="acm">ACM</option>
           </select>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-            影响引用抽取与综述参考文献章节格式。
-          </p>
         </InlineField>
 
-        <label className="settings-checkbox-row">
+        <label className="settings-cap-inline-check settings-personal-panel__check">
           <input type="checkbox" checked={planConfirm} onChange={(e) => setPlanConfirm(e.target.checked)} />
           执行前展示工作流拓扑并确认（plan_confirm）
         </label>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-          <button type="button" className="btn-primary" onClick={() => void onSave()} disabled={saving}>
+        <div className="settings-personal-panel__actions">
+          <button type="button" className="btn-primary btn-sm" onClick={() => void onSave()} disabled={saving}>
             {saving ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
-    </div>
+    </FunctionalDocShell>
   );
 }
