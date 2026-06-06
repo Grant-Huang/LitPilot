@@ -126,7 +126,7 @@ function CapabilityCard({
         .filter(Boolean);
 
     if (cap.capability_id === "web_search") {
-      const searchProvider = String(params.search_provider ?? "native");
+      const searchProvider = String(params.search_provider ?? "multi_academic");
       const isApiSearch = searchProviderNeedsCredential(searchProvider);
       const searchDepthTip = `${CAP_TIPS.search_depth_basic}\n${CAP_TIPS.search_depth_advanced}`;
       return (
@@ -159,7 +159,9 @@ function CapabilityCard({
             <p className="settings-cap-field-note">
               {searchProvider === "openalex"
                 ? "OpenAlex 学术索引，无需 API Key。"
-                : "native 使用 DuckDuckGo HTML 检索，无需 API Key。"}
+                : searchProvider === "multi_academic"
+                  ? "multi_academic 并行 arXiv/CrossRef/PMC/OpenAlex/Semantic Scholar，无需 Key。"
+                  : "native 使用 DuckDuckGo HTML 检索，无需 API Key。"}
             </p>
           ) : null}
           <div className="settings-cap-params-grid">
@@ -170,7 +172,7 @@ function CapabilityCard({
                 type="number"
                 min={1}
                 max={80}
-                value={Number(params.search_max_results ?? 8)}
+                value={Number(params.search_max_results ?? 20)}
                 onChange={(e) =>
                   setParams((p) => ({ ...p, search_max_results: Number(e.target.value) }))
                 }
@@ -183,7 +185,7 @@ function CapabilityCard({
                 type="number"
                 min={0}
                 max={3}
-                value={Number(params.search_retry_count ?? 0)}
+                value={Number(params.search_retry_count ?? 3)}
                 onChange={(e) =>
                   setParams((p) => ({ ...p, search_retry_count: Number(e.target.value) }))
                 }
@@ -347,7 +349,7 @@ function CapabilityCard({
               <select
                 id={`${cap.capability_id}-pdf-backend`}
                 className="input settings-select"
-                value={String(params.pdf_extract_backend ?? "pypdf")}
+                value={String(params.pdf_extract_backend ?? "pymupdf4llm")}
                 onChange={(e) =>
                   setParams((p) => ({ ...p, pdf_extract_backend: e.target.value }))
                 }
@@ -357,7 +359,7 @@ function CapabilityCard({
               </select>
             </InlineField>
           ) : null}
-          {String(params.pdf_extract_backend ?? "pypdf") === "pymupdf4llm" && isNativeFetch ? (
+          {String(params.pdf_extract_backend ?? "pymupdf4llm") === "pymupdf4llm" && isNativeFetch ? (
             <p className="settings-cap-field-note">
               pymupdf4llm 基于 PyMuPDF（Artifex）。商业使用需 Artifex 许可证；可选：{" "}
               <code>pip install pymupdf4llm</code>

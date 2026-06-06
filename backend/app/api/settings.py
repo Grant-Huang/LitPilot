@@ -39,7 +39,7 @@ def _capability_health_ok(cap: dict, *, cred_ok: dict, inst_ok: dict) -> bool:
     cap_id = str(cap.get("capability_id") or "")
     params = _capability_params(cap)
     if cap_id == "web_search":
-        sp = str(params.get("search_provider") or "native").strip().lower()
+        sp = str(params.get("search_provider") or "multi_academic").strip().lower()
         if sp in ("native", "openalex"):
             return True
     if cap_id == "web_fetch":

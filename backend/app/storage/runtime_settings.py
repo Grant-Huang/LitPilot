@@ -17,9 +17,9 @@ WEB_SEARCH_PARAM_DEFAULTS: dict[str, Any] = {
 
     "search_provider": "multi_academic",
 
-    "search_max_results": 8,
+    "search_max_results": 20,
 
-    "search_retry_count": 0,
+    "search_retry_count": 3,
 
     "include_domains": list(ACADEMIC_SEARCH_DOMAINS),
 
@@ -55,7 +55,7 @@ WEB_FETCH_PARAM_DEFAULTS: dict[str, Any] = {
 
     "fetch_provider": "native",
 
-    "pdf_extract_backend": "pypdf",
+    "pdf_extract_backend": "pymupdf4llm",
 
     "max_fetch_urls": 5,
 
@@ -418,7 +418,9 @@ def build_runtime_settings(
 
         "fetch_provider": fetch_provider,
 
-        "pdf_extract_backend": str(fetch.get("pdf_extract_backend") or "pypdf").strip().lower(),
+        "pdf_extract_backend": str(
+            fetch.get("pdf_extract_backend") or "pymupdf4llm"
+        ).strip().lower(),
 
         "llm_provider": llm.get("llm_provider") or "openai",
 
@@ -446,7 +448,7 @@ def build_runtime_settings(
 
         "fetch_timeout_sec": float(fetch.get("fetch_timeout_sec") or 45),
 
-        "search_max_results": int(web.get("search_max_results") or 8),
+        "search_max_results": int(web.get("search_max_results") or 20),
 
         "max_fetch_urls": int(fetch.get("max_fetch_urls") or 5),
 
@@ -456,7 +458,7 @@ def build_runtime_settings(
 
         "search_parallel": int(web.get("search_parallel") or 1),
 
-        "search_retry_count": int(web.get("search_retry_count") or 0),
+        "search_retry_count": int(web.get("search_retry_count") or 3),
 
         "fetch_retry_count": int(fetch.get("fetch_retry_count") or 0),
 

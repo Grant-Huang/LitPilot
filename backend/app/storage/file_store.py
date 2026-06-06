@@ -599,8 +599,8 @@ class FileStore:
             params={
                 **WEB_SEARCH_PARAM_DEFAULTS,
                 "search_provider": "multi_academic",
-                "search_max_results": int(legacy.get("search_max_results") or 8),
-                "search_retry_count": int(legacy.get("search_retry_count") or 0),
+                "search_max_results": int(legacy.get("search_max_results") or 20),
+                "search_retry_count": int(legacy.get("search_retry_count") or 3),
             },
         )
         cap(
@@ -751,12 +751,12 @@ class FileStore:
                     "search_max_results": int(
                         legacy.get("search_max_results")
                         or legacy.get("tavily_max_results")
-                        or 8
+                        or 20
                     ),
                     "search_retry_count": int(
                         legacy.get("search_retry_count")
                         or legacy.get("tavily_retry_count")
-                        or 0
+                        or 3
                     ),
                 },
             },

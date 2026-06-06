@@ -38,7 +38,7 @@ async def get_web_search_api_key() -> str:
 
     s = await get_merged_settings()
 
-    provider = str(s.get("search_provider") or "native").strip().lower()
+    provider = str(s.get("search_provider") or "multi_academic").strip().lower()
 
     if provider == "brave":
 
@@ -147,7 +147,7 @@ SEARCH_MAX_RESULTS_CAP = 80
 
 async def get_search_max_results() -> int:
 
-    n = int((await get_merged_settings()).get("search_max_results") or 8)
+    n = int((await get_merged_settings()).get("search_max_results") or 20)
 
     return max(1, min(n, SEARCH_MAX_RESULTS_CAP))
 
@@ -215,7 +215,7 @@ async def get_literature_source_mode() -> str:
 
 async def get_search_retry_count() -> int:
 
-    n = int((await get_merged_settings()).get("search_retry_count") or 0)
+    n = int((await get_merged_settings()).get("search_retry_count") or 3)
 
     return max(0, min(n, 3))
 

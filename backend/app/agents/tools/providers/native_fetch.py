@@ -77,7 +77,7 @@ async def fetch_bytes(
     timeout: float = 60.0,
     redirect_checker: Callable[[str, str], bool] | None = None,
     s2_api_key: str | None = None,
-    pdf_extract_backend: str = "pypdf",
+    pdf_extract_backend: str = "pymupdf4llm",
 ) -> FetchResult:
     """Fetch URL; resolve OJS / citation_pdf_url / S2 / PDF when possible."""
     target = normalize_reader_target_url(url)
@@ -153,7 +153,7 @@ async def fetch(
     timeout: float = 60.0,
     redirect_checker: Callable[[str, str], bool] | None = None,
     s2_api_key: str | None = None,
-    pdf_extract_backend: str = "pypdf",
+    pdf_extract_backend: str = "pymupdf4llm",
 ) -> str:
     """Fetch URL body as text/markdown-ish string (HTML decoded or PDF extracted)."""
     result = await fetch_bytes(

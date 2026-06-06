@@ -33,6 +33,7 @@ from app.agents.tools.web_search_domains import (
 def test_normalize_pdf_extract_backend() -> None:
     assert normalize_pdf_extract_backend("pypdf") == "pypdf"
     assert normalize_pdf_extract_backend("pymupdf4llm") == "pymupdf4llm"
+    assert normalize_pdf_extract_backend(None) == "pymupdf4llm"
     assert normalize_pdf_extract_backend("unknown") == "pypdf"
 
 

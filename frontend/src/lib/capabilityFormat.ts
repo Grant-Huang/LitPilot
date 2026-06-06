@@ -93,11 +93,11 @@ export function formatCapabilityParams(
   const p = params || {};
   if (capId === "web_search") {
     const prov = String(p.search_provider ?? "multi_academic");
-    return `${prov} · 检索 ${Number(p.search_max_results ?? 8)} · 重试 ${Number(p.search_retry_count ?? 0)}`;
+    return `${prov} · 检索 ${Number(p.search_max_results ?? 20)} · 重试 ${Number(p.search_retry_count ?? 3)}`;
   }
   if (capId === "web_fetch") {
     const prov = String(p.fetch_provider ?? "native");
-    const pdf = String(p.pdf_extract_backend ?? "pypdf");
+    const pdf = String(p.pdf_extract_backend ?? "pymupdf4llm");
     const pdfPart = prov === "native" ? ` · PDF ${pdf}` : "";
     return `${prov} · 抓取 ${Number(p.max_fetch_urls ?? 5)} · 并行 ${Number(p.fetch_parallel ?? 3)}${pdfPart}`;
   }

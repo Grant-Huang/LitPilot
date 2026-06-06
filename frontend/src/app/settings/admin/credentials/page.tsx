@@ -227,7 +227,7 @@ export default function AdminCredentialsPage() {
   const webFetchCap = caps.find((c) => c.capability_id === "web_fetch");
   const searchProvider = String(webSearchCap?.params?.search_provider ?? "multi_academic");
   const fetchProvider = String(webFetchCap?.params?.fetch_provider ?? "native");
-  const pdfExtractBackend = String(webFetchCap?.params?.pdf_extract_backend ?? "pypdf");
+  const pdfExtractBackend = String(webFetchCap?.params?.pdf_extract_backend ?? "pymupdf4llm");
   const fetchTimeoutSec = Number(webFetchCap?.params?.fetch_timeout_sec ?? 45);
 
   return (
