@@ -357,6 +357,8 @@ async def stream_search_phase(
             {
                 **pass_meta,
                 "hits": len(hits),
+                "hits_found": int(raw_search.get("raw_found_total") or pre_corpus_hit_count),
+                "hits_taken": len(hits),
                 "source_counts": raw_search.get("source_counts") or {},
                 "duration_ms": search_ms,
             },
@@ -411,6 +413,209 @@ async def stream_search_phase(
             upsert_stage(execution_trace, "文献检索", "done")
 
 
+async def _stream_expanded_multi_academic_by_source(
+    *,
+    user_message: str,
+    clean_queries: list[str],
+    titles: list[str],
+    total: int,
+    search_max_results: int,
+    search_retry_count: int,
+    source_mode: str,
+    upload_count: int,
+    upload_urls: list[str],
+    think_acc: ThinkAccumulator,
+    planner_ctx,
+    execution_trace: dict[str, Any],
+    corpus: SessionCorpus | None,
+    search_include_domains: tuple[str, ...] | None,
+    search_exclude_domains: tuple[str, ...] | None,
+    search_enforce_domain_filter: bool,
+    search_enable_junk_filter: bool,
+    exclude_title_substrings: list[str] | None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """Multi-topic multi_academic: parallel across sources, one in-flight request per source."""
+    from app.agents.tools.providers import multi_academic as ma
+    from app.agents.tools.web_providers import _resolve_s2_api_key
+
+    include_domains = search_include_domains or ACADEMIC_SEARCH_DOMAINS
+    exclude_domains = search_exclude_domains or DEFAULT_EXCLUDE_DOMAINS
+
+    yield ("stage", {"name": "文献检索", "state": "active"})
+
+    if clean_queries:
+        search_before_ctx = format_search_before_context(
+            query=clean_queries[0],
+            source_mode=source_mode,
+            search_max_results=search_max_results,
+            upload_count=upload_count,
+            skipped_web_search=False,
+            search_provider="multi_academic",
+        )
+        async for ev in narrate_phase_stream(
+            "B",
+            user_message,
+            search_before_ctx,
+            think_acc=think_acc,
+            ctx=planner_ctx,
+        ):
+            yield ev
+
+    specs = [
+        ma.PassSpec(
+            pass_index=idx,
+            pass_total=total,
+            query=query,
+            topic_title=titles[idx - 1] if idx - 1 < len(titles) else "",
+            max_results=search_max_results,
+        )
+        for idx, query in enumerate(clean_queries, start=1)
+    ]
+
+    for spec in specs:
+        yield (
+            "literature_search_pass_start",
+            {
+                "query": spec.query,
+                "pass_index": spec.pass_index,
+                "pass_total": spec.pass_total,
+                "provider": "multi_academic",
+                "topic_title": spec.topic_title,
+            },
+        )
+
+    s2_key = await _resolve_s2_api_key(None)
+    t0 = time.monotonic()
+    pass_outcomes: dict[int, dict[str, Any]] = {}
+
+    async for kind, payload in ma.iter_multi_pass_by_source_events(
+        specs,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
+        s2_api_key=s2_key or "",
+    ):
+        if kind == "source_start":
+            yield ("literature_search_source_start", payload)
+            yield (
+                "literature_progress",
+                {
+                    "stage": "search",
+                    "detail": str(payload.get("label") or payload.get("source") or ""),
+                    "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                    "pass_index": payload.get("pass_index"),
+                    "pass_total": payload.get("pass_total"),
+                    "source": payload.get("source"),
+                },
+            )
+        elif kind == "source_done":
+            yield ("literature_search_source_done", payload)
+            yield (
+                "literature_progress",
+                {
+                    "stage": "search",
+                    "detail": str(payload.get("label") or payload.get("source") or ""),
+                    "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                    "pass_index": payload.get("pass_index"),
+                    "pass_total": payload.get("pass_total"),
+                    "source": payload.get("source"),
+                },
+            )
+        elif kind == "pass_complete":
+            pass_index = int(payload.get("pass_index") or 0)
+            pass_total = int(payload.get("pass_total") or total)
+            query = str(payload.get("query") or "")
+            topic_title = str(payload.get("topic_title") or "")
+            raw_search = {
+                "results": payload.get("results") or [],
+                "answer": "",
+                "source_counts": payload.get("source_counts") or {},
+                "raw_found_total": payload.get("raw_found_total") or 0,
+                "hits_taken": payload.get("hits_taken") or 0,
+            }
+            pass_meta = {
+                "query": query,
+                "pass_index": pass_index,
+                "pass_total": pass_total,
+                "provider": "multi_academic",
+                "topic_title": topic_title,
+            }
+            raw_hits = normalize_search_results(raw_search)
+            hits, filter_warning = apply_literature_hit_filters(
+                raw_hits,
+                include_domains=include_domains,
+                enable_junk_filter=search_enable_junk_filter,
+                enforce_domain_filter=search_enforce_domain_filter,
+                exclude_title_substrings=exclude_title_substrings,
+            )
+            if filter_warning:
+                async for ev in emit_system_think_line(
+                    f"⟦sys⟧{filter_warning}⟦/sys⟧",
+                    accumulator=think_acc,
+                ):
+                    yield ev
+            pre_corpus_hit_count = len(hits)
+            if corpus:
+                hits = [h for h in hits if not corpus.has_url(str(h.get("url") or ""))]
+            search_ms = int((time.monotonic() - t0) * 1000)
+            async for ev in emit_tool_event(
+                lambda p: f"{p}_search",
+                "web_search",
+                {
+                    "query": query,
+                    "provider": "multi_academic",
+                    "pass_index": pass_index,
+                    "pass_total": pass_total,
+                },
+                json.dumps(
+                    {
+                        "answer": "",
+                        "hits": len(hits),
+                        "hits_before_corpus": pre_corpus_hit_count,
+                        "retries": search_retry_count,
+                    },
+                    ensure_ascii=False,
+                ),
+                duration_ms=search_ms,
+                trace=execution_trace,
+            ):
+                yield ev
+            pass_out = {
+                "hits": [dict(h) for h in hits],
+                "answer": "",
+                "tool_hit_count": len(hits),
+                "hits_before_corpus": pre_corpus_hit_count,
+            }
+            pass_outcomes[pass_index] = pass_out
+            yield (
+                "literature_search_pass_hits",
+                {
+                    "hits": pass_out["hits"],
+                    "pass_index": pass_index,
+                    "pass_total": pass_total,
+                },
+            )
+            yield (
+                "literature_search_pass_done",
+                {
+                    **pass_meta,
+                    "hits": len(hits),
+                    "hits_found": int(raw_search.get("raw_found_total") or pre_corpus_hit_count),
+                    "hits_taken": len(hits),
+                    "source_counts": raw_search.get("source_counts") or {},
+                    "duration_ms": search_ms,
+                },
+            )
+            if not hits:
+                async for ev in emit_system_think_line(
+                    f"⟦sys⟧第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。⟦/sys⟧",
+                    accumulator=think_acc,
+                ):
+                    yield ev
+
+    # Stash for caller via execution_trace scratch (avoid changing signature)
+    execution_trace["_ma_pass_outcomes"] = pass_outcomes
+
+
 async def stream_expanded_search_phase(
     *,
     user_message: str,
@@ -445,34 +650,87 @@ async def stream_expanded_search_phase(
     if not clean_queries:
         clean_queries = [""]
     total = len(clean_queries)
-    per_query_max = max(2, search_max_results // total)
+
+    from app.agents.tools.web_providers import normalize_search_provider
+
+    if search_provider is None:
+        from app.agents.agent_settings import get_web_search_provider
+
+        search_provider = await get_web_search_provider()
+    search_prov = normalize_search_provider(search_provider)
+
+    titles = list(topic_titles or [])
+    if len(titles) < total:
+        titles.extend([""] * (total - len(titles)))
+
+    topic_parallel = max(1, min(int(search_parallel or 1), total))
+    if search_prov == "multi_academic":
+        from app.agents.tools.providers.academic.source_gate import source_count
+
+        topic_parallel = 1
+        source_parallel = source_count()
+        parallel_mode = "by_source"
+    else:
+        source_parallel = None
+        parallel_mode = "by_topic"
+
+    yield (
+        "literature_search_plan",
+        {
+            "queries": clean_queries,
+            "per_query_max_results": search_max_results,
+            "total_passes": total,
+            "search_parallel": topic_parallel,
+            "topic_parallel": topic_parallel,
+            "source_parallel": source_parallel,
+            "parallel_mode": parallel_mode,
+        },
+    )
+
+    pass_results: dict[int, dict[str, Any]] = {}
     hits_lists: list[list[dict[str, str]]] = []
     answers: list[str] = []
     raw_total = 0
     raw_before_corpus = 0
     tool_hit_total = 0
 
-    yield (
-        "literature_search_plan",
-        {
-            "queries": clean_queries,
-            "per_query_max_results": per_query_max,
-            "total_passes": total,
-            "search_parallel": max(1, search_parallel),
-        },
-    )
-
-    pass_results: dict[int, dict[str, Any]] = {}
-    parallel = max(1, min(int(search_parallel or 1), total))
-    titles = list(topic_titles or [])
-    if len(titles) < total:
-        titles.extend([""] * (total - len(titles)))
-
-    if parallel > 1 and total > 1:
+    if search_prov == "multi_academic" and total > 1:
+        async for ev in _stream_expanded_multi_academic_by_source(
+            user_message=user_message,
+            clean_queries=clean_queries,
+            titles=titles,
+            total=total,
+            search_max_results=search_max_results,
+            search_retry_count=search_retry_count,
+            source_mode=source_mode,
+            upload_count=upload_count,
+            upload_urls=upload_urls,
+            think_acc=think_acc,
+            planner_ctx=planner_ctx,
+            execution_trace=execution_trace,
+            corpus=corpus,
+            search_include_domains=search_include_domains,
+            search_exclude_domains=search_exclude_domains,
+            search_enforce_domain_filter=search_enforce_domain_filter,
+            search_enable_junk_filter=search_enable_junk_filter,
+            exclude_title_substrings=exclude_title_substrings,
+        ):
+            yield ev
+        pass_results = dict(execution_trace.pop("_ma_pass_outcomes", {}))
+        for idx in range(1, total + 1):
+            pass_out = pass_results.get(idx) or {}
+            pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
+            raw_total += len(pass_hits)
+            raw_before_corpus += int(
+                pass_out.get("hits_before_corpus") or len(pass_hits)
+            )
+            tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
+            hits_lists.append(pass_hits)
+    elif topic_parallel > 1 and total > 1:
         queue: asyncio.Queue[
             tuple[str, int, tuple[str, dict[str, Any]] | dict[str, Any]]
         ] = asyncio.Queue()
-        sem = asyncio.Semaphore(parallel)
+        sem = asyncio.Semaphore(topic_parallel)
 
         async def _pass_worker(idx: int, query: str) -> None:
             async with sem:
@@ -481,7 +739,7 @@ async def stream_expanded_search_phase(
                     user_message=user_message,
                     query=query,
                     search_api_key=search_api_key,
-                    search_max_results=per_query_max,
+                    search_max_results=search_max_results,
                     search_retry_count=search_retry_count,
                     fetch_retry_delay_ms=fetch_retry_delay_ms,
                     source_mode=source_mode,
@@ -558,7 +816,7 @@ async def stream_expanded_search_phase(
                 user_message=user_message,
                 query=query,
                 search_api_key=search_api_key,
-                search_max_results=per_query_max,
+                search_max_results=search_max_results,
                 search_retry_count=search_retry_count,
                 fetch_retry_delay_ms=fetch_retry_delay_ms,
                 source_mode=source_mode,
@@ -603,7 +861,7 @@ async def stream_expanded_search_phase(
 
     merge_cap = search_max_results if search_max_results > 0 else None
     pass_hit_counts = [len(h) for h in hits_lists]
-    merged_pre_corpus = merge_search_hits(hits_lists, max_results=merge_cap)
+    merged_pre_corpus = merge_search_hits(hits_lists)
     merged = list(merged_pre_corpus)
     corpus_dropped = 0
     if corpus:
@@ -620,7 +878,7 @@ async def stream_expanded_search_phase(
             "deduped": len(merged),
             "deduped_pre_corpus": len(merged_pre_corpus),
             "corpus_dropped": corpus_dropped,
-            "cap": search_max_results,
+            "per_source_cap": merge_cap,
             "pass_hit_counts": pass_hit_counts,
         },
     )

@@ -1,10 +1,19 @@
+export type SearchHitPreview = {
+  url: string;
+  title: string;
+};
+
 export type SearchSourceNode = {
   source: string;
   label: string;
   status: "pending" | "running" | "done" | "error";
   hits: number;
-  expected: number;
+  hitsFound: number;
+  hitsTaken: number;
+  maxResults: number;
   topUrls: string[];
+  topHits: SearchHitPreview[];
+  failed: boolean;
   query?: string;
 };
 
@@ -51,8 +60,12 @@ function defaultSources(): SearchSourceNode[] {
     label: SOURCE_LABELS[source] ?? source,
     status: "pending",
     hits: 0,
-    expected: 0,
+    hitsFound: 0,
+    hitsTaken: 0,
+    maxResults: 0,
     topUrls: [],
+    topHits: [],
+    failed: false,
   }));
 }
 
@@ -96,8 +109,12 @@ function sourceFor(topic: SearchTopicNode, source: string, label?: string): Sear
       label: label ?? SOURCE_LABELS[source] ?? source,
       status: "pending",
       hits: 0,
-      expected: 0,
+      hitsFound: 0,
+      hitsTaken: 0,
+      maxResults: 0,
       topUrls: [],
+      topHits: [],
+      failed: false,
     };
     topic.sources.push(row);
   }
@@ -106,7 +123,9 @@ function sourceFor(topic: SearchTopicNode, source: string, label?: string): Sear
 }
 
 function recountTopic(topic: SearchTopicNode): void {
-  topic.sourcesDone = topic.sources.filter((s) => s.status === "done").length;
+  topic.sourcesDone = topic.sources.filter(
+    (s) => s.status === "done" || s.status === "error",
+  ).length;
 }
 
 export function buildSearchProgressTree(
@@ -174,16 +193,44 @@ export function buildSearchProgressTree(
       );
       const src = String(data.source ?? "");
       const row = sourceFor(topic, src, String(data.label ?? ""));
-      if (typeof data.expected === "number") row.expected = data.expected;
+      if (typeof data.max_results === "number") row.maxResults = data.max_results;
       if (typeof data.query === "string") row.query = data.query;
       if (ext.name === "literature_search_source_start") {
         row.status = "running";
       } else {
-        row.status = "done";
-        row.hits = typeof data.hits === "number" ? data.hits : row.hits;
-        const urls = data.top_urls;
-        if (Array.isArray(urls)) {
-          row.topUrls = urls.map((u) => String(u)).filter(Boolean);
+        row.failed = Boolean(data.failed);
+        row.status = row.failed ? "error" : "done";
+        const found =
+          typeof data.hits_found === "number"
+            ? data.hits_found
+            : typeof data.hits === "number"
+              ? data.hits
+              : row.hitsFound;
+        const taken =
+          typeof data.hits_taken === "number"
+            ? data.hits_taken
+            : found;
+        row.hitsFound = found;
+        row.hitsTaken = taken;
+        row.hits = found;
+        const hitsRaw = data.top_hits;
+        if (Array.isArray(hitsRaw)) {
+          row.topHits = hitsRaw
+            .map((h) => {
+              const rowHit = h as Record<string, unknown>;
+              const url = String(rowHit.url ?? "").trim();
+              const title = String(rowHit.title ?? "").trim();
+              if (!url) return null;
+              return { url, title: title || url };
+            })
+            .filter((h): h is SearchHitPreview => Boolean(h));
+          row.topUrls = row.topHits.map((h) => h.url);
+        } else {
+          const urls = data.top_urls;
+          if (Array.isArray(urls)) {
+            row.topUrls = urls.map((u) => String(u)).filter(Boolean);
+            row.topHits = row.topUrls.map((url) => ({ url, title: url }));
+          }
         }
       }
       recountTopic(topic);
@@ -199,14 +246,19 @@ export function buildSearchProgressTree(
         String(data.query ?? ""),
       );
       topic.status = "done";
-      topic.hits = typeof data.hits === "number" ? data.hits : topic.hits;
+      topic.hits =
+        typeof data.hits_taken === "number"
+          ? data.hits_taken
+          : typeof data.hits === "number"
+            ? data.hits
+            : topic.hits;
       if (typeof data.duration_ms === "number") topic.durationMs = data.duration_ms;
       const counts = data.source_counts as Record<string, number> | undefined;
       if (counts) {
         for (const [src, n] of Object.entries(counts)) {
           const row = sourceFor(topic, src);
-          row.hits = n;
-          row.status = "done";
+          if (!row.hitsFound && !row.failed) row.hitsFound = n;
+          if (row.status !== "error") row.status = "done";
         }
         recountTopic(topic);
       }
@@ -240,21 +292,26 @@ export function topicDisplayTitle(topic: SearchTopicNode): string {
 }
 
 export function topicStatusLabel(topic: SearchTopicNode): string {
-  const done = topic.sourcesDone;
-  const total = topic.sourceTotal || SOURCE_ORDER.length;
+  const sourcesDone = topic.sourcesDone;
+  const sourceTotal = topic.sourceTotal || SOURCE_ORDER.length;
   if (topic.status === "done") {
-    return `检索完成（${topic.hits}/${total}）`;
+    return `检索完成 · ${topic.hits} 篇`;
   }
-  return `检索中（${done}/${total}）`;
+  if (topic.status === "running") {
+    return `检索中 · ${sourcesDone}/${sourceTotal} 源（${sourcesDone} 个数据源已完成）`;
+  }
+  return "待检索";
 }
 
 export function sourceStatusLabel(source: SearchSourceNode): string {
-  const exp = source.expected || "?";
+  if (source.status === "error" || source.failed) {
+    return "检索超时/失败（0）";
+  }
   if (source.status === "done") {
-    return `检索完成（${source.hits}/${exp}）`;
+    return `检索完成 · 搜到 ${source.hitsFound} 篇，取 ${source.hitsTaken} 篇`;
   }
   if (source.status === "running") {
-    return `检索中（${source.hits}/${exp}）`;
+    return "检索中…";
   }
-  return `待检索（0/${exp}）`;
+  return "待检索";
 }

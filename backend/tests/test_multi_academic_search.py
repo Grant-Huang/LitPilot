@@ -1,6 +1,7 @@
 """Tests for multi_academic search provider."""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -91,6 +92,32 @@ async def test_multi_academic_iter_search_events(monkeypatch) -> None:
     assert kinds.count("source_done") == 5
     assert kinds[-1] == "complete"
     assert events[-1][1]["source_counts"]["openalex"] == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_academic_emits_failed_done_for_stalled_source(monkeypatch) -> None:
+    async def slow_ss(*_args, **_kwargs):
+        await asyncio.sleep(3600)
+        return []
+
+    monkeypatch.setattr(ma.openalex_provider, "search", AsyncMock(return_value={"results": []}))
+    monkeypatch.setattr(ma.arxiv, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.crossref, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.pubmed, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.semantic_scholar, "search", slow_ss)
+    monkeypatch.setattr(ma, "SOURCE_TIMEOUTS", {"semantic_scholar": 0.2})
+    monkeypatch.setattr(ma, "SOURCE_TIMEOUT_SEC", 0.5)
+
+    events: list[tuple[str, dict]] = []
+    async for kind, payload in ma.iter_search_events("stall probe", max_results=5):
+        events.append((kind, payload))
+
+    ss_done = [
+        p for k, p in events if k == "source_done" and p.get("source") == "semantic_scholar"
+    ]
+    assert len(ss_done) == 1
+    assert ss_done[0]["failed"] is True
+    assert ss_done[0]["hits"] == 0
 
 
 @pytest.mark.asyncio

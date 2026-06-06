@@ -47,21 +47,32 @@ function TopicBlock({
         <ul className="litpilot-search-topic__sources">
           {topic.sources.map((src) => {
             const running = src.status === "running";
-            const url = src.topUrls[0] ?? "";
+            const failed = src.status === "error" || src.failed;
+            const previews = src.topHits.length
+              ? src.topHits
+              : src.topUrls.map((url) => ({ url, title: url }));
             return (
               <li
                 key={src.source}
-                className={`litpilot-search-source litpilot-search-source--${src.status}`}
+                className={`litpilot-search-source litpilot-search-source--${src.status}${
+                  failed ? " litpilot-search-source--failed" : ""
+                }`}
               >
                 <span className="litpilot-search-source__marker" aria-hidden="true">
                   {running ? (
                     <span className="litpilot-log-line__spinner" />
+                  ) : failed ? (
+                    "×"
                   ) : (
                     "·"
                   )}
                 </span>
                 <div className="litpilot-search-source__body">
-                  <span className="litpilot-search-source__label">
+                  <span
+                    className={`litpilot-search-source__label${
+                      failed ? " litpilot-search-source__label--failed" : ""
+                    }`}
+                  >
                     {src.label}
                   </span>
                   <span className="litpilot-search-source__status">
@@ -72,22 +83,32 @@ function TopicBlock({
                       {src.query.slice(0, 96)}
                     </span>
                   ) : null}
-                  {url ? (
-                    <a
-                      className="litpilot-search-source__url"
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  {failed && src.query ? (
+                    <span
+                      className="litpilot-search-source__query litpilot-search-source__query--failed"
+                      title={src.query}
                     >
-                      {url.length > 72 ? `${url.slice(0, 72)}…` : url}
-                    </a>
+                      {src.query.slice(0, 96)}
+                    </span>
                   ) : null}
-                  {src.status === "done" && src.topUrls.length > 1 ? (
-                    <ul className="litpilot-search-source__urls">
-                      {src.topUrls.slice(1, 4).map((u) => (
-                        <li key={u}>
-                          <a href={u} target="_blank" rel="noopener noreferrer">
-                            {u.length > 64 ? `${u.slice(0, 64)}…` : u}
+                  {previews.length > 0 && !failed ? (
+                    <ul className="litpilot-search-source__hits">
+                      {previews.slice(0, 4).map((hit) => (
+                        <li key={hit.url} className="litpilot-search-source__hit">
+                          <a
+                            href={hit.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={hit.url}
+                          >
+                            <span className="litpilot-search-source__hit-title">
+                              {hit.title.length > 120
+                                ? `${hit.title.slice(0, 120)}…`
+                                : hit.title}
+                            </span>
+                            <span className="litpilot-search-source__hit-url">
+                              {hit.url.length > 72 ? `${hit.url.slice(0, 72)}…` : hit.url}
+                            </span>
                           </a>
                         </li>
                       ))}
@@ -119,9 +140,9 @@ export function SearchProgressView({
   const aggregatePending =
     streaming && !summary.allDone && summary.completedTopics < summary.totalTopics;
   const aggregateLabel = summary.allDone
-    ? `检索完成（${summary.completedTopics}/${summary.totalTopics}）`
+    ? `检索完成 · ${summary.completedTopics}/${summary.totalTopics} 主题`
     : aggregatePending
-      ? `检索中（${summary.completedTopics}/${summary.totalTopics}）`
+      ? `检索中 · ${summary.completedTopics}/${summary.totalTopics} 主题`
       : null;
 
   return (

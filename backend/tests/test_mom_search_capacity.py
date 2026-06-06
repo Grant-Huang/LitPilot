@@ -18,19 +18,17 @@ def test_mom_decompose_four_subtopics() -> None:
     assert len(topics) == 4
 
 
-def test_mom_subtopic_search_merge_cap() -> None:
-    """M2 分 4 轮检索时，合并后命中上限 = min(search_max_results, 去重后总数)。"""
+def test_mom_subtopic_search_merge_accumulates() -> None:
+    """M2 分 4 轮检索：每轮单源受 search_max 约束；跨 pass 合并按实际累计去重，不再截断。"""
     topics = decompose_research_brief(MOM_BRIEF, base_query="AI-native MOM")
-    search_max = 80
-    per_query = max(2, search_max // len(topics))
-    assert per_query == 20
+    hits_per_pass = 20
 
     fake_lists = [
-        [{"url": f"https://example.com/{i}-{j}", "title": f"T{i}-{j}"} for j in range(per_query)]
+        [{"url": f"https://example.com/{i}-{j}", "title": f"T{i}-{j}"} for j in range(hits_per_pass)]
         for i in range(len(topics))
     ]
-    merged = merge_search_hits(fake_lists, max_results=search_max)
-    assert len(merged) == search_max
+    merged = merge_search_hits(fake_lists)
+    assert len(merged) == hits_per_pass * len(topics)
 
     queries = [apply_academic_search_suffix(t.search_query) for t in topics]
     assert all("site:" in q or "academic" in q.lower() or "survey" in q.lower() for q in queries)

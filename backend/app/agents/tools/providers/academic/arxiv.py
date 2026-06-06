@@ -6,13 +6,20 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from app.agents.tools.providers.academic._hit import hit
+from app.agents.tools.providers.academic.api_pacing import (
+    pace_before_request,
+    wait_after_429,
+)
 
 API_BASE = "https://export.arxiv.org/api/query"
 DEFAULT_CATEGORIES = "cs.AI OR cs.MA OR cs.SE OR eess.SY"
+_USER_AGENT = "LitPilot/1.0 (mailto:support@litpilot.local)"
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",
 }
+MAX_ATTEMPTS = 4
+REQUEST_TIMEOUT_SEC = 60.0
 
 
 def _text(el, tag: str, ns: str = "atom") -> str:
@@ -80,11 +87,38 @@ async def search(
         "sortBy": "relevance",
         "sortOrder": "descending",
     }
+    headers = {"User-Agent": _USER_AGENT}
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        resp = await client.get(API_BASE, params=params)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
+    async with httpx.AsyncClient(
+        timeout=REQUEST_TIMEOUT_SEC,
+        follow_redirects=True,
+        headers=headers,
+    ) as client:
+        for attempt in range(MAX_ATTEMPTS):
+            await pace_before_request("arxiv")
+            try:
+                resp = await client.get(API_BASE, params=params)
+            except httpx.TimeoutException:
+                if attempt + 1 >= MAX_ATTEMPTS:
+                    raise
+                await wait_after_429("arxiv", attempt=attempt)
+                continue
+
+            if resp.status_code == 429:
+                if attempt + 1 >= MAX_ATTEMPTS:
+                    return []
+                retry_after = None
+                raw = resp.headers.get("Retry-After")
+                if raw and raw.isdigit():
+                    retry_after = int(raw)
+                await wait_after_429("arxiv", attempt=attempt, retry_after=retry_after)
+                continue
+
+            resp.raise_for_status()
+            root = ET.fromstring(resp.text)
+            break
+        else:
+            return []
 
     rows: list[dict[str, str]] = []
     for entry in root.findall("atom:entry", _NS):

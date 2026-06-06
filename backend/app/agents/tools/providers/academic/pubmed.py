@@ -4,10 +4,16 @@ from __future__ import annotations
 import httpx
 
 from app.agents.tools.providers.academic._hit import hit, merge_snippet
+from app.agents.tools.providers.academic.api_pacing import (
+    pace_before_request,
+    wait_after_429,
+)
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 PMC_ARTICLE_BASE = "https://www.ncbi.nlm.nih.gov/pmc/articles"
+_USER_AGENT = "LitPilot/1.0 (mailto:support@litpilot.local)"
+MAX_ATTEMPTS = 4
 
 
 async def _esearch(
@@ -26,10 +32,18 @@ async def _esearch(
         "maxdate": "3000",
         "datetype": "pdat",
     }
-    resp = await client.get(ESEARCH_URL, params=params)
-    resp.raise_for_status()
-    data = resp.json()
-    return list(data.get("esearchresult", {}).get("idlist") or [])
+    for attempt in range(MAX_ATTEMPTS):
+        await pace_before_request("ncbi")
+        resp = await client.get(ESEARCH_URL, params=params)
+        if resp.status_code == 429:
+            if attempt + 1 >= MAX_ATTEMPTS:
+                return []
+            await wait_after_429("ncbi", attempt=attempt)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        return list(data.get("esearchresult", {}).get("idlist") or [])
+    return []
 
 
 async def _esummary(client: httpx.AsyncClient, pmc_ids: list[str]) -> list[dict]:
@@ -40,13 +54,19 @@ async def _esummary(client: httpx.AsyncClient, pmc_ids: list[str]) -> list[dict]
         "id": ",".join(pmc_ids),
         "retmode": "json",
     }
-    resp = await client.get(ESUMMARY_URL, params=params)
-    if resp.status_code == 429:
-        return []
-    resp.raise_for_status()
-    result = resp.json().get("result") or {}
-    uids = result.get("uids") or []
-    return [result[uid] for uid in uids if uid in result and isinstance(result[uid], dict)]
+    for attempt in range(MAX_ATTEMPTS):
+        await pace_before_request("ncbi")
+        resp = await client.get(ESUMMARY_URL, params=params)
+        if resp.status_code == 429:
+            if attempt + 1 >= MAX_ATTEMPTS:
+                return []
+            await wait_after_429("ncbi", attempt=attempt)
+            continue
+        resp.raise_for_status()
+        result = resp.json().get("result") or {}
+        uids = result.get("uids") or []
+        return [result[uid] for uid in uids if uid in result and isinstance(result[uid], dict)]
+    return []
 
 
 def _normalize(article: dict, query: str) -> dict[str, str] | None:
@@ -94,7 +114,11 @@ async def search(
     if not q:
         return []
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
         pmc_ids = await _esearch(client, q, limit, min_year)
         if not pmc_ids:
             return []

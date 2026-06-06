@@ -80,6 +80,15 @@ export function summarizeWorkflowCard(card: WorkflowCard): string {
     const first = card.body.split(/\r?\n/).find((l) => l.trim());
     return first ? first.slice(0, 48) : "已完成";
   }
+  if (card.type === "understand" && card.subTopics?.length) {
+    const titles = card.subTopics
+      .map((st) => (st.title ?? "").trim())
+      .filter(Boolean);
+    if (titles.length) {
+      const preview = titles.slice(0, 2).join("、");
+      return titles.length > 2 ? `${preview} 等 ${titles.length} 个子主题` : preview;
+    }
+  }
   if (toolDone) return `${toolDone} 步`;
   return "已完成";
 }
