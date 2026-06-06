@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { SearchProgressView } from "./SearchProgressView";
+import { SubtopicListView } from "./SubtopicListView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
 import { toolStepToState } from "@/lib/executionTrace";
 import { summarizeWorkflowCard } from "@/lib/turnCompletion";
@@ -17,6 +19,7 @@ type Props = {
   streaming?: boolean;
   defaultOpen?: boolean;
   forceOpen?: boolean;
+  extensions?: Array<{ name: string; data: Record<string, unknown> }>;
 };
 
 function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
@@ -48,6 +51,7 @@ export function WorkflowCardView({
   streaming = false,
   defaultOpen = false,
   forceOpen,
+  extensions = [],
 }: Props) {
   const locked = card.locked || card.type === "clarify";
   const isRunning = card.state === "running";
@@ -112,6 +116,16 @@ export function WorkflowCardView({
         <div className="litpilot-wf-card__body">
           {card.body ? (
             <div className="litpilot-wf-card__body-text">{card.body}</div>
+          ) : null}
+          {card.type === "understand" && card.subTopics?.length ? (
+            <SubtopicListView subTopics={card.subTopics} />
+          ) : null}
+          {card.type === "search" ? (
+            <SearchProgressView
+              extensions={extensions}
+              subTopics={card.subTopics}
+              streaming={streaming && isRunning}
+            />
           ) : null}
           <div className="litpilot-log-lines" role="list">
             {visibleSteps.map((step) => {

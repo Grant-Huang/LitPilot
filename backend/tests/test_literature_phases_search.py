@@ -30,6 +30,11 @@ def _fake_search_result(
     }
 
 
+async def _empty_narrate(*_args, **_kwargs):
+    return
+    yield  # pragma: no cover — async generator
+
+
 @pytest.mark.asyncio
 async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
     """第 4/4 轮 0 命中时，前几轮命中仍应合并成功。"""
@@ -44,7 +49,10 @@ async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
     events: list[tuple[str, dict]] = []
     think_acc = ThinkAccumulator()
 
-    with patch("app.agents.literature_phases.cached_web_search", mock_search):
+    with (
+        patch("app.agents.literature_phases.cached_web_search", mock_search),
+        patch("app.agents.literature_phases.narrate_phase_stream", _empty_narrate),
+    ):
         async for ev in stream_expanded_search_phase(
             user_message="AI-native MOM review",
             queries=["q1", "q2", "q3", "q4"],
@@ -60,6 +68,7 @@ async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
             planner_ctx=None,
             execution_trace={},
             result=out,
+            search_provider="tavily",
         ):
             events.append(ev)
 
@@ -112,6 +121,7 @@ async def test_search_phase_keeps_hits_when_narrate_fails() -> None:
                 result=pass_out,
                 pass_index=1,
                 pass_total=1,
+                search_provider="tavily",
             ):
                 pass
 
@@ -134,7 +144,10 @@ async def test_expanded_search_all_corpus_dupes_does_not_raise() -> None:
     out: dict = {}
     think_acc = ThinkAccumulator()
 
-    with patch("app.agents.literature_phases.cached_web_search", mock_search):
+    with (
+        patch("app.agents.literature_phases.cached_web_search", mock_search),
+        patch("app.agents.literature_phases.narrate_phase_stream", _empty_narrate),
+    ):
         async for _ev in stream_expanded_search_phase(
             user_message="topic",
             queries=["q1", "q2"],
@@ -151,6 +164,7 @@ async def test_expanded_search_all_corpus_dupes_does_not_raise() -> None:
             execution_trace={},
             corpus=corpus,
             result=out,
+            search_provider="tavily",
         ):
             pass
 
@@ -187,6 +201,7 @@ async def test_single_search_emits_pass_hits_for_pipeline() -> None:
                 planner_ctx=None,
                 execution_trace={},
                 emit_pass_hits=True,
+                search_provider="tavily",
             ):
                 events.append(ev)
 

@@ -204,15 +204,15 @@ async def run_retrieval_pipeline(
                 )
                 expanded_queries = refinement.queries or expanded_queries
                 ctx.search_hit_exclusions = list(refinement.exclude_title_substrings)
-                yield (
-                    "literature_search_refine",
-                    {
-                        "queries": expanded_queries,
-                        "exclude_title_substrings": ctx.search_hit_exclusions,
-                    },
-                )
                 if len(expanded_queries) == 1:
                     query = expanded_queries[0]
+
+            topic_titles: list[str] | None = None
+            if ctx.use_outline_path and len(ctx.sub_topics_for_search) >= 2:
+                topic_titles = [
+                    str(st.title or "").strip()
+                    for st in ctx.sub_topics_for_search
+                ]
 
             fetch_cap_early = effective_fetch_cap(ctx.max_fetch_urls, ctx.upload_urls)
             pipe_coord: FetchCoordinator | None = None
@@ -266,6 +266,7 @@ async def run_retrieval_pipeline(
                     exclude_title_substrings=ctx.search_hit_exclusions,
                     search_provider=ctx.search_provider,
                     search_parallel=ctx.search_parallel,
+                    topic_titles=topic_titles,
                 )
             else:
                 search_stream = stream_search_phase(

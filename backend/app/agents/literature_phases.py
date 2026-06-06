@@ -109,6 +109,7 @@ async def stream_search_phase(
     exclude_title_substrings: list[str] | None = None,
     pass_index: int = 1,
     pass_total: int = 1,
+    topic_title: str = "",
     emit_stage_lifecycle: bool = True,
     search_provider: str | None = None,
     emit_pass_hits: bool = False,
@@ -170,46 +171,130 @@ async def stream_search_phase(
 
     pre_corpus_hit_count = 0
     try:
-        yield (
-            "literature_search_pass_start",
-            {
-                "query": query,
-                "pass_index": pass_index,
-                "pass_total": pass_total,
-                "provider": search_prov,
-            },
-        )
-
-        async def _search_call() -> dict:
-            return await cached_web_search(
-                search_api_key,
-                query,
-                provider=search_prov,
-                max_results=search_max_results,
-                search_depth=search_depth,
-                include_domains=include_domains,
-                exclude_domains=exclude_domains,
-            )
+        pass_meta = {
+            "query": query,
+            "pass_index": pass_index,
+            "pass_total": pass_total,
+            "provider": search_prov,
+            "topic_title": topic_title or "",
+        }
+        yield ("literature_search_pass_start", dict(pass_meta))
 
         t0 = time.monotonic()
-        search_task = asyncio.create_task(
-            retry_async(
-                _search_call,
-                max_retries=search_retry_count,
-                delay_ms=fetch_retry_delay_ms,
+        raw_search: dict[str, Any] = {"results": [], "answer": "", "source_counts": {}}
+
+        if search_prov == "multi_academic":
+            from app.agents.tools.providers import multi_academic as multi_academic_provider
+            from app.agents.tools.web_providers import _resolve_s2_api_key
+
+            s2_key = await _resolve_s2_api_key(None)
+            ma_queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+            source_total = len(multi_academic_provider.SOURCE_LABELS)
+            sources_done = 0
+
+            async def _ma_worker() -> dict[str, Any]:
+                merged: dict[str, Any] = {
+                    "results": [],
+                    "answer": "",
+                    "source_counts": {},
+                }
+                async for kind, payload in multi_academic_provider.iter_search_events(
+                    query,
+                    max_results=search_max_results,
+                    include_domains=include_domains,
+                    exclude_domains=exclude_domains,
+                    s2_api_key=s2_key or "",
+                ):
+                    if kind == "source_start":
+                        await ma_queue.put(
+                            ("literature_search_source_start", {**pass_meta, **payload}),
+                        )
+                    elif kind == "source_done":
+                        await ma_queue.put(
+                            ("literature_search_source_done", {**pass_meta, **payload}),
+                        )
+                    elif kind == "complete":
+                        merged = payload
+                return merged
+
+            ma_task = asyncio.create_task(_ma_worker())
+            try:
+                while True:
+                    if ma_task.done() and ma_queue.empty():
+                        break
+                    try:
+                        item = await asyncio.wait_for(ma_queue.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        detail = topic_title or format_pass_query_label(query)
+                        yield (
+                            "literature_progress",
+                            {
+                                "stage": "search",
+                                "detail": detail,
+                                "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                                "pass_index": pass_index,
+                                "pass_total": pass_total,
+                                "provider": search_prov,
+                                "completed": sources_done,
+                                "total": source_total,
+                            },
+                        )
+                        continue
+                    if item is None:
+                        break
+                    ev_name, ev_data = item
+                    if ev_name == "literature_search_source_done":
+                        sources_done += 1
+                    yield (ev_name, ev_data)
+                    yield (
+                        "literature_progress",
+                        {
+                            "stage": "search",
+                            "detail": str(ev_data.get("label") or ev_data.get("source") or ""),
+                            "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                            "pass_index": pass_index,
+                            "pass_total": pass_total,
+                            "source": ev_data.get("source"),
+                            "completed": sources_done,
+                            "total": source_total,
+                        },
+                    )
+                raw_search = await ma_task
+            finally:
+                if not ma_task.done():
+                    ma_task.cancel()
+                    await asyncio.gather(ma_task, return_exceptions=True)
+        else:
+            async def _search_call() -> dict:
+                return await cached_web_search(
+                    search_api_key,
+                    query,
+                    provider=search_prov,
+                    max_results=search_max_results,
+                    search_depth=search_depth,
+                    include_domains=include_domains,
+                    exclude_domains=exclude_domains,
+                )
+
+            search_task = asyncio.create_task(
+                retry_async(
+                    _search_call,
+                    max_retries=search_retry_count,
+                    delay_ms=fetch_retry_delay_ms,
+                )
             )
-        )
-        query_label = format_pass_query_label(query) if query.strip() else "检索"
-        async for tick in iter_progress_while_pending(
-            "search",
-            query_label,
-            search_task,
-            pass_index=pass_index,
-            pass_total=pass_total,
-            provider=search_prov,
-        ):
-            yield tick
-        raw_search = await search_task
+            query_label = format_pass_query_label(query) if query.strip() else "检索"
+            async for tick in iter_progress_while_pending(
+                "search",
+                query_label,
+                search_task,
+                pass_index=pass_index,
+                pass_total=pass_total,
+                provider=search_prov,
+            ):
+                yield tick
+            raw_search = await search_task
+
         search_ms = int((time.monotonic() - t0) * 1000)
         raw_hits = normalize_search_results(raw_search)
         hits, filter_warning = apply_literature_hit_filters(
@@ -267,6 +352,15 @@ async def stream_search_phase(
                     "pass_total": pass_total,
                 },
             )
+        yield (
+            "literature_search_pass_done",
+            {
+                **pass_meta,
+                "hits": len(hits),
+                "source_counts": raw_search.get("source_counts") or {},
+                "duration_ms": search_ms,
+            },
+        )
     except Exception:
         search_failed = True
         if not upload_urls:
@@ -302,7 +396,7 @@ async def stream_search_phase(
         out["answer"] = answer
         out["tool_hit_count"] = len(hits)
 
-    if pass_index == pass_total:
+    if pass_index == pass_total and pass_total == 1:
         search_ctx = format_search_context(hits, answer, query=query)
         async for ev in narrate_phase_stream(
             "C",
@@ -342,6 +436,7 @@ async def stream_expanded_search_phase(
     exclude_title_substrings: list[str] | None = None,
     search_provider: str | None = None,
     search_parallel: int = 1,
+    topic_titles: list[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.search_merge import merge_search_hits
 
@@ -369,6 +464,9 @@ async def stream_expanded_search_phase(
 
     pass_results: dict[int, dict[str, Any]] = {}
     parallel = max(1, min(int(search_parallel or 1), total))
+    titles = list(topic_titles or [])
+    if len(titles) < total:
+        titles.extend([""] * (total - len(titles)))
 
     if parallel > 1 and total > 1:
         queue: asyncio.Queue[
@@ -403,7 +501,8 @@ async def stream_expanded_search_phase(
                     exclude_title_substrings=exclude_title_substrings,
                     pass_index=idx,
                     pass_total=total,
-                    emit_stage_lifecycle=idx == 1 or idx == total,
+                    topic_title=titles[idx - 1] if idx - 1 < len(titles) else "",
+                    emit_stage_lifecycle=idx == 1,
                     search_provider=search_provider,
                 ):
                     await queue.put(("event", idx, ev))
@@ -479,7 +578,8 @@ async def stream_expanded_search_phase(
                 exclude_title_substrings=exclude_title_substrings,
                 pass_index=idx,
                 pass_total=total,
-                emit_stage_lifecycle=idx == 1 or idx == total,
+                topic_title=titles[idx - 1] if idx - 1 < len(titles) else "",
+                emit_stage_lifecycle=idx == 1,
                 search_provider=search_provider,
             ):
                 yield ev
@@ -564,6 +664,22 @@ async def stream_expanded_search_phase(
 
     out["hits"] = merged
     out["answer"] = answers[0] if answers else ""
+
+    search_ctx = format_search_context(
+        merged,
+        combined_answer,
+        query=clean_queries[0] if clean_queries else "",
+    )
+    async for ev in narrate_phase_stream(
+        "C",
+        user_message,
+        search_ctx,
+        think_acc=think_acc,
+        ctx=planner_ctx,
+    ):
+        yield ev
+    yield ("stage", {"name": "文献检索", "state": "done"})
+    upsert_stage(execution_trace, "文献检索", "done")
 
 
 async def stream_attributes_phase(

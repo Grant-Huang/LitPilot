@@ -71,6 +71,29 @@ async def test_multi_academic_merges_and_dedupes(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_multi_academic_iter_search_events(monkeypatch) -> None:
+    events: list[tuple[str, dict]] = []
+
+    async def fake_openalex(q, *, max_results, include_domains=None):
+        return {"results": [{"url": "https://oa/1", "title": "t", "snippet": ""}]}
+
+    monkeypatch.setattr(ma.openalex_provider, "search", fake_openalex)
+    monkeypatch.setattr(ma.arxiv, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.crossref, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.pubmed, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.semantic_scholar, "search", AsyncMock(return_value=[]))
+
+    async for kind, payload in ma.iter_search_events("test query", max_results=8):
+        events.append((kind, payload))
+
+    kinds = [k for k, _ in events]
+    assert kinds.count("source_start") == 5
+    assert kinds.count("source_done") == 5
+    assert kinds[-1] == "complete"
+    assert events[-1][1]["source_counts"]["openalex"] == 1
+
+
+@pytest.mark.asyncio
 async def test_web_search_query_multi_academic_routing(monkeypatch) -> None:
     captured: dict = {}
 

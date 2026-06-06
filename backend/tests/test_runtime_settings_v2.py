@@ -311,6 +311,7 @@ async def test_search_phase_uses_runtime_domains(tmp_path, monkeypatch) -> None:
             search_depth="basic",
             search_enforce_domain_filter=True,
             search_enable_junk_filter=False,
+            search_provider="tavily",
         ):
             events.append(ev)
 

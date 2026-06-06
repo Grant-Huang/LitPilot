@@ -33,6 +33,28 @@ const STAGE_LABELS: Record<string, string> = {
   brief: "Brief 评估",
 };
 
+function latestSearchDetail(
+  log: StreamState["extensionLog"],
+): string {
+  for (let i = log.length - 1; i >= 0; i -= 1) {
+    const ext = log[i];
+    const name = ext.payload.name;
+    const data = (ext.payload.data ?? {}) as Record<string, unknown>;
+    if (name === "literature_search_source_start") {
+      const label = String(data.label ?? data.source ?? "检索源");
+      const topic = String(data.topic_title ?? "").trim();
+      return topic ? `${topic} · ${label}` : label;
+    }
+    if (name === "literature_search_pass_start") {
+      const topic = String(data.topic_title ?? "").trim();
+      if (topic) return topic;
+      const q = String(data.query ?? "").trim();
+      if (q) return q.slice(0, 72);
+    }
+  }
+  return "";
+}
+
 function latestProgress(
   log: StreamState["extensionLog"],
 ): StreamProgressSnapshot | undefined {
@@ -99,11 +121,13 @@ export function buildStreamActivitySnapshot(
   const silenceSec = Math.max(0, Math.floor((nowMs - lastEventAtMs) / 1000));
   const elapsedSec = Math.max(0, Math.floor((nowMs - streamStartedAtMs) / 1000));
   const progress = latestProgress(stream.extensionLog);
+  const searchDetail = latestSearchDetail(stream.extensionLog);
   const stage = progress
     ? STAGE_LABELS[progress.stage] ?? progress.stage
     : activeStageName(stream);
   const toolHint = runningToolHint(stream);
   const detail =
+    searchDetail ||
     progress?.detail?.trim() ||
     toolHint ||
     (stream.thinkContent ? "思考中…" : "");

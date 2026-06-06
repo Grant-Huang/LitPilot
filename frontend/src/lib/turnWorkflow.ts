@@ -42,6 +42,7 @@ export type WorkflowCard = {
   steps: WorkflowStep[];
   body?: string;
   locked?: boolean;
+  subTopics?: Array<{ id: string; title: string; search_query: string }>;
 };
 
 export type TurnWorkflow = {
@@ -103,20 +104,14 @@ function processLineToStep(line: ProcessLine): WorkflowStep {
 }
 
 function extensionInlineStep(name: string, data: Record<string, unknown>): WorkflowStep | null {
-  if (name === "literature_search_pass_start") {
-    const q = String(data.query ?? "").trim();
-    const pi = data.pass_index;
-    const pt = data.pass_total;
-    const passTag =
-      typeof pi === "number" && typeof pt === "number" && pt > 1
-        ? `（${pi}/${pt}）`
-        : "";
-    return {
-      key: `ext-${name}-${pi ?? 0}`,
-      kind: "inline",
-      title: q ? `检索中${passTag}：${q.slice(0, 96)}` : `检索中${passTag}`,
-      status: "running",
-    };
+  if (
+    name === "literature_search_pass_start" ||
+    name === "literature_search_source_start" ||
+    name === "literature_search_source_done" ||
+    name === "literature_search_pass_done" ||
+    name === "literature_search_refine"
+  ) {
+    return null;
   }
   if (name === "literature_fetch_start") {
     const title = String(data.title ?? "").trim();
@@ -143,16 +138,6 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
       status: "running",
     };
   }
-  if (name === "literature_search_refine") {
-    const queries = data.queries;
-    const n = Array.isArray(queries) ? queries.length : 0;
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: n ? `检索式 ×${n}` : "检索式精炼",
-      status: "done",
-    };
-  }
   if (name === "literature_search_merge") {
     const deduped = data.deduped;
     const raw = data.raw_total;
@@ -173,13 +158,7 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
     };
   }
   if (name === "literature_subtopic_plan") {
-    const count = data.count;
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: typeof count === "number" ? `${count} 个子主题` : "子主题拆分",
-      status: "done",
-    };
+    return null;
   }
   if (name === "literature_section_refine") {
     const titles = data.target_titles;
@@ -257,8 +236,23 @@ export function buildTurnWorkflowFromTrace(
   const cards: WorkflowCard[] = [];
   let activeType: WorkflowCardType = "understand";
   const extByPhase: Record<string, WorkflowStep[]> = {};
+  let subTopics: WorkflowCard["subTopics"];
 
   for (const ext of opts.extensions ?? []) {
+    if (ext.name === "literature_subtopic_plan") {
+      const raw = ext.data.sub_topics;
+      if (Array.isArray(raw)) {
+        subTopics = raw.map((st, i) => {
+          const row = st as Record<string, unknown>;
+          return {
+            id: String(row.id ?? `sub-${i}`),
+            title: String(row.title ?? ""),
+            search_query: String(row.search_query ?? ""),
+          };
+        });
+      }
+      continue;
+    }
     const step = extensionInlineStep(ext.name, ext.data);
     if (!step) continue;
     const phase =
@@ -345,7 +339,12 @@ export function buildTurnWorkflowFromTrace(
     (c) => c.type === "clarify" && (c.locked || c.state === "running"),
   );
 
-  const enrichedCards = enrichWorkflowCardSummaries(cards);
+  const enrichedCards = enrichWorkflowCardSummaries(cards).map((c) => {
+    if (subTopics?.length && (c.type === "understand" || c.type === "search")) {
+      return { ...c, subTopics };
+    }
+    return c;
+  });
 
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
@@ -385,6 +384,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       steps: c.steps ?? [],
       body: c.body,
       locked: c.locked ?? c.type === "clarify",
+      subTopics: c.subTopics,
     })),
   };
 }

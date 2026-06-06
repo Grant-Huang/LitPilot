@@ -68,6 +68,7 @@ export function TurnWorkflowBlock({
             streaming={streaming}
             defaultOpen={card.id === runningId}
             forceOpen={card.type === "clarify"}
+            extensions={extensions}
           />
         ))}
       </div>
