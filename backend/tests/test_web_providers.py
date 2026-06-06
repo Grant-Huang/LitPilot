@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from app.agents.tools.providers.native_fetch import (
@@ -160,9 +161,18 @@ async def test_resolve_semantic_scholar_doi_to_ojs_pdf(monkeypatch) -> None:
         async def aclose(self):
             return None
 
+        async def head(self, url, **kwargs):
+            return await self.get(url, **kwargs)
+
         async def get(self, url, **kwargs):
             if "api.semanticscholar.org" in url:
                 return FakeS2Resp()
+            if "api.unpaywall.org" in url:
+                raise httpx.HTTPStatusError(
+                    "not found",
+                    request=httpx.Request("GET", url),
+                    response=httpx.Response(404),
+                )
             if "doi.org" in url:
                 return FakeLandingResp()
             raise AssertionError(f"unexpected url {url}")
@@ -248,6 +258,10 @@ async def test_native_fetch_s2_resolves_doi_ojs_pdf(monkeypatch) -> None:
         "https://www.semanticscholar.org/paper/"
         "Investigating-LLM/c7ceee9a2fd3cdff55efa53b86b97454d15a1647"
     )
+    publisher_html = (
+        '<meta name="citation_pdf_url" '
+        'content="https://sol.sbc.org.br/index.php/webmedia/article/download/38018/37796">'
+    )
 
     async def fake_s2_record(paper_id: str, **kwargs):
         return {
@@ -255,9 +269,86 @@ async def test_native_fetch_s2_resolves_doi_ojs_pdf(monkeypatch) -> None:
             "externalIds": {"DOI": "10.5753/webmedia.2025.16160"},
         }
 
+    class FakeLandingResp:
+        status_code = 200
+        url = "https://sol.sbc.org.br/index.php/webmedia/article/view/38018"
+
+        def raise_for_status(self):
+            return None
+
+        @property
+        def headers(self):
+            return {"content-type": "text/html; charset=utf-8"}
+
+        @property
+        def content(self):
+            return publisher_html.encode("utf-8")
+
+        @property
+        def text(self):
+            return publisher_html
+
+    class FakePdfResp:
+        status_code = 200
+        url = "https://sol.sbc.org.br/index.php/webmedia/article/download/38018/37796"
+
+        def raise_for_status(self):
+            return None
+
+        @property
+        def headers(self):
+            return {"content-type": "application/pdf"}
+
+        @property
+        def content(self):
+            return b"%PDF-1.4 fake"
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aclose(self):
+            return None
+
+        async def head(self, url, **kwargs):
+            return await self.get(url, **kwargs)
+
+        async def get(self, url, **kwargs):
+            if "api.semanticscholar.org" in url:
+                raise AssertionError("should use mocked s2 record")
+            if "api.unpaywall.org" in url:
+                raise httpx.HTTPStatusError(
+                    "not found",
+                    request=httpx.Request("GET", url),
+                    response=httpx.Response(404),
+                )
+            if "doi.org" in url or "sol.sbc.org.br" in url:
+                if "download" in url:
+                    return FakePdfResp()
+                return FakeLandingResp()
+            raise AssertionError(f"unexpected url {url}")
+
     monkeypatch.setattr(
         "app.agents.tools.source_resolve.fetch_s2_paper_record",
         fake_s2_record,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.source_resolve.httpx.AsyncClient",
+        FakeClient,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.httpx.AsyncClient",
+        FakeClient,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.metadata_fetch.httpx.AsyncClient",
+        FakeClient,
     )
     monkeypatch.setattr(
         "app.agents.tools.providers.native_fetch.pdf_bytes_to_text",

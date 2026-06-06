@@ -11,6 +11,13 @@ from bs4 import BeautifulSoup
 
 from app.agents.retry_utils import retry_async
 from app.agents.ttl_cache import TTLCache, normalize_cache_key
+from app.agents.tools.metadata_fetch import (
+    browser_headers,
+    extract_doi_from_url,
+    fetch_unpaywall_oa_pdf,
+    is_paywalled_host,
+    resolve_doi_redirect_url,
+)
 
 _s2_paper_cache: TTLCache[dict[str, Any]] = TTLCache(max_entries=128, ttl_sec=3600)
 
@@ -95,12 +102,7 @@ def is_pdf_content_type(content_type: str) -> bool:
 
 
 _S2_RESOLVE_FIELDS = "openAccessPdf,externalIds"
-_FETCH_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf,*/*",
-    "User-Agent": (
-        "Mozilla/5.0 (compatible; LitPilot/1.0; +https://github.com/litpilot; academic fetch)"
-    ),
-}
+_FETCH_HEADERS = browser_headers()
 
 
 def _normalize_doi(raw: str) -> str:
@@ -226,13 +228,43 @@ async def resolve_semantic_scholar_fetch_url(
     if isinstance(ext, dict):
         doi = _normalize_doi(str(ext.get("DOI") or ""))
         if doi:
-            landing = await resolve_landing_page_to_pdf_url(
-                f"https://doi.org/{doi}",
-                headers=hdrs,
-                timeout=timeout,
-            )
-            if landing:
-                return landing
+            try:
+                oa_pdf = await fetch_unpaywall_oa_pdf(
+                    doi,
+                    timeout=min(timeout, 15.0),
+                )
+                if oa_pdf:
+                    return oa_pdf
+            except Exception:
+                pass
+            try:
+                redirect = await resolve_doi_redirect_url(
+                    f"https://doi.org/{doi}",
+                    timeout=min(timeout, 15.0),
+                    headers=hdrs,
+                )
+                if redirect and "arxiv.org" in redirect:
+                    return redirect
+                if redirect and not is_paywalled_host(redirect):
+                    landing = await resolve_landing_page_to_pdf_url(
+                        redirect,
+                        headers=hdrs,
+                        timeout=timeout,
+                    )
+                    if landing:
+                        return landing
+            except Exception:
+                pass
+            try:
+                landing = await resolve_landing_page_to_pdf_url(
+                    f"https://doi.org/{doi}",
+                    headers=hdrs,
+                    timeout=timeout,
+                )
+                if landing:
+                    return landing
+            except Exception:
+                pass
 
     return None
 
@@ -289,6 +321,43 @@ async def resolve_fetch_url(
             pass
 
     if _is_doi_url(target):
+        doi = extract_doi_from_url(target)
+        if doi:
+            try:
+                oa_pdf = await fetch_unpaywall_oa_pdf(
+                    doi,
+                    timeout=min(timeout, 15.0),
+                )
+                if oa_pdf:
+                    return oa_pdf
+            except Exception:
+                pass
+            try:
+                redirect = await resolve_doi_redirect_url(
+                    target,
+                    timeout=min(timeout, 15.0),
+                    headers=hdrs,
+                )
+                if redirect and "arxiv.org" in redirect:
+                    return redirect
+            except Exception:
+                pass
+        try:
+            redirect = await resolve_doi_redirect_url(
+                target,
+                timeout=min(timeout, 15.0),
+                headers=hdrs,
+            )
+            if redirect and not is_paywalled_host(redirect):
+                resolved = await resolve_landing_page_to_pdf_url(
+                    redirect,
+                    headers=hdrs,
+                    timeout=timeout,
+                )
+                if resolved:
+                    return resolved
+        except Exception:
+            pass
         try:
             resolved = await resolve_landing_page_to_pdf_url(
                 target,

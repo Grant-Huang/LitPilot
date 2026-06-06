@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from bs4 import BeautifulSoup
 
 from app.agents.tools.cached_tools import cached_web_fetch
+from app.agents.tools.metadata_fetch import is_junk_fetch_content
 from app.agents.prompt_registry import DEFAULT_SUMMARY_SYSTEM as SUMMARY_SYSTEM
 from app.agents.prompt_settings import get_summary_system_prompt
 from app.llm.base import LLMMessage
@@ -151,6 +152,8 @@ async def process_url_for_context(
     text = clean_html_to_text(raw)
     text = extract_main_content(text)
     text = strip_instruction_injections(text)
+    if is_junk_fetch_content(text):
+        return "", "low quality content"
     if len(text) < MIN_USEFUL_CHARS:
         return "", "content too short after filtering"
 

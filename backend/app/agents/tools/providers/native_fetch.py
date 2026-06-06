@@ -8,8 +8,13 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from app.agents.tools.metadata_fetch import (
+    browser_headers,
+    is_junk_fetch_content,
+    normalize_native_fetch_url,
+    try_metadata_fetch,
+)
 from app.agents.tools.pdf_text import pdf_bytes_to_text
-from app.agents.tools.providers.jina import normalize_reader_target_url
 from app.agents.tools.source_resolve import (
     is_pdf_bytes,
     is_pdf_content_type,
@@ -19,10 +24,6 @@ from app.agents.tools.source_resolve import (
 
 _MAX_BYTES = 10 * 1024 * 1024
 _MAX_REDIRECTS = 10
-_USER_AGENT = (
-    "Mozilla/5.0 (compatible; LitPilot/1.0; +https://github.com/litpilot; academic fetch)"
-)
-
 _OJS_PDF_RE = re.compile(
     r'href=["\']([^"\']*/(?:article/download|viewFile)/[^"\']+)["\']',
     re.I,
@@ -65,10 +66,7 @@ def pick_ojs_pdf_url(html: str, page_url: str) -> str | None:
 
 
 def _default_headers() -> dict[str, str]:
-    return {
-        "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf,*/*",
-        "User-Agent": _USER_AGENT,
-    }
+    return browser_headers()
 
 
 async def fetch_bytes(
@@ -79,8 +77,23 @@ async def fetch_bytes(
     s2_api_key: str | None = None,
     pdf_extract_backend: str = "pymupdf4llm",
 ) -> FetchResult:
-    """Fetch URL; resolve OJS / citation_pdf_url / S2 / PDF when possible."""
-    target = normalize_reader_target_url(url)
+    """Fetch URL; metadata APIs first, then OJS / citation_pdf_url / S2 / PDF."""
+    meta = await try_metadata_fetch(
+        url,
+        timeout=timeout,
+        pdf_extract_backend=pdf_extract_backend,
+    )
+    if meta:
+        text, final_url, resolved_pdf_url, is_pdf = meta
+        if text.strip() and not is_junk_fetch_content(text):
+            return FetchResult(
+                text=text,
+                final_url=final_url,
+                resolved_pdf_url=resolved_pdf_url,
+                is_pdf=is_pdf,
+            )
+
+    target = normalize_native_fetch_url(url)
     checker = redirect_checker or permitted_redirect
     headers = _default_headers()
     resolved_pdf_url: str | None = None
@@ -94,7 +107,7 @@ async def fetch_bytes(
                 s2_api_key=s2_api_key,
             )
             if better and better != target:
-                target = normalize_reader_target_url(better)
+                target = normalize_native_fetch_url(better)
                 if "download" in target.lower() or target.lower().endswith(".pdf"):
                     resolved_pdf_url = target
         except Exception:
@@ -123,6 +136,8 @@ async def fetch_bytes(
 
             if is_pdf_content_type(ctype) or is_pdf_bytes(raw):
                 text = pdf_bytes_to_text(raw, backend=pdf_extract_backend)
+                if is_junk_fetch_content(text):
+                    text = ""
                 return FetchResult(
                     text=text[:120_000],
                     final_url=final_url,
@@ -135,8 +150,10 @@ async def fetch_bytes(
                 pdf = pick_ojs_pdf_url(text, final_url)
                 if pdf and pdf != current:
                     resolved_pdf_url = pdf
-                    current = normalize_reader_target_url(pdf)
+                    current = normalize_native_fetch_url(pdf)
                     continue
+            if is_junk_fetch_content(text):
+                text = ""
             return FetchResult(
                 text=text[:120_000],
                 final_url=final_url,
