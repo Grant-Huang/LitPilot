@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BookOutlined, MessageOutlined } from "@ant-design/icons";
 import { ThreeColumnLayout } from "@meso.ai/ui";
@@ -134,9 +135,19 @@ export function LitPilotAppShell({ children }: Props) {
       <ThreeColumnLayout
         appName="LitPilot"
         sidebarLogo={
-          <LitPilotMark size={26} aria-label="LitPilot" className="litpilot-sidebar-mark" />
+          <Link
+            href="/chat"
+            className="litpilot-sidebar-home"
+            aria-label="回到主页"
+          >
+            <LitPilotMark size={26} aria-hidden className="litpilot-sidebar-mark" />
+          </Link>
         }
-        sidebarTitle={<LitPilotWordmark size={15} />}
+        sidebarTitle={
+          <Link href="/chat" className="litpilot-sidebar-home__title" aria-label="回到主页">
+            <LitPilotWordmark size={15} />
+          </Link>
+        }
         navItems={navItems}
         sidebarFooter={<LitPilotSidebarUser />}
         sessionColumn={layoutFlags.showSessionColumn ? sessionColumn : <div />}
