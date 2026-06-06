@@ -53,7 +53,10 @@ from app.agents.literature_planner import (
     load_planner_context,
     stream_understanding_and_route,
 )
-from app.agents.literature_router import should_auto_rename_session, title_is_message_truncation
+from app.agents.literature_router import (
+    resolve_auto_session_title,
+    should_auto_rename_session,
+)
 from app.agents.review_prompt import citation_format_label
 from app.agents.session_corpus import (
     SessionCorpus,
@@ -398,15 +401,17 @@ async def stream_literature_turn(
             route_message,
             user_message_count=user_turns,
         ):
-            new_title = router_result.session_title or intent.session_title
-            if new_title and title_is_message_truncation(new_title, route_message):
-                new_title = ""
+            new_title = await resolve_auto_session_title(
+                primary_title=router_result.session_title or intent.session_title,
+                user_message=route_message,
+            )
             if new_title:
                 store.update_session(
                     session_id,
                     title=new_title,
                     title_auto_set=True,
                 )
+                session_meta = store.get_session(session_id) or session_meta
                 yield (
                     "session_title",
                     {"session_id": session_id, "title": new_title},

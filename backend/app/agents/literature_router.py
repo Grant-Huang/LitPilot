@@ -172,3 +172,34 @@ def should_auto_rename_session(
     if is_default_session_title(title):
         return True
     return title_is_message_truncation(title, user_message)
+
+
+async def resolve_auto_session_title(
+    *,
+    primary_title: str,
+    user_message: str,
+) -> str:
+    """Resolve a summary title for first-turn auto-rename (never keep default 新综述)."""
+    msg = user_message.strip()
+    if not msg:
+        return ""
+
+    def _usable(title: str) -> bool:
+        t = (title or "").strip()
+        return bool(t) and not is_default_session_title(t) and not title_is_message_truncation(t, msg)
+
+    candidate = (primary_title or "").strip()
+    if _usable(candidate):
+        return candidate[:80]
+
+    try:
+        routed = await route_literature(msg)
+        candidate = (routed.session_title or "").strip()
+    except Exception:
+        candidate = ""
+
+    if _usable(candidate):
+        return candidate[:80]
+
+    fb = fallback_session_title(msg)
+    return fb[:80] if not is_default_session_title(fb) else ""

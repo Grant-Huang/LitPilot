@@ -6,6 +6,7 @@ from app.agents.literature_router import (
     LiteratureRouterResult,
     _sanitize_session_title,
     refine_router_session_title,
+    resolve_auto_session_title,
     route_literature,
     should_auto_rename_session,
     title_is_message_truncation,
@@ -141,3 +142,38 @@ async def test_route_literature_fallback_on_error() -> None:
         result = await route_literature("short topic")
     assert result.session_title == "short topic"
     assert result.search_query == "short topic"
+
+
+@pytest.mark.asyncio
+async def test_resolve_auto_session_title_falls_back_to_router() -> None:
+    long_q = "请综述 AI-native manufacturing operations management 的最新研究"
+    truncated = long_q[:40] + "…"
+    with patch(
+        "app.agents.literature_router.route_literature",
+        new_callable=AsyncMock,
+        return_value=LiteratureRouterResult(
+            session_title="AI原生制造运营综述",
+            search_query=long_q,
+        ),
+    ):
+        title = await resolve_auto_session_title(
+            primary_title=truncated,
+            user_message=long_q,
+        )
+    assert title == "AI原生制造运营综述"
+
+
+@pytest.mark.asyncio
+async def test_resolve_auto_session_title_uses_message_prefix_when_router_fails() -> None:
+    long_q = "请综述 AI-native manufacturing operations management 的最新研究"
+    with patch(
+        "app.agents.literature_router.route_literature",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("no llm"),
+    ):
+        title = await resolve_auto_session_title(
+            primary_title="新综述",
+            user_message=long_q,
+        )
+    assert title_is_message_truncation(title, long_q)
+    assert title != "新综述"

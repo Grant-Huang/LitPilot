@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { ReactNode } from "react";
@@ -49,8 +50,12 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     await fetchSessions();
   }, [fetchSessions]);
 
+  const loadGenRef = useRef(0);
+
   const loadMessages = useCallback(async (id: string) => {
+    const gen = ++loadGenRef.current;
     const msgs = await sessionsApi.messages(id);
+    if (loadGenRef.current !== gen) return;
     setMessages(msgs);
   }, []);
 
@@ -105,9 +110,13 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
 
   const handleSelectSession = useCallback(
     async (id: string) => {
+      const switching = id !== activeSessionId;
       setActiveSessionId(id);
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, id);
+      }
+      if (switching) {
+        setMessages([]);
       }
       try {
         await loadMessages(id);
@@ -137,7 +146,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     },
-    [fetchSessions, loadMessages],
+    [activeSessionId, fetchSessions, loadMessages],
   );
 
   const handleDeleteSession = useCallback(

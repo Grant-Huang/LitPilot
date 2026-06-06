@@ -75,10 +75,33 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   const streamSessionRef = useRef<string | null>(null);
   const pendingUserTextRef = useRef<string | null>(null);
   const extensionHandledRef = useRef(0);
+  const prevActiveSessionRef = useRef<string | null>(null);
 
   const streaming = streamState.status === "streaming";
   const streamDone = streamState.status === "done";
   const streamError = streamState.status === "error";
+
+  useEffect(() => {
+    const prev = prevActiveSessionRef.current;
+    prevActiveSessionRef.current = activeSessionId;
+    if (prev === activeSessionId) return;
+
+    if (streaming) {
+      abort();
+    }
+    reset();
+    streamStartedRef.current = false;
+    streamFinalizeRef.current = false;
+    turnSessionRef.current = activeSessionId;
+    streamSessionRef.current = activeSessionId;
+    pendingUserTextRef.current = null;
+    extensionHandledRef.current = 0;
+    setStreamSettling(false);
+    setLiveMessages([]);
+    setLiveIntent("new_topic");
+    setLiveProcessText("");
+    setLiveChatText("");
+  }, [activeSessionId, streaming, abort, reset]);
 
   useEffect(() => {
     if (!streamStartedRef.current || !(streamDone || streamError)) return;
