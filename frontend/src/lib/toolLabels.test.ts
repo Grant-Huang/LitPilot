@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   describeWorkflowKind,
   describeWorkflowStep,
+  formatToolLogLine,
   formatWebFetchPlainText,
+  humanizeDurationMs,
   isWebFetchCharOnlyPreview,
   parseWebFetchCharCountFromOutput,
   resolveWebFetchCharCount,
@@ -47,5 +49,30 @@ describe("web_fetch char count display", () => {
     });
     expect(title.startsWith(WEB_FETCH_PREFIX)).toBe(true);
     expect(title.includes("Paper A")).toBe(true);
+  });
+
+  it("formatToolLogLine avoids duplicating fetch char preview", () => {
+    const line = formatToolLogLine(
+      {
+        id: "f1",
+        name: "web_fetch",
+        args: {
+          url: "https://example.com",
+          title: "Paper A",
+        },
+        risk: "safe",
+        provider: "api",
+      },
+      { output: "已抓取正文（约 500 字）", duration_ms: 800 },
+      "done",
+    );
+    expect(line.primary).toContain("Paper A");
+    expect(line.outcome).toContain("500 字");
+    expect(line.rawDetail).toBeNull();
+  });
+
+  it("humanizeDurationMs", () => {
+    expect(humanizeDurationMs(500)).toBe("500ms");
+    expect(humanizeDurationMs(5000)).toBe("5s");
   });
 });

@@ -1,17 +1,31 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+type ArtifactPanelControl = {
+  visible: boolean;
+  open: () => void;
+};
 
 type ChatLayoutBridge = {
   hasArtifact: boolean;
   artifactPanel: ReactNode | null;
   literatureDetailOpen: boolean;
+  artifactPanelVisible: boolean;
+  openArtifactPanel: () => void;
   setChatLayout: (layout: {
     hasArtifact?: boolean;
     artifactPanel?: ReactNode | null;
     literatureDetailOpen?: boolean;
   }) => void;
+  registerArtifactPanelControl: (control: ArtifactPanelControl | null) => void;
   resetChatLayout: () => void;
 };
 
@@ -21,6 +35,8 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
   const [hasArtifact, setHasArtifact] = useState(false);
   const [artifactPanel, setArtifactPanel] = useState<ReactNode | null>(null);
   const [literatureDetailOpen, setLiteratureDetailOpen] = useState(false);
+  const [artifactControl, setArtifactControl] =
+    useState<ArtifactPanelControl | null>(null);
 
   const setChatLayout = useCallback(
     (layout: {
@@ -37,6 +53,17 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
     [],
   );
 
+  const registerArtifactPanelControl = useCallback(
+    (control: ArtifactPanelControl | null) => {
+      setArtifactControl(control);
+    },
+    [],
+  );
+
+  const openArtifactPanel = useCallback(() => {
+    artifactControl?.open();
+  }, [artifactControl]);
+
   const resetChatLayout = useCallback(() => {
     setHasArtifact(false);
     setArtifactPanel(null);
@@ -48,14 +75,20 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
       hasArtifact,
       artifactPanel,
       literatureDetailOpen,
+      artifactPanelVisible: artifactControl?.visible ?? false,
+      openArtifactPanel,
       setChatLayout,
+      registerArtifactPanelControl,
       resetChatLayout,
     }),
     [
       hasArtifact,
       artifactPanel,
       literatureDetailOpen,
+      artifactControl,
+      openArtifactPanel,
       setChatLayout,
+      registerArtifactPanelControl,
       resetChatLayout,
     ],
   );

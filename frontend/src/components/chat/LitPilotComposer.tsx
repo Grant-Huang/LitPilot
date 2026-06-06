@@ -22,6 +22,8 @@ type LitPilotComposerProps = {
   maxFetchUrls?: number;
   literatureSourceMode?: LiteratureSourceMode;
   streaming: boolean;
+  streamActivityHint?: string | null;
+  streamActivityLevel?: "active" | "waiting" | "slow" | null;
   onSend: () => void;
   onAbort: () => void;
 };
@@ -34,6 +36,8 @@ export function LitPilotComposer({
   maxFetchUrls = 50,
   literatureSourceMode = "merge",
   streaming,
+  streamActivityHint = null,
+  streamActivityLevel = null,
   onSend,
   onAbort,
 }: LitPilotComposerProps) {
@@ -75,35 +79,42 @@ export function LitPilotComposer({
 
   const canSend = Boolean(input.trim()) && !streaming;
 
-  const sourceHint =
-    fetchUrls.length > 0
-      ? literatureSourceMode === "user_only"
-        ? "当前：仅用户列表，将跳过 web_search 网络检索"
-        : "当前：合并模式，您的链接将优先抓取"
-      : literatureSourceMode === "user_only"
-        ? "仅用户列表模式：上传链接后跳过检索；未上传时将自动 web_search 检索"
-        : null;
-
   return (
     <div className="litpilot-composer">
       <div className="litpilot-composer__dock">
         <div className="litpilot-composer__box">
-          {(fetchUrls.length > 0 || sourceHint) && (
-            <div className="litpilot-composer__urls">
-              {fetchUrls.length > 0 && (
-                <Tag
-                  closable
-                  onClose={() => onFetchUrlsChange([])}
-                  closeIcon={<CloseOutlined />}
-                >
-                  已添加 {fetchUrls.length} 个 web_fetch 链接
-                </Tag>
-              )}
-              {sourceHint ? (
-                <span className="litpilot-composer__source-hint">{sourceHint}</span>
-              ) : null}
+          <div className="litpilot-composer__meta">
+            <div className="litpilot-composer__chips" role="group" aria-label="文献来源模式">
+              <span
+                className={`litpilot-composer__chip${
+                  literatureSourceMode === "merge"
+                    ? " litpilot-composer__chip--active"
+                    : ""
+                }`}
+              >
+                合并检索
+              </span>
+              <span
+                className={`litpilot-composer__chip${
+                  literatureSourceMode === "user_only"
+                    ? " litpilot-composer__chip--active"
+                    : ""
+                }`}
+              >
+                仅用户链接
+              </span>
             </div>
-          )}
+            {fetchUrls.length > 0 ? (
+              <Tag
+                closable
+                onClose={() => onFetchUrlsChange([])}
+                closeIcon={<CloseOutlined />}
+                className="litpilot-composer__url-tag"
+              >
+                {fetchUrls.length} 个链接
+              </Tag>
+            ) : null}
+          </div>
           <TextArea
             className="litpilot-composer__input"
             value={input}
@@ -139,8 +150,19 @@ export function LitPilotComposer({
               className="litpilot-composer__file-input"
               onChange={onFileChange}
             />
-            <span className="litpilot-composer__hint">
-              {streaming ? "执行中…" : "Enter 发送 · Shift+Enter 换行"}
+            <span
+              className={`litpilot-composer__hint${
+                streamActivityLevel === "waiting" || streamActivityLevel === "slow"
+                  ? " litpilot-composer__hint--pulse"
+                  : ""
+              }`}
+            >
+              {streaming
+                ? streamActivityHint ||
+                  (streamActivityLevel === "slow"
+                    ? `仍在执行（已等待较久，可停止后重试）`
+                    : "执行中…")
+                : "Enter 发送 · Shift+Enter 换行"}
             </span>
             {streaming ? (
               <Button size="small" onClick={onAbort} danger>

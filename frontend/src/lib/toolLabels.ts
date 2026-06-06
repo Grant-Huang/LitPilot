@@ -198,6 +198,132 @@ function callLooksJson(s: string): boolean {
   return t.startsWith("{") && t.endsWith("}");
 }
 
+/** 毫秒 → 用户可读耗时（≥1s 显示秒） */
+export function humanizeDurationMs(ms?: number): string | null {
+  if (ms == null || ms <= 0) return null;
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return rem ? `${min}m${rem}s` : `${min}m`;
+}
+
+export type ToolLogLine = {
+  primary: string;
+  outcome: string | null;
+  rawDetail: string | null;
+  pending: boolean;
+  error: boolean;
+};
+
+function parseSearchOutput(output: string | undefined): string | null {
+  const raw = (output ?? "").trim();
+  if (!callLooksJson(raw)) return null;
+  try {
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof data.hits !== "number") return null;
+    const ans = String(data.answer ?? "").trim();
+    const base = ans ? `命中 ${data.hits} 条；${ans}` : `命中 ${data.hits} 条`;
+    return base.length > 120 ? `${base.slice(0, 120)}…` : base;
+  } catch {
+    return null;
+  }
+}
+
+/** 对话式单行：主文案 + outcome，避免标题与 preview 重复 */
+export function formatToolLogLine(
+  call: ToolCallPayload,
+  result: { output?: string; error?: string; duration_ms?: number } | undefined,
+  status: string,
+): ToolLogLine {
+  const normalized =
+    status === "awaiting_confirm" ? "pending" : status;
+  const pending = normalized === "pending" || normalized === "running";
+  const error = normalized === "error";
+  const args = call.args ?? {};
+  const duration = humanizeDurationMs(result?.duration_ms);
+  const rawDetail = (error ? result?.error : result?.output)?.trim() || null;
+
+  if (call.name === "web_search") {
+    const q = String(args.query ?? "").trim();
+    const prov = String(args.provider ?? "").trim();
+    const pi = args.pass_index;
+    const pt = args.pass_total;
+    const passTag =
+      typeof pi === "number" && typeof pt === "number" && pt > 1
+        ? `（${pi}/${pt}）`
+        : "";
+    const parsed = parseSearchOutput(result?.output);
+    const outcomeParts = [
+      parsed,
+      prov ? prov : null,
+      duration,
+    ].filter(Boolean);
+    return {
+      primary: q ? `检索${passTag}：${q}` : `检索${passTag}`,
+      outcome: pending ? "检索中…" : outcomeParts.join(" · ") || null,
+      rawDetail: rawDetail && !parsed ? rawDetail : null,
+      pending,
+      error,
+    };
+  }
+
+  if (call.name === "web_fetch") {
+    const parsed = parseWebFetchArgs(args as Record<string, unknown>);
+    const title = webFetchDisplayTitle(parsed?.articleTitle ?? "");
+    const charCount = resolveWebFetchCharCount(
+      args as Record<string, unknown>,
+      result?.output,
+    );
+    let host = "";
+    const url = parsed?.url ?? "";
+    if (url) {
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        host = url.slice(0, 40);
+      }
+    }
+    const label = title !== "（暂无标题）" ? title : host || "网页";
+    const outcomeParts = [
+      error ? result?.error || "抓取失败" : null,
+      !error && charCount ? `约 ${charCount} 字` : null,
+      !error && !charCount && pending ? "抓取中…" : null,
+      duration,
+    ].filter(Boolean);
+    return {
+      primary: `抓取：${label}`,
+      outcome: outcomeParts.length ? outcomeParts.join(" · ") : null,
+      rawDetail: rawDetail && isWebFetchCharOnlyPreview(result?.output, result?.error)
+        ? null
+        : rawDetail,
+      pending,
+      error,
+    };
+  }
+
+  const primary = describeToolAction(call);
+  const preview = previewToolResult(result?.output, result?.error, 140);
+  const outcomeParts = [
+    error ? result?.error || "失败" : null,
+    !error && preview && preview !== primary ? preview : null,
+    pending ? "执行中…" : null,
+    duration,
+  ].filter(Boolean);
+
+  return {
+    primary,
+    outcome: outcomeParts.length ? outcomeParts.join(" · ") : null,
+    rawDetail:
+      rawDetail && previewToolResult(rawDetail, undefined, 999) !== preview
+        ? rawDetail
+        : null,
+    pending,
+    error,
+  };
+}
+
 export function isWebFetchLine(
   name: string,
   args?: Record<string, unknown>,

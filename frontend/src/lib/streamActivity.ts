@@ -1,0 +1,155 @@
+import type { StreamState } from "@meso.ai/ui";
+
+export const STREAM_SILENCE_WARN_SEC = 5;
+export const STREAM_SILENCE_SLOW_SEC = 20;
+
+export type StreamActivityLevel = "active" | "waiting" | "slow";
+
+export type StreamProgressSnapshot = {
+  stage: string;
+  detail: string;
+  elapsedMs: number;
+  passIndex?: number;
+  passTotal?: number;
+  completed?: number;
+  total?: number;
+};
+
+export type StreamActivitySnapshot = {
+  stage: string;
+  detail: string;
+  elapsedSec: number;
+  silenceSec: number;
+  level: StreamActivityLevel;
+  progress?: StreamProgressSnapshot;
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  search: "文献检索",
+  fetch: "抓取全文",
+  cite: "引用抽取",
+  generate: "综述生成",
+  understand: "理解研究问题",
+  brief: "Brief 评估",
+};
+
+function latestProgress(
+  log: StreamState["extensionLog"],
+): StreamProgressSnapshot | undefined {
+  for (let i = log.length - 1; i >= 0; i -= 1) {
+    const ext = log[i];
+    if (ext.payload.name !== "literature_progress") continue;
+    const data = (ext.payload.data ?? {}) as Record<string, unknown>;
+    const stage = typeof data.stage === "string" ? data.stage : "";
+    if (!stage) continue;
+    return {
+      stage,
+      detail: typeof data.detail === "string" ? data.detail : "",
+      elapsedMs:
+        typeof data.elapsed_ms === "number" ? Math.floor(data.elapsed_ms) : 0,
+      passIndex:
+        typeof data.pass_index === "number" ? data.pass_index : undefined,
+      passTotal:
+        typeof data.pass_total === "number" ? data.pass_total : undefined,
+      completed:
+        typeof data.completed === "number" ? data.completed : undefined,
+      total: typeof data.total === "number" ? data.total : undefined,
+    };
+  }
+  return undefined;
+}
+
+function activeStageName(stream: StreamState): string {
+  for (let i = stream.stages.length - 1; i >= 0; i -= 1) {
+    if (stream.stages[i].state === "active") return stream.stages[i].name;
+  }
+  const progress = latestProgress(stream.extensionLog);
+  if (progress) {
+    return STAGE_LABELS[progress.stage] ?? progress.stage;
+  }
+  return "处理中";
+}
+
+function runningToolHint(stream: StreamState): string {
+  for (const id of stream.toolCallOrder) {
+    const tc = stream.toolCalls[id];
+    if (tc?.status === "running" || tc?.status === "pending") {
+      const q = String((tc.call.args as Record<string, unknown>)?.query ?? "").trim();
+      if (q) return q.slice(0, 72);
+      const url = String((tc.call.args as Record<string, unknown>)?.url ?? "").trim();
+      if (url) {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return url.slice(0, 48);
+        }
+      }
+      return tc.call.name.replace(/_/g, " ");
+    }
+  }
+  return "";
+}
+
+export function buildStreamActivitySnapshot(
+  stream: StreamState,
+  nowMs: number,
+  lastEventAtMs: number,
+  streamStartedAtMs: number,
+): StreamActivitySnapshot {
+  const silenceSec = Math.max(0, Math.floor((nowMs - lastEventAtMs) / 1000));
+  const elapsedSec = Math.max(0, Math.floor((nowMs - streamStartedAtMs) / 1000));
+  const progress = latestProgress(stream.extensionLog);
+  const stage = progress
+    ? STAGE_LABELS[progress.stage] ?? progress.stage
+    : activeStageName(stream);
+  const toolHint = runningToolHint(stream);
+  const detail =
+    progress?.detail?.trim() ||
+    toolHint ||
+    (stream.thinkContent ? "思考中…" : "");
+
+  let level: StreamActivityLevel = "active";
+  if (silenceSec >= STREAM_SILENCE_SLOW_SEC) level = "slow";
+  else if (silenceSec >= STREAM_SILENCE_WARN_SEC) level = "waiting";
+
+  return {
+    stage,
+    detail,
+    elapsedSec,
+    silenceSec,
+    level,
+    progress,
+  };
+}
+
+export function formatStreamActivityHint(snapshot: StreamActivitySnapshot): string {
+  const parts: string[] = [snapshot.stage];
+  if (snapshot.progress?.passIndex && snapshot.progress.passTotal) {
+    parts.push(`第 ${snapshot.progress.passIndex}/${snapshot.progress.passTotal} 轮`);
+  }
+  if (
+    snapshot.progress?.completed != null &&
+    snapshot.progress.total != null &&
+    snapshot.progress.total > 0
+  ) {
+    parts.push(`${snapshot.progress.completed}/${snapshot.progress.total}`);
+  }
+  if (snapshot.level === "waiting" || snapshot.level === "slow") {
+    parts.push(`已等待 ${snapshot.silenceSec}s`);
+  } else if (snapshot.elapsedSec > 0) {
+    parts.push(`${snapshot.elapsedSec}s`);
+  }
+  return parts.join(" · ");
+}
+
+export function streamActivityFingerprint(stream: StreamState): string {
+  const extLen = stream.extensionLog.length;
+  const toolLen = stream.toolCallOrder.length;
+  const stageLen = stream.stages.length;
+  const thinkLen = stream.thinkContent?.length ?? 0;
+  const textLen = stream.textContent?.length ?? 0;
+  const wfLen = stream.workflowRunOrder.length;
+  const lastTool = stream.toolCallOrder[toolLen - 1] ?? "";
+  const lastStage = stream.stages[stageLen - 1]?.name ?? "";
+  return `${extLen}|${toolLen}|${lastTool}|${stageLen}|${lastStage}|${thinkLen}|${textLen}|${wfLen}|${stream.status}`;
+}

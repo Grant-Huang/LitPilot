@@ -19,6 +19,7 @@ from app.agents.literature_planner import (
     narrate_phase_stream,
     should_narrate,
 )
+from app.agents.literature_progress import iter_progress_while_pending
 from app.agents.literature_source import build_fetch_hits
 from app.agents.parallel_fetch import iter_fetch_sources_parallel
 from app.agents.retry_utils import retry_async
@@ -169,6 +170,15 @@ async def stream_search_phase(
 
     pre_corpus_hit_count = 0
     try:
+        yield (
+            "literature_search_pass_start",
+            {
+                "query": query,
+                "pass_index": pass_index,
+                "pass_total": pass_total,
+                "provider": search_prov,
+            },
+        )
 
         async def _search_call() -> dict:
             return await cached_web_search(
@@ -182,11 +192,24 @@ async def stream_search_phase(
             )
 
         t0 = time.monotonic()
-        raw_search = await retry_async(
-            _search_call,
-            max_retries=search_retry_count,
-            delay_ms=fetch_retry_delay_ms,
+        search_task = asyncio.create_task(
+            retry_async(
+                _search_call,
+                max_retries=search_retry_count,
+                delay_ms=fetch_retry_delay_ms,
+            )
         )
+        query_label = format_pass_query_label(query) if query.strip() else "检索"
+        async for tick in iter_progress_while_pending(
+            "search",
+            query_label,
+            search_task,
+            pass_index=pass_index,
+            pass_total=pass_total,
+            provider=search_prov,
+        ):
+            yield tick
+        raw_search = await search_task
         search_ms = int((time.monotonic() - t0) * 1000)
         raw_hits = normalize_search_results(raw_search)
         hits, filter_warning = apply_literature_hit_filters(
@@ -344,63 +367,76 @@ async def stream_expanded_search_phase(
         },
     )
 
-    async def _run_pass(idx: int, query: str) -> tuple[int, list[tuple[str, dict[str, Any]]], dict[str, Any]]:
-        collected: list[tuple[str, dict[str, Any]]] = []
-        pass_out: dict[str, Any] = {}
-        async for ev in stream_search_phase(
-            user_message=user_message,
-            query=query,
-            search_api_key=search_api_key,
-            search_max_results=per_query_max,
-            search_retry_count=search_retry_count,
-            fetch_retry_delay_ms=fetch_retry_delay_ms,
-            source_mode=source_mode,
-            upload_count=upload_count if idx == 1 else 0,
-            skip_web_search=skip_web_search,
-            upload_urls=upload_urls if idx == 1 else [],
-            think_acc=think_acc,
-            planner_ctx=planner_ctx,
-            execution_trace=execution_trace,
-            corpus=corpus,
-            result=pass_out,
-            search_include_domains=search_include_domains,
-            search_exclude_domains=search_exclude_domains,
-            search_depth=search_depth,
-            search_enforce_domain_filter=search_enforce_domain_filter,
-            search_enable_junk_filter=search_enable_junk_filter,
-            exclude_title_substrings=exclude_title_substrings,
-            pass_index=idx,
-            pass_total=total,
-            emit_stage_lifecycle=idx == 1 or idx == total,
-            search_provider=search_provider,
-        ):
-            collected.append(ev)
-        return idx, collected, pass_out
-
     pass_results: dict[int, dict[str, Any]] = {}
     parallel = max(1, min(int(search_parallel or 1), total))
 
     if parallel > 1 and total > 1:
+        queue: asyncio.Queue[
+            tuple[str, int, tuple[str, dict[str, Any]] | dict[str, Any]]
+        ] = asyncio.Queue()
         sem = asyncio.Semaphore(parallel)
 
-        async def _bounded(idx: int, query: str) -> tuple[int, list[tuple[str, dict[str, Any]]], dict[str, Any]]:
+        async def _pass_worker(idx: int, query: str) -> None:
             async with sem:
-                return await _run_pass(idx, query)
+                pass_out: dict[str, Any] = {}
+                async for ev in stream_search_phase(
+                    user_message=user_message,
+                    query=query,
+                    search_api_key=search_api_key,
+                    search_max_results=per_query_max,
+                    search_retry_count=search_retry_count,
+                    fetch_retry_delay_ms=fetch_retry_delay_ms,
+                    source_mode=source_mode,
+                    upload_count=upload_count if idx == 1 else 0,
+                    skip_web_search=skip_web_search,
+                    upload_urls=upload_urls if idx == 1 else [],
+                    think_acc=think_acc,
+                    planner_ctx=planner_ctx,
+                    execution_trace=execution_trace,
+                    corpus=corpus,
+                    result=pass_out,
+                    search_include_domains=search_include_domains,
+                    search_exclude_domains=search_exclude_domains,
+                    search_depth=search_depth,
+                    search_enforce_domain_filter=search_enforce_domain_filter,
+                    search_enable_junk_filter=search_enable_junk_filter,
+                    exclude_title_substrings=exclude_title_substrings,
+                    pass_index=idx,
+                    pass_total=total,
+                    emit_stage_lifecycle=idx == 1 or idx == total,
+                    search_provider=search_provider,
+                ):
+                    await queue.put(("event", idx, ev))
+                await queue.put(("done", idx, pass_out))
 
-        tasks = [
-            asyncio.create_task(_bounded(idx, query))
+        workers = [
+            asyncio.create_task(_pass_worker(idx, query))
             for idx, query in enumerate(clean_queries, start=1)
         ]
-        for fut in asyncio.as_completed(tasks):
-            idx, collected, pass_out = await fut
-            for ev in collected:
-                yield ev
-            pass_results[idx] = pass_out
-            pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
-            yield (
-                "literature_search_pass_hits",
-                {"hits": pass_hits, "pass_index": idx, "pass_total": total},
-            )
+        completed = 0
+        try:
+            while completed < total:
+                kind, idx, payload = await queue.get()
+                if kind == "done":
+                    pass_out = payload if isinstance(payload, dict) else {}
+                    pass_results[idx] = pass_out
+                    completed += 1
+                    pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
+                    yield (
+                        "literature_search_pass_hits",
+                        {
+                            "hits": pass_hits,
+                            "pass_index": idx,
+                            "pass_total": total,
+                        },
+                    )
+                else:
+                    yield payload
+        finally:
+            for w in workers:
+                if not w.done():
+                    w.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
         hits_lists = []
         answers = []
         raw_total = 0
@@ -418,13 +454,41 @@ async def stream_expanded_search_phase(
                 answers.append(ans)
     else:
         for idx, query in enumerate(clean_queries, start=1):
-            idx, collected, pass_out = await _run_pass(idx, query)
-            for ev in collected:
+            pass_out: dict[str, Any] = {}
+            async for ev in stream_search_phase(
+                user_message=user_message,
+                query=query,
+                search_api_key=search_api_key,
+                search_max_results=per_query_max,
+                search_retry_count=search_retry_count,
+                fetch_retry_delay_ms=fetch_retry_delay_ms,
+                source_mode=source_mode,
+                upload_count=upload_count if idx == 1 else 0,
+                skip_web_search=skip_web_search,
+                upload_urls=upload_urls if idx == 1 else [],
+                think_acc=think_acc,
+                planner_ctx=planner_ctx,
+                execution_trace=execution_trace,
+                corpus=corpus,
+                result=pass_out,
+                search_include_domains=search_include_domains,
+                search_exclude_domains=search_exclude_domains,
+                search_depth=search_depth,
+                search_enforce_domain_filter=search_enforce_domain_filter,
+                search_enable_junk_filter=search_enable_junk_filter,
+                exclude_title_substrings=exclude_title_substrings,
+                pass_index=idx,
+                pass_total=total,
+                emit_stage_lifecycle=idx == 1 or idx == total,
+                search_provider=search_provider,
+            ):
                 yield ev
             pass_results[idx] = pass_out
             pass_hits = [dict(h) for h in (pass_out.get("hits") or [])]
             raw_total += len(pass_hits)
-            raw_before_corpus += int(pass_out.get("hits_before_corpus") or len(pass_hits))
+            raw_before_corpus += int(
+                pass_out.get("hits_before_corpus") or len(pass_hits)
+            )
             tool_hit_total += int(pass_out.get("tool_hit_count") or len(pass_hits))
             hits_lists.append(pass_hits)
             ans = str(pass_out.get("answer") or "").strip()
@@ -659,10 +723,13 @@ async def stream_fetch_phase(
     search_queue = [h for h in fetch_hits if str(h.get("source") or "") != "upload"]
     ordered_queues = [upload_queue, search_queue] if upload_queue else [fetch_hits]
 
+    fetch_total = min(len(fetch_hits), fetch_cap)
+    url_to_idx: dict[str, int] = {}
+
     for queue in ordered_queues:
         if not queue:
             continue
-        async for hit, ctx_md, err in iter_fetch_sources_parallel(
+        async for phase, hit, ctx_md, err in iter_fetch_sources_parallel(
             queue,
             api_key=fetch_api_key or None,
             llm=llm,
@@ -673,9 +740,58 @@ async def stream_fetch_phase(
             retry_delay_ms=fetch_retry_delay_ms,
             fetch_provider=fetch_provider,
         ):
-            idx = fetch_idx
-            fetch_idx += 1
             url = hit["url"]
+            if phase == "tick":
+                yield (
+                    "literature_progress",
+                    {
+                        "stage": "fetch",
+                        "detail": f"抓取中 {fetch_ok + fetch_failed}/{fetch_total}",
+                        "completed": fetch_ok + fetch_failed,
+                        "total": fetch_total,
+                        "in_flight": max(0, fetch_idx - fetch_ok - fetch_failed),
+                    },
+                )
+                continue
+            if phase == "start":
+                idx = fetch_idx
+                fetch_idx += 1
+                url_to_idx[url] = idx
+                display_title = resolve_fetch_display_title(hit, "")
+                child_id = f"fetch_{idx}"
+                child_meta = {
+                    "url": url,
+                    "title": hit.get("title") or "",
+                    "provider": fetch_provider,
+                }
+                yield (
+                    "literature_fetch_start",
+                    {
+                        "url": url,
+                        "title": display_title or str(hit.get("title") or ""),
+                        "index": idx,
+                        "total": fetch_total,
+                        "provider": fetch_provider,
+                    },
+                )
+                async for ev in emitter.yield_begin(
+                    child_id, name="web_fetch", parent_id="fetch", metadata=child_meta
+                ):
+                    yield ev
+                yield (
+                    "literature_progress",
+                    {
+                        "stage": "fetch",
+                        "detail": display_title or url,
+                        "elapsed_ms": 0,
+                        "completed": max(0, idx - 1),
+                        "total": fetch_total,
+                        "in_flight": min(parallel, fetch_total - idx + 1),
+                    },
+                )
+                continue
+
+            idx = url_to_idx.pop(url, fetch_idx)
             delta.fetch_results.append((hit, ctx_md or "", err))
             delta.fetch_hits.append(hit)
             delta.register_url(url)
@@ -686,10 +802,6 @@ async def stream_fetch_phase(
                 "title": hit.get("title") or "",
                 "provider": fetch_provider,
             }
-            async for ev in emitter.yield_begin(
-                child_id, name="web_fetch", parent_id="fetch", metadata=child_meta
-            ):
-                yield ev
 
             display_title = resolve_fetch_display_title(hit, ctx_md or "")
             if ctx_md:
@@ -796,6 +908,19 @@ async def stream_fetch_phase(
                 ):
                     yield ev
                 fetch_throttle.mark_narrated()
+
+            done_count = fetch_ok + fetch_failed
+            yield (
+                "literature_progress",
+                {
+                    "stage": "fetch",
+                    "detail": f"{done_count}/{fetch_total} 篇",
+                    "completed": done_count,
+                    "total": fetch_total,
+                    "ok": fetch_ok,
+                    "failed": fetch_failed,
+                },
+            )
 
     async for ev in sync_graph_node(emitter, graph, graph_artifact_id, "fetch", "done"):
         yield ev

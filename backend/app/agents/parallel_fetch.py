@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
-from app.agents.content_pipeline import process_url_for_context
+from app.agents.literature_progress import PROGRESS_INTERVAL_SEC
 from app.agents.retry_utils import retry_async
+
+FetchPhase = Literal["start", "done", "tick"]
 
 
 async def _fetch_one_hit(
@@ -56,6 +58,7 @@ async def _fetch_one_hit(
             return hit, "", msg
 
 
+
 async def iter_fetch_sources_parallel(
     hits: list[dict[str, str]],
     *,
@@ -68,8 +71,8 @@ async def iter_fetch_sources_parallel(
     retry_delay_ms: int = 500,
     fetch_provider: str | None = None,
     prioritize_upload: bool = False,
-) -> AsyncIterator[tuple[dict[str, str], str, str | None]]:
-    """每完成一篇即 yield；prioritize_upload 时先完成全部 upload 再处理检索命中。"""
+) -> AsyncIterator[tuple[FetchPhase, dict[str, str], str, str | None]]:
+    """Yield (phase, hit, md, err): ``start`` when queued, ``done`` when finished."""
     sem = asyncio.Semaphore(max(1, parallel))
     subset = hits[:max_urls]
     if prioritize_upload and len(subset) > 1:
@@ -79,24 +82,37 @@ async def iter_fetch_sources_parallel(
     else:
         ordered = subset
 
-    tasks = [
-        asyncio.create_task(
-            _fetch_one_hit(
-                h,
-                api_key=api_key,
-                llm=llm,
-                timeout_per_url=timeout_per_url,
-                retry_count=retry_count,
-                retry_delay_ms=retry_delay_ms,
-                fetch_provider=fetch_provider,
-                sem=sem,
-            )
-        )
-        for h in ordered
-    ]
+    tasks: list[asyncio.Task[tuple[dict[str, str], str, str | None]]] = []
     try:
-        for finished in asyncio.as_completed(tasks):
-            yield await finished
+        for h in ordered:
+            tasks.append(
+                asyncio.create_task(
+                    _fetch_one_hit(
+                        h,
+                        api_key=api_key,
+                        llm=llm,
+                        timeout_per_url=timeout_per_url,
+                        retry_count=retry_count,
+                        retry_delay_ms=retry_delay_ms,
+                        fetch_provider=fetch_provider,
+                        sem=sem,
+                    )
+                )
+            )
+            yield ("start", h, "", None)
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=PROGRESS_INTERVAL_SEC,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                yield ("tick", {}, "", None)
+                continue
+            for task in done:
+                hit, md, err = task.result()
+                yield ("done", hit, md, err)
     finally:
         for task in tasks:
             if not task.done():
@@ -172,18 +188,19 @@ async def fetch_sources_parallel(
     fetch_provider: str | None = None,
     prioritize_upload: bool = False,
 ) -> list[tuple[dict[str, str], str, str | None]]:
-    return [
-        item
-        async for item in iter_fetch_sources_parallel(
-            hits,
-            api_key=api_key,
-            llm=llm,
-            parallel=parallel,
-            timeout_per_url=timeout_per_url,
-            max_urls=max_urls,
-            retry_count=retry_count,
-            retry_delay_ms=retry_delay_ms,
-            fetch_provider=fetch_provider,
-            prioritize_upload=prioritize_upload,
-        )
-    ]
+    out: list[tuple[dict[str, str], str, str | None]] = []
+    async for phase, hit, md, err in iter_fetch_sources_parallel(
+        hits,
+        api_key=api_key,
+        llm=llm,
+        parallel=parallel,
+        timeout_per_url=timeout_per_url,
+        max_urls=max_urls,
+        retry_count=retry_count,
+        retry_delay_ms=retry_delay_ms,
+        fetch_provider=fetch_provider,
+        prioritize_upload=prioritize_upload,
+    ):
+        if phase == "done":
+            out.append((hit, md, err))
+    return out

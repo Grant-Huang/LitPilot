@@ -5,6 +5,9 @@ import { message } from "antd";
 import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotComposer } from "@/components/chat/LitPilotComposer";
 import { LitPilotMessageList } from "@/components/chat/LitPilotMessageList";
+import { LitPilotScrollToBottom } from "@/components/chat/LitPilotScrollToBottom";
+import { useStreamActivity } from "@/hooks/useStreamActivity";
+import { formatStreamActivityHint } from "@/lib/streamActivity";
 import { useChatLayoutBridge } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { useLiteratureStream } from "@/contexts/LiteratureStreamContext";
@@ -38,6 +41,11 @@ export function LitPilotChatPage() {
     abort,
   } = useLiteratureStream();
 
+  const streamActivity = useStreamActivity(streamState, streaming);
+  const streamActivityHint = streamActivity
+    ? formatStreamActivityHint(streamActivity)
+    : null;
+
   const [input, setInput] = useState("");
   const [fetchUrls, setFetchUrls] = useState<string[]>([]);
   const [literatureSourceMode, setLiteratureSourceMode] = useState<
@@ -47,6 +55,7 @@ export function LitPilotChatPage() {
   const [pinnedArtifact, setPinnedArtifact] = useState(
     () => null as ReturnType<typeof cloneStreamState> | null,
   );
+  const pinnedSessionRef = useRef<string | null>(null);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(
     null,
@@ -85,7 +94,7 @@ export function LitPilotChatPage() {
     streaming || streamDone || streamError || streamSettling;
 
   const liveStreaming =
-    (streaming || streamDone || streamError) && !streamSettling
+    streaming && !streamSettling
       ? stripWorkflowArtifacts(streamState)
       : undefined;
 
@@ -209,6 +218,9 @@ export function LitPilotChatPage() {
   }, []);
 
   useEffect(() => {
+    if (pinnedSessionRef.current === activeSessionId) return;
+    pinnedSessionRef.current = activeSessionId;
+    setPinnedArtifact(null);
     if (activeSessionId) void loadSessionArtifacts(activeSessionId);
   }, [activeSessionId, loadSessionArtifacts]);
 
@@ -246,11 +258,12 @@ export function LitPilotChatPage() {
             liveIntent={liveIntent}
             liveProcessText={liveProcessText}
             liveChatText={liveChatText}
+            hasArtifact={hasArtifactPane}
             scrollContainerRef={chatScrollRef}
             scrollResetKey={activeSessionId}
             emptyStateAlign="top"
             emptyState={
-              historyMessages.length === 0 && !activeStreaming ? (
+              historyMessages.length === 0 && !streaming && !streamSettling ? (
                 <div className="litpilot-chat-welcome">
                   <LitPilotBrandLockup
                     markSize={40}
@@ -265,6 +278,7 @@ export function LitPilotChatPage() {
               ) : null
             }
           />
+          <LitPilotScrollToBottom scrollContainerRef={chatScrollRef} />
         </div>
         <LitPilotComposer
           input={input}
@@ -274,6 +288,8 @@ export function LitPilotChatPage() {
           maxFetchUrls={maxFetchUrls}
           literatureSourceMode={literatureSourceMode}
           streaming={streaming}
+          streamActivityHint={streamActivityHint}
+          streamActivityLevel={streamActivity?.level ?? null}
           onSend={() => void send()}
           onAbort={abort}
         />

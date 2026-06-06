@@ -5,6 +5,7 @@ import {
   type ProcessLine,
   buildProcessLines,
 } from "@/lib/executionTrace";
+import { enrichWorkflowCardSummaries } from "@/lib/turnCompletion";
 import { formatLiteratureIntentLabel } from "@/lib/literatureIntent";
 
 export type WorkflowCardType =
@@ -102,6 +103,46 @@ function processLineToStep(line: ProcessLine): WorkflowStep {
 }
 
 function extensionInlineStep(name: string, data: Record<string, unknown>): WorkflowStep | null {
+  if (name === "literature_search_pass_start") {
+    const q = String(data.query ?? "").trim();
+    const pi = data.pass_index;
+    const pt = data.pass_total;
+    const passTag =
+      typeof pi === "number" && typeof pt === "number" && pt > 1
+        ? `（${pi}/${pt}）`
+        : "";
+    return {
+      key: `ext-${name}-${pi ?? 0}`,
+      kind: "inline",
+      title: q ? `检索中${passTag}：${q.slice(0, 96)}` : `检索中${passTag}`,
+      status: "running",
+    };
+  }
+  if (name === "literature_fetch_start") {
+    const title = String(data.title ?? "").trim();
+    const idx = data.index;
+    const total = data.total;
+    const n =
+      typeof idx === "number" && typeof total === "number"
+        ? ` ${idx}/${total}`
+        : "";
+    const url = String(data.url ?? "").trim();
+    let host = "";
+    if (url) {
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        host = url.slice(0, 40);
+      }
+    }
+    const label = title || host || "网页";
+    return {
+      key: `ext-${name}-${url || idx || 0}`,
+      kind: "inline",
+      title: `抓取${n}：${label.slice(0, 72)}`,
+      status: "running",
+    };
+  }
   if (name === "literature_search_refine") {
     const queries = data.queries;
     const n = Array.isArray(queries) ? queries.length : 0;
@@ -304,16 +345,18 @@ export function buildTurnWorkflowFromTrace(
     (c) => c.type === "clarify" && (c.locked || c.state === "running"),
   );
 
-  const summaryParts = cards
+  const enrichedCards = enrichWorkflowCardSummaries(cards);
+
+  const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
-    .map((c) => c.title)
+    .map((c) => c.summary || c.title)
     .slice(0, 4);
 
   return {
     turnIndex: opts.turnIndex ?? 1,
     intent,
     summary: summaryParts.join(" · ") || formatLiteratureIntentLabel(intent),
-    cards,
+    cards: enrichedCards,
     clarifying,
   };
 }

@@ -78,6 +78,15 @@ export function LitPilotAppShell({ children }: Props) {
     }
   }, [isChat, artifactVisible]);
 
+  useEffect(() => {
+    if (!isChat || !chatBridge) return;
+    chatBridge.registerArtifactPanelControl({
+      visible: artifactVisible,
+      open: () => setArtifactVisible(true),
+    });
+    return () => chatBridge.registerArtifactPanelControl(null);
+  }, [isChat, chatBridge, artifactVisible]);
+
   const navItems = [
     {
       id: "chat",
@@ -123,6 +132,7 @@ export function LitPilotAppShell({ children }: Props) {
 
   const layoutExtraClass = [
     "litpilot-branded",
+    isChat && artifactVisible ? "litpilot-layout--artifact-open" : "",
     isChat && chatBridge?.literatureDetailOpen
       ? "litpilot-layout--literature-detail"
       : "",

@@ -27,6 +27,7 @@ export type LitPilotMessageListProps = {
   liveIntent?: string;
   liveProcessText?: string;
   liveChatText?: string;
+  hasArtifact?: boolean;
   emptyState?: React.ReactNode;
   emptyStateAlign?: "center" | "top";
   /** Scrollable ancestor (e.g. `.litpilot-chat-scroll`). */
@@ -41,6 +42,7 @@ export function LitPilotMessageList({
   liveIntent = "new_topic",
   liveProcessText = "",
   liveChatText = "",
+  hasArtifact = false,
   emptyState,
   emptyStateAlign = "center",
   scrollContainerRef,
@@ -133,6 +135,7 @@ export function LitPilotMessageList({
             liveIntent={liveIntent}
             liveProcessText={liveProcessText}
             liveChatText={liveChatText}
+            hasArtifact={hasArtifact}
           />
         )}
 
