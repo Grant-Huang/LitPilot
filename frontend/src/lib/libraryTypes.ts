@@ -44,6 +44,12 @@ export type LibraryItem = {
   citations?: Record<string, string>;
   provenance?: LibraryProvenance[];
   tags?: string[];
+  subtopic_tags?: string[];
+  enrich_lite?: {
+    method_one_liner?: string;
+    findings_one_liner?: string;
+    year?: string;
+  };
   starred?: boolean;
   updated_at?: string;
 };

@@ -1,7 +1,7 @@
 """Tests for section-level refine (P0)."""
 from __future__ import annotations
 
-from app.agents.literature_outline import prepare_outline
+from app.agents.literature_outline import build_subtopic_plan
 from app.agents.literature_section_writer import stitch_review_sections
 from app.agents.section_refine import (
     build_section_refine_plan,
@@ -17,11 +17,13 @@ MOM_BRIEF = """我要写一个与AI原生MOM有关的文献综述，包括4个�
 
 
 def _sample_outline():
-    return prepare_outline(
+    outline, _ = build_subtopic_plan(
         user_message=MOM_BRIEF,
         search_query="AI-native MOM",
         session_title="AI MOM",
+        intent="new_topic",
     )
+    return outline
 
 
 def test_parse_refine_second_chapter() -> None:

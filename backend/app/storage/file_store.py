@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -236,11 +237,6 @@ class FileStore:
             "max_fetch_urls": int(
                 self._pick_legacy_value(cfg, defaults, "max_fetch_urls", fallback=5)
             ),
-            "literature_source_mode": str(
-                self._pick_legacy_value(
-                    cfg, defaults, "literature_source_mode", fallback="merge"
-                )
-            ),
             "tavily_retry_count": int(
                 self._pick_legacy_value(cfg, defaults, "tavily_retry_count", fallback=0)
             ),
@@ -252,9 +248,6 @@ class FileStore:
             ),
             "max_source_chars": int(
                 self._pick_legacy_value(cfg, defaults, "max_source_chars", fallback=14_000)
-            ),
-            "plan_confirm": bool(
-                self._pick_legacy_value(cfg, defaults, "plan_confirm", fallback=False)
             ),
             "citation_format": str(
                 self._pick_legacy_value(cfg, defaults, "citation_format", fallback="apa")
@@ -616,13 +609,6 @@ class FileStore:
                 "max_source_chars": int(legacy.get("max_source_chars") or 14_000),
             },
         )
-        cap(
-            "literature_source",
-            "文献来源策略",
-            primary_ref=None,
-            params={"literature_source_mode": str(legacy.get("literature_source_mode") or "merge"),
-                    "merge_search_budget": "full"},
-        )
         prompt_defaults = deploy_settings()
         cap(
             "prompts",
@@ -632,11 +618,6 @@ class FileStore:
                 "review_system_prompt_template": str(
                     legacy.get("review_system_prompt_template") or ""
                 ),
-                "enable_paper_attributes": bool(
-                    prompt_defaults.get("enable_paper_attributes", True)
-                ),
-                "outline_mode": str(prompt_defaults.get("outline_mode") or "lite"),
-                "post_refine_mode": str(prompt_defaults.get("post_refine_mode") or "lite"),
             },
         )
 
@@ -648,7 +629,6 @@ class FileStore:
             prefs = {
                 "preferences": {
                     "citation_format": str(legacy.get("citation_format") or "apa"),
-                    "plan_confirm": bool(legacy.get("plan_confirm", False)),
                 },
                 "created_at": now,
                 "updated_at": now,
@@ -776,18 +756,6 @@ class FileStore:
                     "max_source_chars": int(legacy.get("max_source_chars") or 14_000),
                 },
             },
-            "literature_source": {
-                "capability_id": "literature_source",
-                "label": "文献来源策略",
-                "enabled": True,
-                "primary_ref": None,
-                "override_params": {},
-                "params": {
-                    "literature_source_mode": str(
-                        legacy.get("literature_source_mode") or "merge"
-                    ),
-                },
-            },
             "prompts": {
                 "capability_id": "prompts",
                 "label": "提示词模板",
@@ -800,13 +768,6 @@ class FileStore:
                         legacy.get("review_system_prompt_template") or ""
                     )
                     or str(prompt_defaults.get("review_system_prompt_template") or ""),
-                    "enable_paper_attributes": bool(
-                        prompt_defaults.get("enable_paper_attributes", True)
-                    ),
-                    "outline_mode": str(prompt_defaults.get("outline_mode") or "lite"),
-                    "post_refine_mode": str(
-                        prompt_defaults.get("post_refine_mode") or "lite"
-                    ),
                 },
             },
         }
@@ -1065,7 +1026,6 @@ class FileStore:
     def _ensure_capability_param_defaults(self) -> None:
         """Backfill new capability params on existing v2 installs."""
         from app.storage.runtime_settings import (
-            LITERATURE_SOURCE_PARAM_DEFAULTS,
             ORCHESTRATOR_PARAM_DEFAULTS,
             PROMPTS_PARAM_DEFAULTS,
             WEB_FETCH_PARAM_DEFAULTS,
@@ -1080,7 +1040,6 @@ class FileStore:
             "web_fetch": WEB_FETCH_PARAM_DEFAULTS,
             "orchestrator": ORCHESTRATOR_PARAM_DEFAULTS,
             "prompts": PROMPTS_PARAM_DEFAULTS,
-            "literature_source": LITERATURE_SOURCE_PARAM_DEFAULTS,
         }
         changed = False
         for cap in caps:
@@ -1277,7 +1236,6 @@ class FileStore:
             prefs = {}
         return {
             "citation_format": str(prefs.get("citation_format") or "apa").strip().lower(),
-            "plan_confirm": bool(prefs.get("plan_confirm", False)),
         }
 
     def save_personal_preferences(self, partial: dict[str, Any]) -> dict[str, Any]:
@@ -1542,12 +1500,19 @@ class FileStore:
         self,
         session_id: str,
         content: str,
+        *,
+        version_id: str | None = None,
+        version_kind: str = "full",
+        parent_version: str | None = None,
     ) -> tuple[Path, str]:
         return self._save_markdown_artifact(
             session_id,
             content,
             kind="review",
             meta_key="review_versions",
+            version_id=version_id,
+            version_kind=version_kind,
+            parent_version=parent_version,
         )
 
     def save_matrix_artifact(
@@ -1569,12 +1534,16 @@ class FileStore:
         *,
         kind: str,
         meta_key: str,
+        version_id: str | None = None,
+        version_kind: str = "full",
+        parent_version: str | None = None,
     ) -> tuple[Path, str]:
         art_dir = self.root / "artifacts" / session_id
         art_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        version_id = f"{kind}_{uuid.uuid4().hex[:12]}"
-        filename = f"{kind}-{ts}.md"
+        resolved_id = (version_id or "").strip() or f"{kind}_{uuid.uuid4().hex[:12]}"
+        safe_id = re.sub(r"[^a-zA-Z0-9._-]", "", resolved_id) or resolved_id
+        filename = f"{kind}-{safe_id}.md"
         path = art_dir / filename
         path.write_text(content, encoding="utf-8")
         latest = art_dir / f"{kind}-latest.md"
@@ -1584,9 +1553,12 @@ class FileStore:
             versions = list(meta.get(meta_key) or [])
             versions.append(
                 {
-                    "id": version_id,
+                    "id": safe_id,
+                    "version": safe_id,
                     "filename": filename,
                     "created_at": _utc_now(),
+                    "kind": version_kind,
+                    "parent": parent_version,
                 }
             )
             meta[meta_key] = versions[-20:]
@@ -1595,7 +1567,7 @@ class FileStore:
                 self.root / "sessions" / session_id / "meta.json",
                 meta,
             )
-        return path, version_id
+        return path, safe_id
 
     def get_latest_review(self, session_id: str) -> dict[str, Any] | None:
         art_dir = self.root / "artifacts" / session_id

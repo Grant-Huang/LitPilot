@@ -5,7 +5,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-from app.agents.agent_settings import get_review_system_prompt_template
 from app.agents.execution_trace import upsert_stage
 from app.agents.literature_intent import LiteratureIntentResult, build_query_prompt
 from app.agents.prompt_settings import (
@@ -18,7 +17,6 @@ from app.agents.literature_planner import (
     format_generate_context,
     narrate_phase_stream,
 )
-from app.agents.literature_post_refine import post_refine_review
 from app.agents.literature_section_writer import (
     stitch_review_sections,
     stream_section_generate,
@@ -28,10 +26,6 @@ from app.agents.literature_turn_finalize import finalize_turn
 from app.agents.literature_turn_graph import sync_graph_node
 from app.agents.literature_turn_helpers import new_id
 from app.agents.report_compliance import append_compliance_footer
-from app.agents.review_prompt import (
-    build_review_materials_user_prompt,
-    build_review_turn_system_prompt,
-)
 from app.agents.section_refine import build_section_refine_plan
 from app.agents.session_corpus import SessionCorpus
 from app.agents.synthesis_matrix_prompt import (
@@ -63,7 +57,6 @@ class GenerateTurnContext:
     gen_constraints: list[str]
     citation_format: str
     fmt_label: str
-    post_refine_mode: str
     finalize_ctx: TurnFinalizeContext
     store: Any
     llm: Any
@@ -79,7 +72,6 @@ class GenerateTurnContext:
     failed_literature: list[dict[str, str]] = field(default_factory=list)
     fetch_ok: int = 0
     fetch_failed: int = 0
-    use_outline_path: bool = False
     outline_obj: LiteratureOutline | None = None
     handled: bool = False
 
@@ -93,12 +85,6 @@ async def stream_generate_turn(
 
     if intent.intent == "query_corpus":
         async for ev in _stream_query_corpus(ctx, context_block):
-            yield ev
-        ctx.handled = True
-        return
-
-    if intent.intent == "synthesis_matrix":
-        async for ev in _stream_synthesis_matrix(ctx, context_block):
             yield ev
         ctx.handled = True
         return
@@ -152,13 +138,16 @@ async def _stream_query_corpus(
 async def _stream_synthesis_matrix(
     ctx: GenerateTurnContext,
     context_block: str,
+    *,
+    parent_id: str | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     async for ev in sync_graph_node(
         ctx.emitter,
         ctx.graph,
         ctx.graph_artifact_id,
-        "generate",
+        "matrix",
         "active",
+        parent_id=parent_id,
     ):
         yield ev
     yield ("stage", {"name": "矩阵生成", "state": "active"})
@@ -227,52 +216,22 @@ async def _stream_synthesis_matrix(
         ctx.emitter,
         ctx.graph,
         ctx.graph_artifact_id,
-        "generate",
+        "matrix",
         "done",
+        parent_id=parent_id,
     ):
         yield ev
     yield ("stage", {"name": "矩阵生成", "state": "done"})
     upsert_stage(ctx.execution_trace, "矩阵生成", "done")
 
-    async for ev in sync_graph_node(
-        ctx.emitter,
-        ctx.graph,
-        ctx.graph_artifact_id,
-        "deliver",
-        "active",
-    ):
-        yield ev
-
-    _, version_id = ctx.store.save_matrix_artifact(ctx.session_id, main_text)
+    _, matrix_version_id = ctx.store.save_matrix_artifact(ctx.session_id, main_text)
     yield artifact_stream_delta(
         matrix_art_id,
         "",
         lang=SYNTHESIS_MATRIX_LANG,
-        version_id=version_id,
+        version_id=matrix_version_id,
         done=True,
     )
-
-    async for ev in sync_graph_node(
-        ctx.emitter,
-        ctx.graph,
-        ctx.graph_artifact_id,
-        "deliver",
-        "done",
-    ):
-        yield ev
-    upsert_stage(ctx.execution_trace, "完成", "done")
-    ctx.finalize_ctx.corpus = ctx.working
-    ctx.finalize_ctx.fetch_results = ctx.fetch_results
-    ctx.finalize_ctx.cite_records = ctx.cite_records
-    ctx.finalize_ctx.failed_literature = ctx.failed_literature
-    ctx.finalize_ctx.intent = ctx.intent
-    lib_result, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=main_text)
-    yield end_ev
-    yield (
-        "extension",
-        {"name": "library_updated", "version": "1.0", "data": lib_result},
-    )
-    yield ("stage", {"name": "完成", "state": "done"})
 
 
 async def _stream_review(
@@ -283,10 +242,13 @@ async def _stream_review(
     raw_main = ""
     review_art_id = new_id("review")
     version_id: str | None = None
-    last_wf_node = "outline" if ctx.use_outline_path and ctx.outline_obj else "cite_extract"
     outline_obj = ctx.outline_obj
+    if not outline_obj:
+        yield chat_text("未找到子主题大纲，无法生成综述。")
+        return
 
-    if ctx.use_outline_path and outline_obj:
+    last_wf_node = "outline"
+    if outline_obj:
         yield ("stage", {"name": "综述生成", "state": "active"})
         gen_ctx = format_generate_context(
             source_blocks=len(ctx.working.sources_md),
@@ -310,34 +272,13 @@ async def _stream_review(
         prior_review = ctx.store.get_latest_review(ctx.session_id)
         prior_review_text = str((prior_review or {}).get("content") or "")
         refine_plan = None
-        if ctx.intent.intent in ("refine_gen", "regen_only") and prior_review_text.strip():
+        if ctx.intent.intent == "review_refine" and prior_review_text.strip():
             refine_plan = build_section_refine_plan(
                 user_message=ctx.user_message,
                 outline=outline_obj,
                 prior_review_text=prior_review_text,
                 gen_directives=gen_directives,
             )
-            if refine_plan.target_section_ids is not None:
-                yield (
-                    "literature_section_refine",
-                    {
-                        "mode": "partial",
-                        "target_section_ids": refine_plan.target_section_ids,
-                        "target_titles": [
-                            s.title
-                            for s in outline_obj.sections
-                            if s.id in refine_plan.target_section_ids
-                        ],
-                        "reused_count": len(outline_obj.sections)
-                        - len(refine_plan.target_section_ids),
-                    },
-                )
-            elif ctx.intent.intent == "refine_gen":
-                yield (
-                    "literature_section_refine",
-                    {"mode": "full", "target_section_ids": [], "reused_count": 0},
-                )
-
         section_tokens = await get_prompt_max_tokens("section_system_template")
         section_refine_tokens = await get_prompt_max_tokens("section_refine_system_template")
 
@@ -379,7 +320,7 @@ async def _stream_review(
             sec_is_refine = bool(
                 refine_plan
                 and refine_plan.prior_bodies.get(section.id, "").strip()
-                and ctx.intent.intent == "refine_gen"
+                and ctx.intent.intent == "review_refine"
             )
             sec_directives = (
                 refine_plan.revision_directives if refine_plan else gen_directives
@@ -427,129 +368,8 @@ async def _stream_review(
         raw_main = stitch_review_sections(section_parts)
         upsert_stage(ctx.execution_trace, "综述生成", "done")
         yield ("stage", {"name": "综述生成", "state": "done"})
-    else:
-        async for ev in sync_graph_node(
-            ctx.emitter, ctx.graph, ctx.graph_artifact_id, "generate", "active"
-        ):
-            yield ev
-        yield ("stage", {"name": "综述生成", "state": "active"})
 
-        gen_ctx = format_generate_context(
-            source_blocks=len(ctx.working.sources_md),
-            cite_ok=cite_ok,
-            failed_fetch=ctx.fetch_failed,
-            fmt_label=ctx.fmt_label,
-        )
-        async for ev in narrate_phase_stream(
-            "G",
-            ctx.user_message,
-            gen_ctx,
-            think_acc=ctx.think_acc,
-            ctx=ctx.planner_ctx,
-        ):
-            yield ev
-
-        gen_prompt = build_review_materials_user_prompt(
-            context_block,
-            prior_review_excerpt=(
-                str((ctx.store.get_latest_review(ctx.session_id) or {}).get("content") or "")
-                if ctx.intent.intent in ("refine_gen", "regen_only")
-                else ""
-            ),
-        )
-        review_template = await get_review_system_prompt_template()
-        review_system = build_review_turn_system_prompt(
-            ctx.citation_format,
-            review_template,
-            initial_query=ctx.initial_query,
-            gen_constraints=ctx.gen_constraints,
-            gen_directives=ctx.intent.gen_directives,
-            writing_emphasis=ctx.planner_ctx.writing_emphasis,
-            intent=ctx.intent.intent,
-        )
-        main_parts: list[str] = []
-        review_tokens = await get_prompt_max_tokens("review_system_prompt_template")
-        try:
-            async for chunk in ctx.llm.chat_stream(
-                [LLMMessage(role="user", content=gen_prompt)],
-                system=review_system,
-                max_tokens=review_tokens,
-                temperature=0.35,
-            ):
-                main_parts.append(chunk)
-                yield artifact_stream_delta(review_art_id, chunk)
-        except Exception:
-            _log.exception("review streaming failed")
-
-        raw_main = "".join(main_parts)
-        if not raw_main.strip():
-            try:
-                resp = await ctx.llm.chat(
-                    [LLMMessage(role="user", content=gen_prompt)],
-                    system=review_system,
-                    max_tokens=review_tokens,
-                    temperature=0.35,
-                )
-                raw_main = (resp.content or "").strip()
-                if raw_main:
-                    yield artifact_stream_delta(review_art_id, raw_main)
-            except Exception:
-                _log.exception("review non-stream fallback failed")
-                raw_main = ""
-            if not raw_main.strip():
-                raw_main = "（综述生成为空：模型未返回任何内容。请缩小问题范围后重试。）\n"
-                yield artifact_stream_delta(review_art_id, raw_main)
-
-        async for ev in sync_graph_node(
-            ctx.emitter, ctx.graph, ctx.graph_artifact_id, "generate", "done"
-        ):
-            yield ev
-        yield ("stage", {"name": "综述生成", "state": "done"})
-        upsert_stage(ctx.execution_trace, "综述生成", "done")
-        last_wf_node = "generate"
-
-    if ctx.use_outline_path:
-        if ctx.post_refine_mode != "off":
-            async for ev in sync_graph_node(
-                ctx.emitter,
-                ctx.graph,
-                ctx.graph_artifact_id,
-                "refine",
-                "active",
-                parent_id=last_wf_node,
-            ):
-                yield ev
-            refined, report = post_refine_review(
-                raw_main,
-                outline=outline_obj,
-                cite_count=cite_ok,
-            )
-            raw_main = refined
-            yield ("literature_refine_report", report)
-            async for ev in sync_graph_node(
-                ctx.emitter,
-                ctx.graph,
-                ctx.graph_artifact_id,
-                "refine",
-                "done",
-                parent_id=last_wf_node,
-            ):
-                yield ev
-            upsert_stage(ctx.execution_trace, "后处理", "done")
-            deliver_parent = "refine"
-        else:
-            async for ev in sync_graph_node(
-                ctx.emitter,
-                ctx.graph,
-                ctx.graph_artifact_id,
-                "refine",
-                "skipped",
-                parent_id=last_wf_node,
-            ):
-                yield ev
-            deliver_parent = "refine"
-    else:
-        deliver_parent = None
+    deliver_parent = last_wf_node
 
     main_text = append_compliance_footer(raw_main)
     if main_text != raw_main:
@@ -567,13 +387,48 @@ async def _stream_review(
     ):
         yield ev
 
-    _, version_id = ctx.store.save_review_artifact(ctx.session_id, main_text)
+    from app.agents.review_version import (
+        current_review_version_id,
+        resolve_review_version_id,
+    )
+
+    session_meta = ctx.store.get_session(ctx.session_id) or {}
+    version_id = resolve_review_version_id(
+        meta=session_meta,
+        intent=ctx.intent.intent,
+        full_regen=ctx.intent.full_regen,
+    )
+    parent = (
+        current_review_version_id(session_meta)
+        if ctx.intent.intent == "review_refine" and not ctx.intent.full_regen
+        else None
+    )
+    version_kind = "refine" if ctx.intent.intent == "review_refine" else "full"
+    if ctx.intent.full_regen:
+        version_kind = "full"
+    _, version_id = ctx.store.save_review_artifact(
+        ctx.session_id,
+        main_text,
+        version_id=version_id,
+        version_kind=version_kind,
+        parent_version=parent,
+    )
     yield artifact_stream_delta(
         review_art_id,
         "",
         version_id=version_id,
         done=True,
     )
+    yield (
+        "literature_generate_done",
+        {
+            "version_id": version_id,
+            "chapter_count": len(outline_obj.sections),
+        },
+    )
+
+    async for ev in _stream_synthesis_matrix(ctx, context_block, parent_id=deliver_parent):
+        yield ev
 
     async for ev in sync_graph_node(
         ctx.emitter,

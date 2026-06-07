@@ -6,9 +6,11 @@ from app.agents.search_query_refiner import apply_academic_search_suffix
 from app.core.think_stream import chunk_text
 
 
-async def _empty_fetch_iter():
+async def _empty_pipeline():
+    from app.agents.literature_turn_pipeline import RetrievalPipelineContext
+
     if False:
-        yield  # pragma: no cover — async generator stub
+        yield  # pragma: no cover
 
 
 async def _mock_understanding_stream():
@@ -43,7 +45,12 @@ async def test_stream_requires_search_api_key(tmp_path, monkeypatch) -> None:
 
     store = FileStore(tmp_path)
     monkeypatch.setattr("app.agents.literature_turn.get_store", lambda: store)
+    monkeypatch.setattr("app.agents.agent_settings.get_store", lambda: store)
+    monkeypatch.setattr("app.storage.file_store.get_store", lambda: store)
     meta = store.create_session("test")
+
+    mock_llm = MagicMock()
+    mock_llm.chat = AsyncMock(return_value=MagicMock(content=""))
 
     with (
         patch(
@@ -56,6 +63,19 @@ async def test_stream_requires_search_api_key(tmp_path, monkeypatch) -> None:
             new_callable=AsyncMock,
             return_value="tavily",
         ),
+        patch(
+            "app.agents.literature_intent.get_router_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_intent.list_session_library_items",
+            return_value=[],
+        ),
+        patch(
+            "app.agents.literature_turn.resolve_session_corpus",
+            return_value=None,
+        ),
     ):
         events = []
         async for ev in stream_literature_turn(meta["id"], "test query"):
@@ -64,117 +84,16 @@ async def test_stream_requires_search_api_key(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_only_skips_web_search(tmp_path, monkeypatch) -> None:
-    from app.agents.literature_turn import stream_literature_turn
-    from app.storage.file_store import FileStore
-
-    store = FileStore(tmp_path)
-    monkeypatch.setattr(
-        "app.agents.literature_turn.get_store", lambda: store
-    )
-    monkeypatch.setattr(
-        "app.agents.agent_settings.get_store", lambda: store
-    )
-    store.save_agent_settings(
-        {
-            "web_search_api_key": "tvly-test",
-            "literature_source_mode": "user_only",
-        }
-    )
-    caps = store.list_system_capabilities()
-    for cap in caps:
-        if cap.get("capability_id") == "literature_source":
-            cap.setdefault("params", {})["literature_source_mode"] = "user_only"
-        if cap.get("capability_id") == "web_search":
-            cap.setdefault("params", {})["search_provider"] = "tavily"
-    store.save_system_capabilities(caps)
-    meta = store.create_session("test")
-
-    search_mock = AsyncMock(
-        return_value={"results": [{"url": "https://t.com/x", "title": "T", "content": "s"}], "answer": "a"}
-    )
-
-    mock_llm = MagicMock()
-    mock_llm.chat = AsyncMock(return_value=MagicMock(content=""))
-
-    with (
-        patch(
-            "app.agents.literature_turn.get_review_llm",
-            new_callable=AsyncMock,
-            return_value=mock_llm,
-        ),
-        patch(
-            "app.agents.literature_turn.get_planner_llm",
-            new_callable=AsyncMock,
-            return_value=mock_llm,
-        ),
-        patch(
-            "app.agents.literature_turn.get_pipeline_llm",
-            new_callable=AsyncMock,
-            return_value=mock_llm,
-        ),
-        patch(
-            "app.agents.literature_turn.get_assessor_llm",
-            new_callable=AsyncMock,
-            return_value=mock_llm,
-        ),
-        patch(
-            "app.agents.literature_turn.get_web_search_api_key",
-            new_callable=AsyncMock,
-            return_value="tvly-test",
-        ),
-        patch(
-            "app.agents.literature_turn.assess_first_turn_gate",
-            new_callable=AsyncMock,
-            return_value=(None, None),
-        ),
-        patch(
-            "app.agents.literature_turn.resolve_outline_plan",
-            return_value=(False, None, []),
-        ),
-        patch(
-            "app.agents.literature_turn.stream_understanding_and_route",
-            return_value=_mock_understanding_stream(),
-        ),
-        patch(
-            "app.agents.literature_phases.cached_web_search",
-            search_mock,
-        ),
-        patch(
-            "app.agents.literature_phases.iter_fetch_sources_parallel",
-            return_value=_empty_fetch_iter(),
-        ),
-        patch(
-            "app.agents.literature_phases.extract_and_persist_batch",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-    ):
-        events = []
-        async for ev in stream_literature_turn(
-            meta["id"],
-            "survey topic",
-            extra_fetch_urls=["https://user.example/paper"],
-        ):
-            events.append(ev)
-
-    search_mock.assert_not_called()
-    source_ev = [e for e in events if e[0] == "literature_source"]
-    assert source_ev, f"events={[e[0] for e in events]}"
-    assert source_ev[0][1]["skipped_web_search"] is True
-
-
-@pytest.mark.asyncio
-async def test_understanding_stage_emitted_before_intent_routing(
+async def test_v2_event_order_turn_start_intent_then_understanding(
     tmp_path, monkeypatch
 ) -> None:
-    """首屏反馈：应先出现思考进度，再在 Checkpoint A 前进入理解阶段。"""
     from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
     store = FileStore(tmp_path)
     monkeypatch.setattr("app.agents.literature_turn.get_store", lambda: store)
     monkeypatch.setattr("app.agents.agent_settings.get_store", lambda: store)
+    monkeypatch.setattr("app.storage.file_store.get_store", lambda: store)
     store.save_agent_settings({"web_search_api_key": "tvly-test"})
     meta = store.create_session("wf-order")
 
@@ -198,9 +117,17 @@ async def test_understanding_stage_emitted_before_intent_routing(
             return_value=mock_llm,
         ),
         patch(
-            "app.agents.literature_turn.get_assessor_llm",
+            "app.agents.literature_intent.get_router_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_router.route_literature",
+            new_callable=AsyncMock,
+            return_value=MagicMock(
+                session_title="Survey topic",
+                search_query="survey topic academic",
+            ),
         ),
         patch(
             "app.agents.literature_turn.get_web_search_api_key",
@@ -212,17 +139,16 @@ async def test_understanding_stage_emitted_before_intent_routing(
             return_value=_mock_understanding_stream(),
         ),
         patch(
-            "app.agents.literature_turn.assess_first_turn_gate",
-            new_callable=AsyncMock,
-            return_value=(None, None),
-        ),
-        patch(
-            "app.agents.literature_turn.resolve_outline_plan",
-            return_value=(False, None, []),
-        ),
-        patch(
             "app.agents.literature_turn.run_retrieval_pipeline",
-            return_value=_empty_fetch_iter(),
+            return_value=_empty_pipeline(),
+        ),
+        patch(
+            "app.agents.literature_turn.resolve_session_corpus",
+            return_value=None,
+        ),
+        patch(
+            "app.agents.literature_intent.list_session_library_items",
+            return_value=[],
         ),
     ):
         events = []
@@ -230,14 +156,6 @@ async def test_understanding_stage_emitted_before_intent_routing(
             events.append(ev)
             if ev[0] == "stage" and ev[1].get("name") == "理解研究问题":
                 break
-
-    think_text = "".join(
-        e[1].get("delta", "")
-        for e in events
-        if e[0] == "think"
-    )
-    assert "正在理解你的研究问题" in think_text
-    assert "正在加载检索与抓取配置" in think_text
 
     understand_idx = next(
         (
@@ -248,7 +166,11 @@ async def test_understanding_stage_emitted_before_intent_routing(
         None,
     )
     turn_start_idx = next(
-        (i for i, e in enumerate(events) if e[0] == "extension" and e[1].get("name") == "turn_start"),
+        (
+            i
+            for i, e in enumerate(events)
+            if e[0] == "extension" and e[1].get("name") == "turn_start"
+        ),
         None,
     )
     intent_idx = next(
@@ -258,5 +180,4 @@ async def test_understanding_stage_emitted_before_intent_routing(
     assert understand_idx is not None
     assert turn_start_idx is not None
     assert intent_idx is not None
-    assert turn_start_idx < understand_idx
-    assert intent_idx < understand_idx
+    assert turn_start_idx < intent_idx < understand_idx

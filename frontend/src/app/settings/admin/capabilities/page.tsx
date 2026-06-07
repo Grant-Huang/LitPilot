@@ -190,23 +190,6 @@ function CapabilityCard({
                 }
               />
             </InlineField>
-            <InlineField
-              label="并行轮数"
-              htmlFor={`${cap.capability_id}-parallel`}
-              tip={CAP_TIPS.search_parallel}
-            >
-              <input
-                id={`${cap.capability_id}-parallel`}
-                className="input"
-                type="number"
-                min={1}
-                max={4}
-                value={Number(params.search_parallel ?? 2)}
-                onChange={(e) =>
-                  setParams((p) => ({ ...p, search_parallel: Number(e.target.value) }))
-                }
-              />
-            </InlineField>
             {searchProvider === "tavily" ? (
               <InlineField
                 label="检索深度"
@@ -272,32 +255,7 @@ function CapabilityCard({
               onChange={(checked) => setParams((p) => ({ ...p, enable_junk_filter: checked }))}
               tip={CAP_TIPS.enable_junk_filter}
             />
-            <InlineCheck
-              label="启用检索扩展（多 query 合并）"
-              checked={Boolean(params.enable_query_expansion ?? true)}
-              onChange={(checked) =>
-                setParams((p) => ({ ...p, enable_query_expansion: checked }))
-              }
-              tip={CAP_TIPS.enable_query_expansion}
-            />
           </div>
-          <InlineField
-            label="扩展条数"
-            htmlFor={`${cap.capability_id}-exp`}
-            tip={CAP_TIPS.expansion_count}
-          >
-            <input
-              id={`${cap.capability_id}-exp`}
-              className="input"
-              type="number"
-              min={1}
-              max={4}
-              value={Number(params.expansion_count ?? 3)}
-              onChange={(e) =>
-                setParams((p) => ({ ...p, expansion_count: Number(e.target.value) }))
-              }
-            />
-          </InlineField>
         </>
       );
     }
@@ -438,46 +396,7 @@ function CapabilityCard({
       return null;
     }
     if (cap.capability_id === "literature_source") {
-      const sourceTip = `${CAP_TIPS.literature_source_merge}\n${CAP_TIPS.literature_source_user_only}`;
-      const budgetTip = `${CAP_TIPS.merge_search_budget_full}\n${CAP_TIPS.merge_search_budget_lite}`;
-      return (
-        <>
-          <InlineField
-            label="来源策略"
-            htmlFor={`${cap.capability_id}-src`}
-            tip={sourceTip}
-          >
-            <select
-              id={`${cap.capability_id}-src`}
-              className="input settings-select"
-              value={String(params.literature_source_mode ?? "merge")}
-              onChange={(e) =>
-                setParams((p) => ({ ...p, literature_source_mode: e.target.value }))
-              }
-            >
-              <option value="merge">合并（用户链接 + web_search）</option>
-              <option value="user_only">仅用户列表</option>
-            </select>
-          </InlineField>
-          <InlineField
-            label="检索预算"
-            htmlFor={`${cap.capability_id}-budget`}
-            tip={budgetTip}
-          >
-            <select
-              id={`${cap.capability_id}-budget`}
-              className="input settings-select"
-              value={String(params.merge_search_budget ?? "full")}
-              onChange={(e) =>
-                setParams((p) => ({ ...p, merge_search_budget: e.target.value }))
-              }
-            >
-              <option value="full">full — 正常检索条数</option>
-              <option value="lite">lite — 多链接时压缩检索</option>
-            </select>
-          </InlineField>
-        </>
-      );
+      return null;
     }
     return null;
   };

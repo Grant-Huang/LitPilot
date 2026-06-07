@@ -1,14 +1,16 @@
-"""Tests for multi-turn literature intent routing."""
+"""Tests for v2 literature intent routing."""
 from __future__ import annotations
 
 from app.agents.literature_intent import (
+    CORPUS_GUIDANCE_FOOTER,
     LiteratureIntentResult,
+    build_append_urls_notice,
     build_generation_prompt,
+    build_query_prompt,
     build_session_turn_context,
     detect_intent_rules,
-    execute_manage_library,
     merge_gen_constraints,
-    parse_manage_command,
+    normalize_intent,
 )
 from app.agents.session_corpus import SessionCorpus, filter_new_urls
 
@@ -33,14 +35,19 @@ def _turn_ctx(*, has_corpus: bool = True, user_turns: int = 2, failed: int = 0):
     )
 
 
-def test_first_turn_is_new_topic() -> None:
+def test_first_turn_is_new_topic_ignores_urls() -> None:
     ctx = _turn_ctx(has_corpus=False, user_turns=1)
-    result = detect_intent_rules("transformer survey papers", turn_ctx=ctx)
+    result = detect_intent_rules(
+        "transformer survey papers",
+        turn_ctx=ctx,
+        extra_urls=["https://example.com/paper"],
+    )
     assert result is not None
     assert result.intent == "new_topic"
+    assert result.new_urls == []
 
 
-def test_supplement_with_url() -> None:
+def test_append_urls_with_url() -> None:
     ctx = _turn_ctx()
     corpus = _make_corpus()
     result = detect_intent_rules(
@@ -49,61 +56,57 @@ def test_supplement_with_url() -> None:
         corpus=corpus,
     )
     assert result is not None
-    assert result.intent == "supplement"
+    assert result.intent == "append_urls"
     assert result.skip_web_search is True
+    assert result.defer_generate is True
     assert result.new_urls
 
 
-def test_refine_gen_keywords() -> None:
+def test_subtopic_add_explicit() -> None:
     ctx = _turn_ctx()
     result = detect_intent_rules(
-        "重点写医疗影像方向，增加伦理一节",
+        "增加子主题：零信任架构",
         turn_ctx=ctx,
         corpus=_make_corpus(),
     )
     assert result is not None
-    assert result.intent == "refine_gen"
-    assert result.skip_fetch is True
+    assert result.intent == "subtopic_change"
+    assert result.subtopic_op == "add"
 
 
-def test_synthesis_matrix_reuses_existing_corpus() -> None:
+def test_subtopic_modify_explicit() -> None:
     ctx = _turn_ctx()
     result = detect_intent_rules(
-        "请基于已有文献生成一个 Synthesis Matrix",
+        "修改子主题 2：改为供应链韧性",
         turn_ctx=ctx,
         corpus=_make_corpus(),
     )
     assert result is not None
-    assert result.intent == "synthesis_matrix"
-    assert result.skip_web_search is True
+    assert result.intent == "subtopic_change"
+    assert result.subtopic_op == "modify"
+
+
+def test_expand_search_hint_becomes_query_corpus() -> None:
+    ctx = _turn_ctx()
+    result = detect_intent_rules(
+        "再搜一些 trust 相关文献",
+        turn_ctx=ctx,
+        corpus=_make_corpus(),
+    )
+    assert result is not None
+    assert result.intent == "query_corpus"
+
+
+def test_review_refine_keywords() -> None:
+    ctx = _turn_ctx()
+    result = detect_intent_rules(
+        "只重写第二章，改为表格对比",
+        turn_ctx=ctx,
+        corpus=_make_corpus(),
+    )
+    assert result is not None
+    assert result.intent == "review_refine"
     assert result.skip_fetch is True
-    assert result.use_existing_corpus is True
-
-
-def test_synthesis_matrix_first_turn_searches() -> None:
-    ctx = _turn_ctx(has_corpus=False, user_turns=1)
-    result = detect_intent_rules(
-        "AI-Native MOM 架构重构文献综述矩阵",
-        turn_ctx=ctx,
-    )
-    assert result is not None
-    assert result.intent == "synthesis_matrix"
-    assert result.skip_web_search is False
-    assert result.skip_fetch is False
-    assert result.use_existing_corpus is False
-
-
-def test_retry_failed() -> None:
-    ctx = _turn_ctx(failed=1)
-    result = detect_intent_rules(
-        "重试刚才失败的链接",
-        turn_ctx=ctx,
-        corpus=_make_corpus(),
-        last_failed=[{"url": "https://fail.example/x"}],
-    )
-    assert result is not None
-    assert result.intent == "retry_failed"
-    assert "fail.example" in result.new_urls[0]
 
 
 def test_query_corpus() -> None:
@@ -115,6 +118,15 @@ def test_query_corpus() -> None:
     )
     assert result is not None
     assert result.intent == "query_corpus"
+
+
+def test_query_prompt_includes_guidance() -> None:
+    prompt = build_query_prompt(
+        initial_query="topic",
+        user_message="有多少篇？",
+        context_block="materials",
+    )
+    assert CORPUS_GUIDANCE_FOOTER.strip() in prompt
 
 
 def test_filter_new_urls_dedupes() -> None:
@@ -135,28 +147,30 @@ def test_merge_gen_constraints() -> None:
     assert out2 == ["a"]
 
 
+def test_normalize_legacy_intents() -> None:
+    assert normalize_intent("supplement") == "append_urls"
+    assert normalize_intent("refine_gen") == "review_refine"
+    assert normalize_intent("expand_search") == "query_corpus"
+
+
+def test_build_append_urls_notice() -> None:
+    text = build_append_urls_notice(
+        updated_titles=["Paper A"],
+        chapter_hints=["第二章"],
+    )
+    assert "Paper A" in text
+    assert "第二章" in text
+
+
 def test_build_generation_prompt_materials_only() -> None:
     prompt = build_generation_prompt(
         initial_query="topic",
         user_message="more",
         intent=LiteratureIntentResult(
-            intent="refine_gen",
+            intent="review_refine",
             gen_directives="focus on ethics",
         ),
         gen_constraints=["use tables"],
         context_block="materials",
     )
     assert "materials" in prompt
-    assert "用户研究问题" not in prompt
-    assert "focus on ethics" not in prompt
-
-
-def test_parse_manage_export() -> None:
-    action, targets = parse_manage_command("导出参考文献", "s1")
-    assert action == "export_refs"
-    assert targets == []
-
-
-def test_execute_manage_list_empty() -> None:
-    text = execute_manage_library("list", [], "no-such-session")
-    assert "尚无" in text or "文献库" in text

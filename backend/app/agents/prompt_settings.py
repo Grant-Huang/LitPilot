@@ -51,10 +51,6 @@ async def get_assessor_system_prompt() -> str:
     return await get_resolved_prompt("assessor_system_template")
 
 
-async def get_search_expansion_system_prompt() -> str:
-    return await get_resolved_prompt("search_expansion_system_template")
-
-
 async def get_query_corpus_system_prompt() -> str:
     return await get_resolved_prompt("query_corpus_system_template")
 

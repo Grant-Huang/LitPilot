@@ -79,7 +79,7 @@ export function TurnWorkflowBlock({
     );
   }
 
-  const showCompletionBar = !workflow.clarifying;
+  const showCompletionBar = true;
 
   return (
     <div className="litpilot-turn-log">

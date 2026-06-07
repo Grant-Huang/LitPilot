@@ -1,5 +1,3 @@
-import { toastWarning } from "@/lib/toastFeedback";
-
 type ExtensionData = Record<string, unknown> | undefined;
 
 type HandlerContext = {
@@ -25,13 +23,6 @@ const HANDLERS: Record<string, ExtensionHandler> = {
   },
   session_title: (_data, ctx) => {
     void ctx.loadSessions();
-  },
-  literature_refine_report: (data, ctx) => {
-    if (!ctx.isChat) return;
-    const missing = data?.missing_sections;
-    if (Array.isArray(missing) && missing.length) {
-      toastWarning(`后处理：${missing.length} 个章节标题未在正文中出现`);
-    }
   },
 };
 

@@ -1,17 +1,6 @@
 /** 能力绑定页字段说明（悬停 tip 用） */
 
 export const CAP_TIPS = {
-  literature_source_merge:
-    "合并：用户粘贴的 URL 与 web_search 检索结果一起进入抓取队列；用户链接会优先开始抓取，并与检索并行。",
-  literature_source_user_only:
-    "仅使用对话中用户提供的链接，跳过网络检索。适合已有明确文献列表的场景。",
-  merge_search_budget_full:
-    "full：merge 模式下检索条数不受额外限制（仍受 web_search 检索条数上限约束）。",
-  merge_search_budget_lite:
-    "lite：当用户链接 ≥10 条时，将检索命中上限压至 20，把 fetch 预算留给用户链接。",
-  search_parallel:
-    "多 query 扩展检索时的并行轮数（1=串行）；仅影响 literature 多轮检索，不增加单 query 并发。",
-
   search_provider:
     "检索后端：multi_academic 并行 arXiv/CrossRef/PMC/OpenAlex/Semantic Scholar（默认，无需 Key）；可在凭据页配置 Semantic Scholar Key 提升 SS 配额；Tavily/Brave 需 API Key。",
   search_depth_basic: "basic：更快、结果较少。",
@@ -20,9 +9,6 @@ export const CAP_TIPS = {
     "开启后只保留「包含域名」白名单内的命中；关闭后仍检索但不做域名硬过滤（澄清轮可临时关闭）。",
   enable_junk_filter:
     "过滤明显非论文页（教程、新闻聚合、下载站等），减少 junk 进入抓取队列。",
-  enable_query_expansion:
-    "首轮检索前用 LLM 拆成多条 query 分别检索，再合并去重；适合多子主题综述，会增加 planner 调用与检索次数。",
-  expansion_count: "检索扩展开启时，最多生成几条并行 query（不含主 query）。",
   include_domains: "每行一个域名；与「强制域名白名单」配合时作为允许列表。",
   exclude_domains: "每行一个域名；命中这些域名的结果会被剔除。",
 

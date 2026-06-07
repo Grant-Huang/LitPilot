@@ -87,24 +87,21 @@ def test_personal_preferences_roundtrip(client: TestClient) -> None:
     body = res.json()
     assert body["status"] == "success"
     assert body["data"]["citation_format"] in ("apa", "acm")
-    assert isinstance(body["data"]["plan_confirm"], bool)
 
     res2 = client.put(
         "/api/settings/personal/preferences",
-        json={"citation_format": "acm", "plan_confirm": True},
+        json={"citation_format": "acm"},
     )
     assert res2.status_code == 200
     body2 = res2.json()
     assert body2["status"] == "success"
     assert body2["data"]["citation_format"] == "acm"
-    assert body2["data"]["plan_confirm"] is True
 
     res3 = client.get("/api/settings/personal/preferences")
     assert res3.status_code == 200
     body3 = res3.json()
     assert body3["status"] == "success"
     assert body3["data"]["citation_format"] == "acm"
-    assert body3["data"]["plan_confirm"] is True
 
 
 def test_system_capability_single_card_save(client: TestClient) -> None:

@@ -247,14 +247,26 @@ export function LitPilotChatPage() {
     return [...chatMessagesToLitPilot(storedMessages), ...liveMessages];
   }, [storedMessages, liveMessages]);
 
+  const allowUrlUpload = useMemo(
+    () => historyMessages.some((m) => m.role === "assistant"),
+    [historyMessages],
+  );
+
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || isStreamBusy) return;
+    const urlsToSend = allowUrlUpload ? fetchUrls : [];
+    if ((!text && !urlsToSend.length) || isStreamBusy) return;
     setInput("");
-    const urlsToSend = fetchUrls;
     setFetchUrls([]);
-    await sendStream(text, urlsToSend, literatureSourceMode);
-  }, [input, fetchUrls, isStreamBusy, sendStream, literatureSourceMode]);
+    await sendStream(text || "追加文献链接", urlsToSend, literatureSourceMode);
+  }, [
+    input,
+    fetchUrls,
+    isStreamBusy,
+    sendStream,
+    literatureSourceMode,
+    allowUrlUpload,
+  ]);
 
   return (
     <div className="litpilot-chat-pane">
@@ -298,6 +310,7 @@ export function LitPilotChatPage() {
           streamActivityHint={streamActivityHint}
           streamActivityLevel={streamActivity?.level ?? null}
           streamParallelismChips={streamParallelismChips}
+          uploadDisabled={!allowUrlUpload}
           onSend={() => void send()}
           onAbort={() => void stop()}
         />

@@ -145,10 +145,10 @@ def build_review_turn_system_prompt(
             directive_lines.append(f"写作要求：{c}")
     if writing_emphasis.strip():
         directive_lines.append(f"写作侧重：{writing_emphasis.strip()}")
-    if gen_directives.strip() and intent == "refine_gen":
+    if gen_directives.strip() and intent == "review_refine":
         directive_lines.append(f"本轮新增要求：{gen_directives.strip()}")
-    if intent == "regen_only":
-        directive_lines.append("请基于相同材料重新组织综述结构与论述。")
+    if intent == "review_refine" and not gen_directives.strip():
+        directive_lines.append("请基于相同材料优化综述表述与结构。")
     if directive_lines:
         parts.append(_TURN_DIRECTIVE_HEADER)
         parts.extend(f"- {line}" for line in directive_lines)

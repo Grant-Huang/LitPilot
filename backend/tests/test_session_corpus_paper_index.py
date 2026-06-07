@@ -1,4 +1,4 @@
-"""Session corpus v2 paper_index roundtrip."""
+"""Session corpus v3 papers roundtrip."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,10 +30,11 @@ def test_corpus_paper_index_roundtrip(store: FileStore) -> None:
     save_session_corpus(store, meta["id"], corpus)
     loaded = store.load_corpus(meta["id"])
     assert loaded is not None
-    assert loaded.get("version") == 2
-    assert len(loaded.get("paper_index") or []) == 1
+    assert loaded.get("version") == 3
+    assert len(loaded.get("papers") or loaded.get("paper_index") or []) == 1
 
     restored = SessionCorpus.from_dict(loaded)
     assert restored is not None
-    assert len(restored.paper_index) == 1
-    assert restored.paper_index[0]["paper_id"] == "abc123"
+    assert len(restored.papers) == 1
+    assert restored.papers[0]["library_id"] == "abc123"
+    assert restored.papers[0]["url"] == "https://arxiv.org/abs/1"

@@ -1,15 +1,12 @@
-"""Outline generation and paper mounting (M2)."""
+"""Subtopic plan and outline (v2: subtopic = chapter)."""
 from __future__ import annotations
 
-import re
-import uuid
 from typing import Any
 
 from app.agents.research_decompose import default_single_sub_topic, decompose_research_brief
 from app.agents.search_aspects import SearchAspect, aspects_to_sub_topics
 from app.agents.literature_router import TOPIC_LABEL_MAX, clamp_search_query
 from app.schemas.literature_outline import LiteratureOutline, OutlineSection, ResearchSubTopic
-from app.schemas.paper_record import PaperRecord
 
 _INTRO_SECTION = OutlineSection(
     id="sec-intro",
@@ -25,21 +22,31 @@ _CONCLUSION_SECTION = OutlineSection(
 )
 
 
-def _section_id(prefix: str = "sec") -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+def _outline_topic_label(
+    *,
+    session_title: str,
+    search_query: str,
+    user_message: str,
+) -> str:
+    return clamp_search_query(
+        session_title or search_query or user_message,
+        max_len=TOPIC_LABEL_MAX,
+        fallback=user_message,
+    )
 
 
 def build_outline_from_sub_topics(
     *,
     topic: str,
     sub_topics: list[ResearchSubTopic],
-    user_message: str = "",
 ) -> LiteratureOutline:
+    import uuid
+
     sections: list[OutlineSection] = [_INTRO_SECTION]
     for i, st in enumerate(sub_topics, start=1):
         sections.append(
             OutlineSection(
-                id=_section_id(),
+                id=f"sec-{uuid.uuid4().hex[:8]}",
                 number=str(i),
                 title=st.title,
                 desc=st.description,
@@ -57,173 +64,55 @@ def build_outline_from_sub_topics(
     )
 
 
-def _outline_topic_label(
-    *,
-    session_title: str,
-    search_query: str,
-    user_message: str,
-) -> str:
-    return clamp_search_query(
-        session_title or search_query or user_message,
-        max_len=TOPIC_LABEL_MAX,
-        fallback=user_message,
-    )
-
-
-def prepare_outline(
+def build_subtopic_plan(
     *,
     user_message: str,
     search_query: str,
     session_title: str = "",
-) -> LiteratureOutline:
-    sub_topics = decompose_research_brief(user_message, base_query=search_query)
-    topic = _outline_topic_label(
-        session_title=session_title,
-        search_query=search_query,
-        user_message=user_message,
-    )
-    if not sub_topics:
-        sub_topics = [default_single_sub_topic(user_message, search_query)]
-    return build_outline_from_sub_topics(
-        topic=topic,
-        sub_topics=sub_topics,
-        user_message=user_message,
-    )
-
-
-_OUTLINE_GEN_INTENTS = frozenset(
-    {"new_topic", "expand_search", "supplement", "refine_gen", "regen_only"}
-)
-
-
-def should_use_outline_path(
-    outline_mode: str,
-    sub_topic_count: int,
-    intent: str,
-) -> bool:
-    if intent in ("query_corpus", "synthesis_matrix", "manage_library"):
-        return False
-    if outline_mode == "off":
-        return False
-    if outline_mode == "full":
-        return intent in _OUTLINE_GEN_INTENTS
-    return sub_topic_count >= 2 and intent in (
-        "new_topic",
-        "expand_search",
-        "supplement",
-        "regen_only",
-    )
-
-
-def resolve_outline_plan(
-    *,
-    outline_mode: str,
-    intent: str,
-    user_message: str,
-    initial_query: str,
-    search_query: str,
-    session_title: str,
-    stored_outline: LiteratureOutline | None,
     search_aspects: list[SearchAspect] | None = None,
-) -> tuple[bool, LiteratureOutline | None, list[ResearchSubTopic]]:
-    """Single decompose pass; build draft outline when outline path is active."""
-    brief = (initial_query or user_message).strip()
-    if search_aspects and len(search_aspects) >= 2:
+    stored_outline: LiteratureOutline | None = None,
+    intent: str = "new_topic",
+) -> tuple[LiteratureOutline, list[ResearchSubTopic]]:
+    """Always returns subtopic-driven outline (v2 single path)."""
+    if intent == "review_refine" and stored_outline and stored_outline.sections:
+        return stored_outline, list(stored_outline.sub_topics)
+
+    if search_aspects and len(search_aspects) >= 1:
         sub_topics = aspects_to_sub_topics(search_aspects)
     else:
-        sub_topics = decompose_research_brief(brief, base_query=search_query)
-    use = should_use_outline_path(
-        outline_mode,
-        len(sub_topics) if sub_topics else 1,
-        intent,
-    )
-    if intent in ("refine_gen", "regen_only") and stored_outline and stored_outline.sections:
-        if outline_mode != "off":
-            return True, stored_outline, list(stored_outline.sub_topics)
-
-    if not use:
-        return False, None, sub_topics
+        sub_topics = decompose_research_brief(user_message, base_query=search_query)
+    if not sub_topics:
+        sub_topics = [default_single_sub_topic(user_message, search_query)]
 
     topic = _outline_topic_label(
         session_title=session_title,
         search_query=search_query,
         user_message=user_message,
     )
-    if not sub_topics:
-        sub_topics = [default_single_sub_topic(brief, search_query)]
-    outline = build_outline_from_sub_topics(
-        topic=topic,
-        sub_topics=sub_topics,
-        user_message=user_message,
-    )
-    return True, outline, list(outline.sub_topics)
+    outline = build_outline_from_sub_topics(topic=topic, sub_topics=sub_topics)
+    return outline, sub_topics
 
 
-def _tokenize(text: str) -> set[str]:
-    parts = re.split(r"[\s,，、;；:：/\\\-—]+", (text or "").lower())
-    return {p for p in parts if len(p) >= 2}
-
-
-def _score_paper_for_section(paper: PaperRecord, section: OutlineSection) -> float:
-    title_tokens = _tokenize(section.title)
-    desc_tokens = _tokenize(section.desc)
-    keys = title_tokens | desc_tokens
-    if not keys:
-        return 0.0
-    attri = paper.attri or {}
-    blob = " ".join(
-        [
-            paper.title,
-            str(attri.get("problem") or ""),
-            str(attri.get("method") or ""),
-            str(attri.get("findings") or ""),
-            " ".join(attri.get("keywords") or []),
-        ]
-    ).lower()
-    if not blob.strip():
-        blob = paper.title.lower()
-    hit = sum(1 for k in keys if k in blob)
-    return hit / max(len(keys), 1)
-
-
-def mount_papers_to_outline(
+def mount_papers_by_subtopic_tags(
     outline: LiteratureOutline,
-    paper_index: list[dict[str, Any]],
-    *,
-    max_per_section: int = 8,
+    papers: list[dict[str, Any]],
 ) -> LiteratureOutline:
-    papers = [PaperRecord.from_dict(p) for p in paper_index if isinstance(p, dict)]
-    body_sections = [
-        s for s in outline.sections if s.id not in ("sec-intro", "sec-conclusion")
-    ]
-    assigned: set[str] = set()
+    """Mount papers onto sections via subtopic_tags."""
+    by_subtopic: dict[str, list[str]] = {}
+    for p in papers:
+        if not p.get("cite_in_review", True):
+            continue
+        url = str(p.get("url") or "")
+        if not url:
+            continue
+        for tag in p.get("subtopic_tags") or []:
+            sid = str(tag).strip()
+            if sid:
+                by_subtopic.setdefault(sid, []).append(url)
 
-    for section in body_sections:
-        scored: list[tuple[float, PaperRecord]] = []
-        for paper in papers:
-            if not paper.paper_id:
-                continue
-            scored.append((_score_paper_for_section(paper, section), paper))
-        scored.sort(key=lambda x: (-x[0], x[1].title))
-        section.mounted_paper_ids = []
-        section.mount_hints = []
-        for score, paper in scored[: max_per_section * 2]:
-            if score <= 0 and section.mounted_paper_ids:
-                continue
-            if paper.paper_id in assigned and len(section.mounted_paper_ids) >= 2:
-                continue
-            if len(section.mounted_paper_ids) >= max_per_section:
-                break
-            section.mounted_paper_ids.append(paper.paper_id)
-            assigned.add(paper.paper_id)
-            hint = str((paper.attri or {}).get("findings") or (paper.attri or {}).get("problem") or paper.title)
-            section.mount_hints.append(
-                {"paper_id": paper.paper_id, "key_info": hint[:300]}
-            )
-
-    for section in outline.sections:
-        if section.id in ("sec-intro", "sec-conclusion"):
-            section.mounted_paper_ids = []
-            section.mount_hints = []
-    outline.status = "confirmed"
+    for sec in outline.sections:
+        if not sec.sub_topic_id:
+            continue
+        urls = by_subtopic.get(sec.sub_topic_id, [])
+        sec.mounted_paper_ids = list(dict.fromkeys(urls))
     return outline

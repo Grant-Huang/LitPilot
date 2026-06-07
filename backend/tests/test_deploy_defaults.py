@@ -280,7 +280,6 @@ def test_ensure_default_capabilities_backfills_web_search_and_fetch(
     assert "web_search" in cap_ids
     assert "web_fetch" in cap_ids
     assert "orchestrator" in cap_ids
-    assert "literature_source" in cap_ids
     assert "prompts" in cap_ids
     cred_templates = {str(t["key"]): str(t["id"]) for t in deploy_credentials()}
     web_search = next(

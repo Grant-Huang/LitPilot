@@ -6,7 +6,6 @@ import { Spin } from "antd";
 
 import {
   FieldTip,
-  InlineCheck,
   InlineField,
   SettingToolbar,
   feedbackOk,
@@ -14,7 +13,6 @@ import {
   useUnsavedGuard,
 } from "../_ui";
 
-import { CAP_TIPS } from "@/lib/capabilityTips";
 import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import {
   instanceBindingLabel,
@@ -36,45 +34,8 @@ import {
   type SystemInstance,
 } from "@/lib/settingsApiV2";
 
-type OutlineMode = "off" | "lite" | "full";
-type PostRefineMode = "off" | "lite";
-
-const OUTLINE_MODE_OPTIONS: { value: OutlineMode; label: string }[] = [
-  { value: "off", label: "关闭" },
-  { value: "lite", label: "智能（推荐）" },
-  { value: "full", label: "始终分章" },
-];
-
-const POST_REFINE_OPTIONS: { value: PostRefineMode; label: string }[] = [
-  { value: "off", label: "关闭" },
-  { value: "lite", label: "轻量校验" },
-];
-
-const OUTLINE_MODE_TIPS: Record<OutlineMode, string> = {
-  off: "一次性生成整篇综述，不拆子主题检索与分章写作；适合短问题或调试。",
-  lite: "检测到「其一、其二…」等多 aspect 提问时，自动拆子主题检索、挂载文献、按章节流式写作再合并；单主题仍一次性生成。",
-  full: "无论是否多 aspect，均走大纲 + 分章写作（含导言/结论）；耗时与 token 更高，结构最可控。",
-};
-
-const POST_REFINE_TIPS: Record<PostRefineMode, string> = {
-  off: "交付前不做规则后处理，综述原文直接保存。",
-  lite: "拼接后去除套话结语、检测缺失章节、统计「待核实」标记，并推送 refine 报告 SSE。",
-};
-
-const PAPER_ATTR_TIP =
-  "抓取后为每篇文献抽取 problem / method / findings 等字段，写入 paper_index，供大纲挂载与各章写作引用。";
-
 const PROMPTS_HINT =
   "留空表示使用内置默认。自定义 JSON 类提示词若缺少输出契约字段，保存后运行时会自动追加契约段。";
-
-function parseOutlineMode(raw: unknown): OutlineMode {
-  const v = String(raw || "lite").toLowerCase();
-  return v === "off" || v === "full" ? v : "lite";
-}
-
-function parsePostRefineMode(raw: unknown): PostRefineMode {
-  return String(raw || "lite").toLowerCase() === "off" ? "off" : "lite";
-}
 
 function groupMeta(meta: PromptTemplateMeta[]): { id: string; label: string; items: PromptTemplateMeta[] }[] {
   const map = new Map<string, PromptTemplateMeta[]>();
@@ -304,62 +265,6 @@ export default function AdminPromptsPage() {
       <p className="settings-field-note settings-cap-section-note">
         按分组绑定模型实例；各提示词可单独设置 Token/阶段（未设时使用内置默认）。
       </p>
-
-      <div className="settings-prompts__toggles">
-        <InlineCheck
-          label="启用文献结构化（AttributeTree lite）"
-          checked={Boolean(promptParams.enable_paper_attributes ?? true)}
-          onChange={(checked) =>
-            setPromptParams((p) => ({ ...p, enable_paper_attributes: checked }))
-          }
-          tip={PAPER_ATTR_TIP}
-        />
-
-        <InlineField
-          label="大纲驱动分章"
-          htmlFor="outline-mode"
-          tip={OUTLINE_MODE_TIPS[parseOutlineMode(promptParams.outline_mode)]}
-        >
-          <select
-            id="outline-mode"
-            className="input settings-prompts__select"
-            value={parseOutlineMode(promptParams.outline_mode)}
-            onChange={(e) =>
-              setPromptParams((p) => ({ ...p, outline_mode: parseOutlineMode(e.target.value) }))
-            }
-          >
-            {OUTLINE_MODE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </InlineField>
-
-        <InlineField
-          label="综述后处理"
-          htmlFor="post-refine-mode"
-          tip={POST_REFINE_TIPS[parsePostRefineMode(promptParams.post_refine_mode)]}
-        >
-          <select
-            id="post-refine-mode"
-            className="input settings-prompts__select"
-            value={parsePostRefineMode(promptParams.post_refine_mode)}
-            onChange={(e) =>
-              setPromptParams((p) => ({
-                ...p,
-                post_refine_mode: parsePostRefineMode(e.target.value),
-              }))
-            }
-          >
-            {POST_REFINE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </InlineField>
-      </div>
 
       <details className="settings-advanced settings-prompts__advanced">
         <summary className="settings-advanced__summary">编辑说明</summary>

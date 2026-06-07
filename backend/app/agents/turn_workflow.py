@@ -1,4 +1,4 @@
-"""Build persisted turn_workflow summary for assistant message meta."""
+"""Build persisted turn_workflow summary for assistant message meta (v2)."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,16 +6,12 @@ from typing import Any
 PHASE_LABELS: dict[str, str] = {
     "understand": "理解研究问题",
     "brief": "Brief 评估",
-    "search": "文献检索",
+    "search": "子主题检索",
+    "filter": "子主题过滤",
     "fetch": "抓取全文",
-    "cite": "引用抽取",
-    "attributes": "文献结构化",
-    "outline": "大纲规划",
-    "generate": "综述生成",
+    "generate": "分章综述",
     "matrix": "文献矩阵",
-    "revise": "章节修订",
     "corpus_qa": "语料问答",
-    "clarify": "等待澄清",
 }
 
 TOOL_PHASE: dict[str, str] = {
@@ -23,7 +19,6 @@ TOOL_PHASE: dict[str, str] = {
     "web_fetch": "fetch",
     "extract_citation": "cite",
     "cite_extract": "cite",
-    "extract_attributes": "attributes",
 }
 
 
@@ -35,26 +30,18 @@ def stage_to_phase(name: str) -> str | None:
         return "understand"
     if "Brief" in n or "brief" in n.lower():
         return "brief"
-    if "澄清" in n or "等待" in n:
-        return "clarify"
-    if "检索" in n or "相关性" in n:
+    if "过滤" in n or "筛选" in n:
+        return "filter"
+    if "检索" in n:
         return "search"
     if "抓取" in n:
         return "fetch"
-    if "引用" in n:
-        return "cite"
-    if "结构化" in n:
-        return "attributes"
-    if "大纲" in n:
-        return "outline"
     if "矩阵" in n:
         return "matrix"
     if "问答" in n:
         return "corpus_qa"
     if "撰写" in n or "综述" in n or "生成" in n:
         return "generate"
-    if "修订" in n:
-        return "revise"
     if "完成" in n:
         return None
     return None
@@ -91,6 +78,8 @@ def _card_summary(
             return f"纳入 {merged} 篇"
         passes = _count_tools(tools, "web_search", "done")
         return f"{passes} 轮检索" if passes else "已完成"
+    if phase == "filter":
+        return "已完成"
     if phase == "fetch":
         ok = _count_tools(tools, "web_fetch", "done")
         failed = _count_tools(tools, "web_fetch", "error")
@@ -152,40 +141,18 @@ def build_turn_workflow_meta(
             },
         )
 
-    if chat_text.strip():
-        if intent == "query_corpus":
-            cards.append(
-                {
-                    "type": "corpus_qa",
-                    "title": PHASE_LABELS["corpus_qa"],
-                    "state": "done",
-                    "body": chat_text.strip()[:800],
-                    "steps": [],
-                }
-            )
-        elif intent in ("clarify", "plan_confirm") or any(
-            c.get("type") == "clarify" for c in cards
-        ):
-            for card in cards:
-                if card.get("type") == "clarify":
-                    card["body"] = chat_text.strip()[:800]
-                    card["locked"] = True
-                    break
-            else:
-                cards.append(
-                    {
-                        "type": "clarify",
-                        "title": PHASE_LABELS["clarify"],
-                        "state": "done",
-                        "body": chat_text.strip()[:800],
-                        "locked": True,
-                        "steps": [],
-                    }
-                )
+    if chat_text.strip() and intent == "query_corpus":
+        cards.append(
+            {
+                "type": "corpus_qa",
+                "title": PHASE_LABELS["corpus_qa"],
+                "state": "done",
+                "body": chat_text.strip()[:800],
+                "steps": [],
+            }
+        )
 
-    phase_tools: dict[str, list[dict[str, Any]]] = {
-        k: [] for k in PHASE_LABELS
-    }
+    phase_tools: dict[str, list[dict[str, Any]]] = {k: [] for k in PHASE_LABELS}
     for tool in tools:
         name = str(tool.get("name") or "")
         phase = TOOL_PHASE.get(name)
@@ -202,11 +169,6 @@ def build_turn_workflow_meta(
             stats=stats,
             subtopic_count=subtopic_count,
         )
-
-    clarifying = any(
-        c.get("type") == "clarify" and (c.get("locked") or c.get("state") != "done")
-        for c in cards
-    )
 
     headline_parts: list[str] = []
     search_passes = _count_tools(tools, "web_search", "done")
@@ -230,7 +192,6 @@ def build_turn_workflow_meta(
             " · ".join(headline_parts[:5]) if headline_parts else _default_summary(cards, intent)
         ),
         "cards": cards,
-        "clarifying": clarifying,
     }
 
 

@@ -78,6 +78,12 @@ def new_item(
         "citations": {},
         "provenance": [],
         "tags": [],
+        "subtopic_tags": [],
+        "enrich_lite": {
+            "method_one_liner": "",
+            "findings_one_liner": "",
+            "year": "",
+        },
         "starred": False,
         "updated_at": now,
         "created_at": now,
@@ -160,6 +166,23 @@ def merge_item(
 
     if "tags" in patch:
         out["tags"] = normalize_tags(patch.get("tags"))
+
+    if "subtopic_tags" in patch:
+        from app.library.subtopic_tags import normalize_subtopic_id
+
+        out["subtopic_tags"] = [
+            normalize_subtopic_id(str(t))
+            for t in (patch.get("subtopic_tags") or [])
+            if normalize_subtopic_id(str(t))
+        ]
+
+    if patch.get("enrich_lite"):
+        lite = dict(out.get("enrich_lite") or {})
+        for key in ("method_one_liner", "findings_one_liner", "year"):
+            val = str((patch.get("enrich_lite") or {}).get(key) or "").strip()
+            if val:
+                lite[key] = val[:500] if key != "year" else val[:16]
+        out["enrich_lite"] = lite
 
     prov = list(out.get("provenance") or [])
     for p in patch.get("provenance") or []:

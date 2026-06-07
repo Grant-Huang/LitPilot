@@ -27,7 +27,6 @@ export default function PersonalSettingsPage() {
   const [msgOk, setMsgOk] = useState(false);
 
   const [citationFormat, setCitationFormat] = useState<CitationFormat>("apa");
-  const [planConfirm, setPlanConfirm] = useState(false);
 
   useEffect(() => {
     void getCachedResource(PERSONAL_PREFS_CACHE_KEY, () =>
@@ -37,7 +36,6 @@ export default function PersonalSettingsPage() {
         if (p.citation_format === "apa" || p.citation_format === "acm") {
           setCitationFormat(p.citation_format);
         }
-        setPlanConfirm(Boolean(p.plan_confirm));
       })
       .catch((e: unknown) => {
         setMsgOk(false);
@@ -52,7 +50,6 @@ export default function PersonalSettingsPage() {
     try {
       await settingsApiV2.savePersonalPreferences({
         citation_format: citationFormat,
-        plan_confirm: planConfirm,
       });
       invalidatePersonalPreferences();
       setMsgOk(true);
@@ -108,11 +105,6 @@ export default function PersonalSettingsPage() {
             <option value="acm">ACM</option>
           </select>
         </InlineField>
-
-        <label className="settings-cap-inline-check settings-personal-panel__check">
-          <input type="checkbox" checked={planConfirm} onChange={(e) => setPlanConfirm(e.target.checked)} />
-          执行前展示工作流拓扑并确认（plan_confirm）
-        </label>
 
         <div className="settings-personal-panel__actions">
           <button type="button" className="btn-primary btn-sm" onClick={() => void onSave()} disabled={saving}>

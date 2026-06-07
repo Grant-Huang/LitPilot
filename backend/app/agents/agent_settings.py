@@ -160,34 +160,6 @@ async def get_search_max_results() -> int:
 
 
 
-SEARCH_PARALLEL_CAP = 4
-
-
-
-
-
-async def get_search_parallel() -> int:
-
-    n = int((await get_merged_settings()).get("search_parallel") or 1)
-
-    return max(1, min(n, SEARCH_PARALLEL_CAP))
-
-
-
-
-
-async def get_merge_search_budget() -> str:
-
-    from app.agents.literature_source import normalize_merge_search_budget
-
-    raw = (await get_merged_settings()).get("merge_search_budget") or "full"
-
-    return normalize_merge_search_budget(str(raw))
-
-
-
-
-
 MAX_FETCH_URLS_CAP = 50
 
 
@@ -205,14 +177,8 @@ async def get_max_fetch_urls() -> int:
 
 
 async def get_literature_source_mode() -> str:
-
-    from app.agents.literature_source import normalize_literature_source_mode
-
-
-
-    raw = (await get_merged_settings()).get("literature_source_mode") or "merge"
-
-    return normalize_literature_source_mode(str(raw))
+    """v2 仅保留 merge 模式（任务级显式 URL 仍受支持）。"""
+    return "merge"
 
 
 
@@ -248,9 +214,6 @@ async def get_fetch_retry_delay_ms() -> int:
 
 
 
-async def is_plan_confirm_required() -> bool:
-
-    return bool((await get_merged_settings()).get("plan_confirm"))
 
 
 
@@ -388,118 +351,6 @@ async def get_max_source_chars() -> int:
     n = int((await get_merged_settings()).get("max_source_chars") or 14_000)
 
     return max(2_000, min(n, 50_000))
-
-
-
-
-
-async def get_enable_paper_attributes() -> bool:
-
-    return bool((await get_merged_settings()).get("enable_paper_attributes", True))
-
-
-
-
-
-async def get_enable_query_expansion() -> bool:
-
-    return bool((await get_merged_settings()).get("enable_query_expansion", True))
-
-
-
-
-
-async def get_search_expansion_count() -> int:
-
-    n = int((await get_merged_settings()).get("search_expansion_count") or 3)
-
-    return max(1, min(n, 4))
-
-
-
-
-
-async def get_outline_mode() -> str:
-
-    raw = str((await get_merged_settings()).get("outline_mode") or "lite").strip().lower()
-
-    if raw in ("off", "lite", "full"):
-
-        return raw
-
-    return "lite"
-
-
-
-
-
-async def get_post_refine_mode() -> str:
-
-    raw = str((await get_merged_settings()).get("post_refine_mode") or "lite").strip().lower()
-
-    if raw in ("off", "lite"):
-
-        return raw
-
-    return "lite"
-
-
-
-
-
-def _llm_cfg_from_flat(s: dict[str, Any], *, prefix: str = "") -> dict[str, Any]:
-
-    from app.llm.factory import PROVIDER_REGISTRY
-
-
-
-    if prefix:
-
-        provider = s.get(f"{prefix}_provider") or "openai"
-
-        api_key = s.get(f"{prefix}_api_key") or ""
-
-        model = s.get(f"{prefix}_model") or ""
-
-        base_url = s.get(f"{prefix}_base_url") or ""
-
-        group_id = (s.get(f"{prefix}_group_id") or "").strip()
-
-    else:
-
-        provider = s.get("llm_provider") or "openai"
-
-        api_key = s.get("llm_api_key") or ""
-
-        model = s.get("llm_model") or ""
-
-        base_url = s.get("llm_base_url") or ""
-
-        group_id = (s.get("llm_group_id") or "").strip()
-
-
-
-    meta = PROVIDER_REGISTRY.get(provider, PROVIDER_REGISTRY["openai"])
-
-    extra: dict[str, str] = {}
-
-    if group_id:
-
-        extra["group_id"] = group_id
-
-    return {
-
-        "provider": provider,
-
-        "api_key": api_key,
-
-        "model": model or meta.get("default_model", "gpt-4o-mini"),
-
-        "base_url": base_url or meta.get("default_base_url"),
-
-        "extra": extra or None,
-
-    }
 
 
 

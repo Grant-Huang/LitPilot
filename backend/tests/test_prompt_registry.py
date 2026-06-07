@@ -17,9 +17,8 @@ def test_understanding_default_is_domain_agnostic() -> None:
 
 
 def test_expansion_and_refiner_roles_differ() -> None:
-    expansion = default_for("search_expansion_system_template")
+    # search_expansion removed in v2 (扩展并入子主题识别)
     refiner = default_for("search_refiner_system_template")
-    assert "不同角度" in expansion or "扩展" in expansion
     assert "1:1" in refiner or "1:1 精炼" in refiner
     assert "exclude_title_substrings" in refiner
 

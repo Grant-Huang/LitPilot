@@ -51,8 +51,12 @@ describe("buildTurnCompletionSummary", () => {
       {
         extensions: [
           {
-            name: "literature_search_merge",
-            data: { deduped: 12, raw_total: 20 },
+            name: "literature_subtopic_filter_done",
+            data: { subtopic_id: "st1", kept_count: 7 },
+          },
+          {
+            name: "literature_subtopic_filter_done",
+            data: { subtopic_id: "st2", kept_count: 5 },
           },
         ],
       },
@@ -111,7 +115,6 @@ describe("buildTurnCompletionSummary", () => {
       turnIndex: 1,
       intent: "new_topic",
       summary: "",
-      clarifying: false,
       cards: [
         {
           id: "search",
@@ -127,7 +130,7 @@ describe("buildTurnCompletionSummary", () => {
     expect(summary.headline).toContain("纳入 9 篇");
   });
 
-  it("appends weak subtopic brief from merge extension", () => {
+  it("appends weak subtopic brief from filter extension", () => {
     const wf = buildTurnWorkflowFromTrace(
       {
         stages: [],
@@ -140,13 +143,21 @@ describe("buildTurnCompletionSummary", () => {
       {
         extensions: [
           {
-            name: "literature_search_merge",
+            name: "literature_subtopic_plan",
             data: {
-              deduped: 8,
-              weak_subtopics: [
-                { pass_index: 2, title: "子主题 B", hits_taken: 1 },
+              subtopics: [
+                { id: "st1", title: "子主题 A", search_query: "q1" },
+                { id: "st2", title: "子主题 B", search_query: "q2" },
               ],
             },
+          },
+          {
+            name: "literature_subtopic_filter_done",
+            data: { subtopic_id: "st1", kept_count: 6 },
+          },
+          {
+            name: "literature_subtopic_filter_done",
+            data: { subtopic_id: "st2", kept_count: 1 },
           },
         ],
       },
@@ -162,19 +173,27 @@ describe("buildTurnCompletionSummary", () => {
       },
       extensions: [
         {
-          name: "literature_search_merge",
+          name: "literature_subtopic_plan",
           data: {
-            deduped: 8,
-            weak_subtopics: [
-              { pass_index: 2, title: "子主题 B", hits_taken: 1 },
+            subtopics: [
+              { id: "st1", title: "子主题 A", search_query: "q1" },
+              { id: "st2", title: "子主题 B", search_query: "q2" },
             ],
           },
+        },
+        {
+          name: "literature_subtopic_filter_done",
+          data: { subtopic_id: "st1", kept_count: 6 },
+        },
+        {
+          name: "literature_subtopic_filter_done",
+          data: { subtopic_id: "st2", kept_count: 1 },
         },
       ],
       hasReview: true,
     });
     expect(summary.brief).toContain("子主题 B");
-    expect(summary.brief).toContain("expand_search");
+    expect(summary.brief).toContain("修改子主题");
   });
 });
 

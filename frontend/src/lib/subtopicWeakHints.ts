@@ -1,95 +1,50 @@
 export type WeakSubtopicHint = {
-  passIndex: number;
+  subtopicId: string;
   title: string;
-  hitsTaken: number;
+  keptCount: number;
 };
 
 type ExtensionRow = { name: string; data: Record<string, unknown> };
 
-function topicTitle(
-  passIndex: number,
-  data: Record<string, unknown>,
-  subTopics?: Array<{ title?: string }>,
-): string {
-  const fromEvent = String(data.topic_title ?? "").trim();
-  if (fromEvent) return fromEvent;
-  const fromPlan = subTopics?.[passIndex - 1]?.title?.trim();
-  if (fromPlan) return fromPlan;
-  return `主题 ${passIndex}`;
-}
+/** 薄弱阈值：保留篇数 < 3 视为偏少 */
+export const WEAK_KEPT_THRESHOLD = 3;
 
-/** 薄弱阈值：max(3, per_query 的 25%) */
-export function weakSubtopicThreshold(perQueryMax: number): number {
-  const base = Number.isFinite(perQueryMax) && perQueryMax > 0 ? perQueryMax : 8;
-  return Math.max(3, Math.floor(base * 0.25));
+export function weakSubtopicThreshold(_perQueryMax?: number): number {
+  return WEAK_KEPT_THRESHOLD;
 }
 
 export function weakSubtopicsFromExtensions(
   extensions: ExtensionRow[],
-  subTopics?: Array<{ title?: string }>,
+  subTopics?: Array<{ id?: string; title?: string }>,
 ): WeakSubtopicHint[] {
-  for (let i = extensions.length - 1; i >= 0; i -= 1) {
-    const ext = extensions[i];
-    if (ext.name !== "literature_search_merge") continue;
-    const raw = ext.data.weak_subtopics;
-    if (Array.isArray(raw) && raw.length) {
-      return raw
-        .map((row) => {
-          const r = row as Record<string, unknown>;
-          const passIndex =
-            typeof r.pass_index === "number" ? r.pass_index : 0;
-          const hitsTaken =
-            typeof r.hits_taken === "number" ? r.hits_taken : 0;
-          const title = String(r.title ?? "").trim() || `主题 ${passIndex}`;
-          if (passIndex <= 0) return null;
-          return { passIndex, title, hitsTaken };
-        })
-        .filter((h): h is WeakSubtopicHint => Boolean(h));
-    }
-    break;
+  const titleById = new Map<string, string>();
+  for (const st of subTopics ?? []) {
+    const id = String(st.id ?? "").trim();
+    if (id) titleById.set(id, String(st.title ?? "").trim());
   }
 
-  let perQuery = 8;
-  let totalPasses = 0;
-  const passHits = new Map<number, { hits: number; title: string }>();
-
+  const keptById = new Map<string, number>();
   for (const ext of extensions) {
-    if (ext.name === "literature_search_plan") {
-      const pq = ext.data.per_query_max_results;
-      if (typeof pq === "number") perQuery = pq;
-      const queries = ext.data.queries;
-      if (Array.isArray(queries)) totalPasses = queries.length;
-    }
-    if (ext.name === "literature_search_pass_done") {
-      const passIndex =
-        typeof ext.data.pass_index === "number" ? ext.data.pass_index : 0;
-      if (passIndex <= 0) continue;
-      const hitsTaken =
-        typeof ext.data.hits_taken === "number"
-          ? ext.data.hits_taken
-          : typeof ext.data.hits === "number"
-            ? ext.data.hits
-            : 0;
-      passHits.set(passIndex, {
-        hits: hitsTaken,
-        title: topicTitle(passIndex, ext.data, subTopics),
-      });
-    }
+    if (ext.name !== "literature_subtopic_filter_done") continue;
+    const id = String(ext.data.subtopic_id ?? "").trim();
+    if (!id) continue;
+    const kept =
+      typeof ext.data.kept_count === "number" ? ext.data.kept_count : 0;
+    keptById.set(id, kept);
   }
 
-  if (totalPasses < 2 && passHits.size < 2) return [];
+  if (keptById.size < 2) return [];
 
-  const threshold = weakSubtopicThreshold(perQuery);
   const hints: WeakSubtopicHint[] = [];
-  for (const [passIndex, row] of passHits) {
-    if (row.hits >= threshold) continue;
+  for (const [subtopicId, keptCount] of keptById) {
+    if (keptCount >= WEAK_KEPT_THRESHOLD) continue;
     hints.push({
-      passIndex,
-      title: row.title,
-      hitsTaken: row.hits,
+      subtopicId,
+      title: titleById.get(subtopicId) || subtopicId,
+      keptCount,
     });
   }
-  return hints.sort((a, b) => a.passIndex - b.passIndex);
+  return hints.sort((a, b) => a.title.localeCompare(b.title, "zh"));
 }
 
 export function weakSubtopicsFromTrace(
@@ -100,12 +55,16 @@ export function weakSubtopicsFromTrace(
   return raw
     .map((row) => {
       const r = row as Record<string, unknown>;
-      const passIndex = typeof r.passIndex === "number" ? r.passIndex : 0;
-      const hitsTaken = typeof r.hitsTaken === "number" ? r.hitsTaken : 0;
-      const title =
-        String(r.title ?? "").trim() || (passIndex ? `主题 ${passIndex}` : "");
-      if (!passIndex) return null;
-      return { passIndex, title, hitsTaken };
+      const subtopicId = String(r.subtopicId ?? r.passIndex ?? "").trim();
+      const keptCount =
+        typeof r.keptCount === "number"
+          ? r.keptCount
+          : typeof r.hitsTaken === "number"
+            ? r.hitsTaken
+            : 0;
+      const title = String(r.title ?? "").trim() || subtopicId;
+      if (!subtopicId) return null;
+      return { subtopicId, title, keptCount };
     })
     .filter((h): h is WeakSubtopicHint => Boolean(h));
 }
@@ -114,12 +73,12 @@ export function formatWeakSubtopicBrief(hints: WeakSubtopicHint[]): string {
   if (!hints.length) return "";
   if (hints.length === 1) {
     const h = hints[0];
-    return `「${h.title}」仅纳入 ${h.hitsTaken} 篇，建议 expand_search 或补充检索式。`;
+    return `「${h.title}」仅保留 ${h.keptCount} 篇，可明确说明「修改子主题：…」调整检索式。`;
   }
   const preview = hints
     .slice(0, 3)
-    .map((h) => `「${h.title}」(${h.hitsTaken} 篇)`)
+    .map((h) => `「${h.title}」(${h.keptCount} 篇)`)
     .join("、");
   const suffix = hints.length > 3 ? ` 等 ${hints.length} 个方向` : "";
-  return `${preview}${suffix} 文献偏少，建议 expand_search。`;
+  return `${preview}${suffix} 文献偏少，可明确说明「增加/修改子主题」以扩展检索。`;
 }

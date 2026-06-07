@@ -36,22 +36,6 @@ WEB_SEARCH_PARAM_DEFAULTS: dict[str, Any] = {
 
     "enable_junk_filter": True,
 
-    "enable_query_expansion": True,
-
-    "expansion_count": 3,
-
-    "search_parallel": 2,
-
-}
-
-
-
-LITERATURE_SOURCE_PARAM_DEFAULTS: dict[str, Any] = {
-
-    "literature_source_mode": "merge",
-
-    "merge_search_budget": "full",
-
 }
 
 
@@ -94,9 +78,6 @@ ORCHESTRATOR_PARAM_DEFAULTS: dict[str, Any] = {
 
 PROMPTS_PARAM_DEFAULTS: dict[str, Any] = {
     **PROMPT_TEMPLATE_PARAM_DEFAULTS,
-    "enable_paper_attributes": True,
-    "outline_mode": "lite",
-    "post_refine_mode": "lite",
     "router_instance_id": "",
     "search_instance_id": "",
     "assessor_instance_id": "",
@@ -324,8 +305,6 @@ def build_runtime_settings(
 
     orch = _cap_params(capabilities, "orchestrator", ORCHESTRATOR_PARAM_DEFAULTS)
 
-    source = _cap_params(capabilities, "literature_source", LITERATURE_SOURCE_PARAM_DEFAULTS)
-
     prompts = _cap_params(capabilities, "prompts", PROMPTS_PARAM_DEFAULTS)
 
 
@@ -503,21 +482,13 @@ def build_runtime_settings(
 
         "max_fetch_urls": int(fetch.get("max_fetch_urls") or 5),
 
-        "literature_source_mode": str(source.get("literature_source_mode") or "merge"),
-
-        "merge_search_budget": str(source.get("merge_search_budget") or "full"),
-
-        "search_parallel": int(web.get("search_parallel") or 1),
-
-        "search_retry_count": int(web.get("search_retry_count") or 3),
+                                "search_retry_count": int(web.get("search_retry_count") or 3),
 
         "fetch_retry_count": int(fetch.get("fetch_retry_count") or 0),
 
         "fetch_retry_delay_ms": int(fetch.get("fetch_retry_delay_ms") or 500),
 
-        "plan_confirm": bool(personal.get("plan_confirm", False)),
-
-        "citation_format": str(personal.get("citation_format") or "apa").strip().lower(),
+                "citation_format": str(personal.get("citation_format") or "apa").strip().lower(),
 
         "use_llm_planner": bool(orch.get("use_llm_planner", True)),
 
@@ -553,15 +524,5 @@ def build_runtime_settings(
 
         "max_source_chars": int(fetch.get("max_source_chars") or 14_000),
 
-        "enable_query_expansion": bool(web.get("enable_query_expansion", True)),
-
-        "search_expansion_count": int(web.get("expansion_count") or 3),
-
-        "enable_paper_attributes": bool(prompts.get("enable_paper_attributes", True)),
-
-        "outline_mode": str(prompts.get("outline_mode") or "lite").strip().lower(),
-
-        "post_refine_mode": str(prompts.get("post_refine_mode") or "lite").strip().lower(),
-
-    }
+                                            }
 

@@ -1,4 +1,4 @@
-"""Multi-turn literature session orchestration."""
+"""Multi-turn literature session orchestration (v2)."""
 from __future__ import annotations
 
 import logging
@@ -6,94 +6,61 @@ from typing import Any, AsyncIterator
 
 from app.agents.agent_settings import (
     get_citation_format,
-    get_enable_paper_attributes,
-    get_enable_query_expansion,
+    get_fetch_api_key,
     get_fetch_parallel,
     get_fetch_retry_count,
     get_fetch_retry_delay_ms,
     get_fetch_timeout_sec,
-    get_fetch_api_key,
-    get_literature_source_mode,
     get_max_fetch_urls,
-    get_merge_search_budget,
     get_max_source_chars,
-    get_outline_mode,
-    get_post_refine_mode,
-    get_search_expansion_count,
-    get_web_search_api_key,
-    get_web_search_provider,
+    get_search_depth,
     get_search_enable_junk_filter,
     get_search_enforce_domain_filter,
     get_search_exclude_domains,
     get_search_include_domains,
     get_search_max_results,
-    get_search_parallel,
     get_search_retry_count,
-    get_search_depth,
     get_web_fetch_provider,
+    get_web_search_api_key,
+    get_web_search_provider,
 )
 from app.agents.agent_skills import skill_active_event
-from app.agents.literature_clarification import (
-    ClarificationGate,
-    ClarificationState,
-    assess_first_turn_gate,
-    merge_first_turn_message,
-    resolve_pending_gate,
-)
-from app.agents.literature_progress import PROGRESS_INTERVAL_SEC, run_with_progress_ticks
+from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.first_turn_assessor import (
     brief_assessment_from_router,
     format_brief_assessment_message,
 )
-from app.agents.search_aspects import search_aspects_plan_ready
+from app.agents.intent_policy import runs_generate
 from app.agents.literature_intent import (
     LiteratureIntentResult,
     build_session_turn_context,
-    execute_manage_library,
     merge_gen_constraints,
     route_literature_intent,
 )
-from app.agents.literature_outline import resolve_outline_plan
-from app.agents.literature_planner import (
-    load_planner_context,
-    stream_understanding_and_route,
-)
-from app.agents.literature_router import (
-    resolve_auto_session_title,
-    should_auto_rename_session,
-)
-from app.agents.review_prompt import citation_format_label
-from app.agents.session_corpus import (
-    SessionCorpus,
-    resolve_session_corpus,
-)
-from app.agents.search_credential_hint import search_credential_secret_hint
-from app.agents.url_list import sanitize_fetch_urls
-from app.agents.workflow_graph import (
-    apply_fetch_provider_label,
-    build_literature_graph,
-    build_literature_graph_legacy,
-)
-from app.core.think_stream import ThinkAccumulator, emit_system_think_line
-from app.core.stream_events import chat_text, process_text, turn_start
-from app.agents.execution_trace import new_trace, upsert_stage
-from app.agents.workflow_emitter import WorkflowNodeEmitter
-from app.schemas.literature_outline import LiteratureOutline
-from app.services.llm_service import get_assessor_llm, get_pipeline_llm, get_planner_llm, get_review_llm
+from app.agents.literature_outline import build_subtopic_plan, mount_papers_by_subtopic_tags
+from app.agents.literature_planner import load_planner_context, stream_understanding_and_route
+from app.agents.literature_router import resolve_auto_session_title, should_auto_rename_session
 from app.agents.literature_turn_context import TurnFinalizeContext
-from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
-from app.agents.literature_turn_graph import (
-    publish_workflow_graph as _publish_workflow_graph,
-    sync_graph_nodes,
-)
+from app.agents.literature_turn_finalize import finalize_turn
 from app.agents.literature_turn_generate import GenerateTurnContext, stream_generate_turn
-from app.agents.literature_turn_pipeline import RetrievalPipelineContext, run_retrieval_pipeline
+from app.agents.literature_turn_graph import publish_workflow_graph as _publish_workflow_graph
 from app.agents.literature_turn_helpers import (
     intent_needs_web_search as _intent_needs_web_search,
     last_assistant_failed as _last_assistant_failed,
     new_id as _new_id,
     section_specs_for_graph as _section_specs_for_graph,
 )
+from app.agents.literature_turn_pipeline import RetrievalPipelineContext, run_retrieval_pipeline
+from app.agents.review_prompt import citation_format_label
+from app.agents.search_aspects import search_aspects_plan_ready
+from app.agents.session_corpus import SessionCorpus, resolve_session_corpus
+from app.agents.url_list import sanitize_fetch_urls
+from app.agents.workflow_emitter import WorkflowNodeEmitter
+from app.agents.workflow_graph import apply_fetch_provider_label, build_literature_graph
+from app.core.stream_events import chat_text, process_text, turn_start
+from app.core.think_stream import ThinkAccumulator
+from app.schemas.literature_outline import LiteratureOutline
+from app.services.llm_service import get_pipeline_llm, get_planner_llm, get_review_llm
 from app.storage.file_store import get_store
 
 _log = logging.getLogger(__name__)
@@ -107,13 +74,13 @@ async def stream_literature_turn(
     literature_source_mode: str | None = None,
     persist_user_message: bool = True,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    del literature_source_mode
     store = get_store()
     if persist_user_message:
         store.append_message(session_id, "user", user_message)
 
     citation_format = await get_citation_format()
     fmt_label = citation_format_label(citation_format)
-
     yield skill_active_event("literature-review")
 
     session_meta = store.get_session(session_id) or {}
@@ -132,72 +99,9 @@ async def stream_literature_turn(
         has_review=has_review,
     )
 
-    clar_state = ClarificationState.from_session(session_meta)
-    pending_gate = ClarificationGate.from_dict(session_meta.get("pending_gate"))
     route_message = user_message
-    skip_to_generate = False
-
-    if pending_gate:
-        resolution = resolve_pending_gate(pending_gate, user_message)
-        gate_resolved = clar_state.mark_resolved(pending_gate.kind)
-        clar_state.apply(resolution)
-        meta_patch: dict[str, Any] = {
-            "pending_gate": None,
-            "gate_resolved": gate_resolved,
-        }
-        if resolution.action == "abort":
-            meta_patch["resume_mode"] = None
-            store.patch_session_meta(session_id, meta_patch)
-            abort_msg = "已按你的要求取消本轮操作。"
-            yield chat_text(abort_msg)
-            execution_trace = new_trace()
-            think_acc = ThinkAccumulator()
-            _, end_ev = await finalize_turn(
-                TurnFinalizeContext(
-                    store=store,
-                    session_id=session_id,
-                    session_meta=session_meta,
-                    session_title=str(session_meta.get("title") or ""),
-                    intent=LiteratureIntentResult(intent="new_topic"),
-                    user_message=user_message,
-                    corpus=corpus,
-                    execution_trace=execution_trace,
-                    think_acc=think_acc,
-                    fetch_results=[],
-                    cite_records=[],
-                    failed_literature=[],
-                    gen_constraints=list(session_meta.get("gen_constraints") or []),
-                    chat_text=abort_msg,
-                ),
-                main_text=abort_msg,
-            )
-            yield end_ev
-            yield ("stage", {"name": "完成", "state": "done"})
-            return
-        if pending_gate.kind == "first_turn":
-            original = str(pending_gate.context.get("original_message") or "")
-            route_message = merge_first_turn_message(original, resolution.merge_text)
-        if pending_gate.kind == "outline_confirm":
-            skip_to_generate = True
-            meta_patch["resume_mode"] = "generate_only"
-        store.patch_session_meta(session_id, meta_patch)
-        session_meta = store.get_session(session_id) or session_meta
-
-    if (
-        not skip_to_generate
-        and str(session_meta.get("resume_mode") or "") == "generate_only"
-    ):
-        skip_to_generate = True
-
     think_acc = ThinkAccumulator()
-
-    if not skip_to_generate:
-        yield turn_start(turn_index=user_turns, intent="new_topic")
-        async for ev in emit_system_think_line(
-            "正在理解你的研究问题…",
-            accumulator=think_acc,
-        ):
-            yield ev
+    yield turn_start(turn_index=user_turns, intent="new_topic")
 
     intent = await route_literature_intent(
         route_message,
@@ -207,100 +111,56 @@ async def stream_literature_turn(
         last_failed=last_failed,
     )
 
-    search_api_key = await get_web_search_api_key()
     search_provider = await get_web_search_provider()
     if _intent_needs_web_search(intent) and search_provider not in (
         "openalex",
         "native",
         "multi_academic",
     ):
-        if not search_api_key:
+        if not await get_web_search_api_key():
             from app.agents.tools.web_providers import search_provider_display
 
-            label = search_provider_display(search_provider)
-            yield ("error", {"message": f"请先在设置页配置 {label} API Key"})
+            yield (
+                "error",
+                {"message": f"请先在设置页配置 {search_provider_display(search_provider)} API Key"},
+            )
             return
-        if search_provider == "tavily":
-            key_hint = search_credential_secret_hint("tavily", search_api_key)
-            if key_hint:
-                yield ("error", {"message": key_hint})
-                return
 
-    async for ev in emit_system_think_line(
-        "正在加载检索与抓取配置…",
-        accumulator=think_acc,
-    ):
-        yield ev
-
-    search_max_results = await get_search_max_results()
-    merge_search_budget = await get_merge_search_budget()
-    search_parallel = await get_search_parallel()
-    max_fetch_urls = await get_max_fetch_urls()
-    if literature_source_mode is not None:
-        from app.agents.literature_source import normalize_literature_source_mode
-
-        source_mode = normalize_literature_source_mode(literature_source_mode)
-    else:
-        source_mode = await get_literature_source_mode()
-    search_retry_count = await get_search_retry_count()
-    fetch_retry_count = await get_fetch_retry_count()
-    fetch_retry_delay_ms = await get_fetch_retry_delay_ms()
-    search_include_domains = await get_search_include_domains()
-    search_exclude_domains = await get_search_exclude_domains()
-    search_depth = await get_search_depth()
-    search_enforce_domain_filter = await get_search_enforce_domain_filter()
-    search_enable_junk_filter = await get_search_enable_junk_filter()
-    max_source_chars = await get_max_source_chars()
-    enable_paper_attributes = await get_enable_paper_attributes()
-    enable_query_expansion = await get_enable_query_expansion()
-    search_expansion_count = await get_search_expansion_count()
-    outline_mode = await get_outline_mode()
-    post_refine_mode = await get_post_refine_mode()
-    upload_urls = sanitize_fetch_urls(extra_fetch_urls)
-    if intent.new_urls:
-        upload_urls = sanitize_fetch_urls(intent.new_urls + upload_urls)
-    if clar_state.extra_urls:
-        upload_urls = sanitize_fetch_urls(clar_state.extra_urls + upload_urls)
-
-    from app.agents.literature_source import effective_merge_search_max_results
-
-    search_max_results = effective_merge_search_max_results(
-        search_max_results,
-        source_mode=source_mode,
-        upload_urls=upload_urls,
-        budget=merge_search_budget,
+    yield (
+        "literature_intent",
+        {
+            "intent": intent.intent,
+            "defer_generate": intent.defer_generate,
+            "skip_web_search": intent.skip_web_search,
+            "skip_fetch": intent.skip_fetch,
+            "use_existing_corpus": intent.use_existing_corpus,
+        },
     )
 
     graph_artifact_id = _new_id("wf")
     emitter = WorkflowNodeEmitter(graph_artifact_id)
     fetch_provider = await get_web_fetch_provider()
-    g = build_literature_graph_legacy()
-    apply_fetch_provider_label(g, fetch_provider)
-    async for ev in _publish_workflow_graph(g, graph_artifact_id):
-        yield ev
-    use_outline_path = False
-    outline_draft: LiteratureOutline | None = None
-    outline_obj: LiteratureOutline | None = None
-    sub_topics_for_search: list[Any] = []
     execution_trace = new_trace()
     planner_ctx = await load_planner_context()
     working = SessionCorpus()
+    if turn_ctx.has_corpus:
+        working = SessionCorpus.from_dict(corpus.to_dict()) or working
+
     review_llm = await get_review_llm()
-    planner_llm = await get_planner_llm()
     pipeline_llm = await get_pipeline_llm()
-    fetch_results: list[tuple[dict[str, str], str, str | None]] = []
-    cite_records: list[Any] = []
-    failed_literature: list[dict[str, str]] = []
-    fetch_ok = 0
-    fetch_failed = 0
-    hits: list[dict[str, str]] = []
-    answer = ""
+    router_result = intent.to_router_result()
+    outline_obj: LiteratureOutline | None = LiteratureOutline.from_dict(
+        store.load_outline(session_id)
+    )
+    sub_topics: list[Any] = []
+    search_query_for_plan = route_message.strip()
+    session_title = str(session_meta.get("title") or "")
+    initial_query = str(session_meta.get("initial_query") or route_message.strip())
+
     gen_constraints = merge_gen_constraints(
         list(session_meta.get("gen_constraints") or []),
-        intent.gen_directives if intent.intent == "refine_gen" else "",
+        intent.gen_directives if intent.intent == "review_refine" else "",
     )
-    initial_query = str(session_meta.get("initial_query") or route_message.strip())
-    session_title = str(session_meta.get("title") or "")
 
     finalize_ctx = TurnFinalizeContext(
         store=store,
@@ -312,108 +172,16 @@ async def stream_literature_turn(
         corpus=corpus,
         execution_trace=execution_trace,
         think_acc=think_acc,
-        fetch_results=fetch_results,
-        cite_records=cite_records,
-        failed_literature=failed_literature,
+        fetch_results=[],
+        cite_records=[],
+        failed_literature=[],
         gen_constraints=gen_constraints,
         turn_index=user_turns,
     )
 
-    if clar_state.search_relax_domain:
-        search_enforce_domain_filter = False
-    if clar_state.search_retry_query:
-        intent.search_query = clar_state.search_retry_query
-
-    if skip_to_generate:
-        working = resolve_session_corpus(store, session_id) or SessionCorpus()
-        outline_obj = LiteratureOutline.from_dict(store.load_outline(session_id))
-        if not working.sources_md and not working.fetch_hits:
-            fail_msg = "没有可用的文献材料，无法继续撰写。请先完成检索与抓取。"
-            yield chat_text(fail_msg)
-            finalize_ctx.corpus = working
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = list(working.failed_literature)
-            finalize_ctx.intent = intent
-            finalize_ctx.chat_text = fail_msg
-            _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
-            yield end_ev
-            store.patch_session_meta(session_id, {"resume_mode": None})
-            yield ("stage", {"name": "完成", "state": "done"})
-            return
-        if not outline_obj or not outline_obj.sections:
-            fail_msg = "未找到可确认的大纲。请重新描述研究主题或关闭「计划确认」后重试。"
-            yield chat_text(fail_msg)
-            finalize_ctx.corpus = working
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = list(working.failed_literature)
-            finalize_ctx.intent = intent
-            finalize_ctx.chat_text = fail_msg
-            _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
-            yield end_ev
-            store.patch_session_meta(session_id, {"resume_mode": None})
-            yield ("stage", {"name": "完成", "state": "done"})
-            return
-        use_outline_path = True
-        outline_draft = outline_obj
-        if clar_state.outline_edit_directives:
-            gen_constraints = merge_gen_constraints(
-                gen_constraints,
-                clar_state.outline_edit_directives,
-            )
-            intent = LiteratureIntentResult(
-                intent="refine_gen",
-                gen_directives=clar_state.outline_edit_directives,
-            )
-        fetch_results = list(working.fetch_results)
-        failed_literature = list(working.failed_literature)
-        fetch_ok = len(working.fetch_hits)
-        fetch_failed = len(failed_literature)
-        g = build_literature_graph(_section_specs_for_graph(outline_obj))
-        apply_fetch_provider_label(g, fetch_provider)
-        async for ev in _publish_workflow_graph(g, graph_artifact_id):
-            yield ev
-        prefix_done = ["fetch", "cite_extract"]
-        if enable_paper_attributes and g.node("attributes"):
-            prefix_done.append("attributes")
-        if g.node("outline"):
-            prefix_done.append("outline")
-        async for ev in sync_graph_nodes(
-            emitter, g, graph_artifact_id, prefix_done, "done"
-        ):
-            yield ev
-        yield (
-            "literature_intent",
-            {
-                "intent": intent.intent,
-                "defer_generate": intent.defer_generate,
-                "skip_web_search": intent.skip_web_search,
-                "skip_fetch": intent.skip_fetch,
-                "use_existing_corpus": intent.use_existing_corpus,
-            },
-        )
-        yield turn_start(turn_index=user_turns, intent=intent.intent)
-        yield ("stage", {"name": "继续撰写", "state": "done"})
-        upsert_stage(execution_trace, "继续撰写", "done")
-    else:
-        yield (
-            "literature_intent",
-            {
-                "intent": intent.intent,
-                "defer_generate": intent.defer_generate,
-                "skip_web_search": intent.skip_web_search,
-                "skip_fetch": intent.skip_fetch,
-                "use_existing_corpus": intent.use_existing_corpus,
-            },
-        )
-        router_result = intent.to_router_result()
+    needs_understanding = intent.intent in ("new_topic", "subtopic_change", "append_urls")
+    if needs_understanding:
         yield ("stage", {"name": "理解研究问题", "state": "active"})
-        async for ev in emit_system_think_line(
-            "正在生成检索规划与检索方向…",
-            accumulator=think_acc,
-        ):
-            yield ev
         async for ev in stream_understanding_and_route(
             route_message,
             think_acc=think_acc,
@@ -423,30 +191,19 @@ async def stream_literature_turn(
                 router_result = ev[1]["result"]
             else:
                 yield ev
-
         planner_ctx.narration_focus = router_result.narration_focus
         planner_ctx.writing_emphasis = router_result.writing_emphasis
 
-        if should_auto_rename_session(
-            session_meta,
-            route_message,
-            user_message_count=user_turns,
-        ):
+        if should_auto_rename_session(session_meta, route_message, user_turns):
             new_title = await resolve_auto_session_title(
                 primary_title=router_result.session_title or intent.session_title,
                 user_message=route_message,
             )
             if new_title:
-                store.update_session(
-                    session_id,
-                    title=new_title,
-                    title_auto_set=True,
-                )
+                store.update_session(session_id, title=new_title, title_auto_set=True)
                 session_meta = store.get_session(session_id) or session_meta
-                yield (
-                    "session_title",
-                    {"session_id": session_id, "title": new_title},
-                )
+                session_title = new_title
+                yield ("session_title", {"session_id": session_id, "title": new_title})
 
         yield ("stage", {"name": "理解研究问题", "state": "done"})
         upsert_stage(execution_trace, "理解研究问题", "done")
@@ -456,258 +213,108 @@ async def stream_literature_turn(
             or intent.search_query
             or route_message.strip()
         )
-        first_gate = None
-        brief_assessment = None
         if search_aspects_plan_ready(router_result.search_aspects):
-            brief_assessment = brief_assessment_from_router(router_result)
-        else:
-            assessor_llm = await get_assessor_llm()
-            async for ev in emit_system_think_line(
-                "正在评估研究 brief…",
-                accumulator=think_acc,
-            ):
-                yield ev
-
-            async def _assess():
-                return await assess_first_turn_gate(
-                    route_message,
-                    search_query=search_query_for_plan,
-                    user_turns=user_turns,
-                    intent=intent.intent,
-                    gate_resolved=clar_state.resolved,
-                    llm=assessor_llm,
-                )
-
-            async for item in run_with_progress_ticks(
-                "brief",
-                "评估研究 brief 并提取关键词…",
-                _assess,
-                interval_sec=PROGRESS_INTERVAL_SEC,
-            ):
-                if isinstance(item, tuple) and item[0] == "__result__":
-                    first_gate, brief_assessment = item[1]
-                else:
-                    yield item
-        if brief_assessment and not first_gate:
-            assess_patch: dict[str, Any] = {
-                "brief_assessment": brief_assessment.to_dict(),
-            }
-            if brief_assessment.search_query_hint:
-                assess_patch["initial_query"] = route_message.strip()
-            store.patch_session_meta(session_id, assess_patch)
-            session_meta = store.get_session(session_id) or session_meta
-            if brief_assessment.search_query_hint:
-                search_query_for_plan = brief_assessment.search_query_hint
-                intent.search_query = brief_assessment.search_query_hint
-            rq_msg = format_brief_assessment_message(brief_assessment)
+            brief = brief_assessment_from_router(router_result)
+            rq_msg = format_brief_assessment_message(brief)
             if rq_msg:
                 finalize_ctx.assistant_prefix = rq_msg
                 finalize_ctx.process_text = rq_msg
                 for para in rq_msg.split("\n\n"):
                     if para.strip():
                         yield process_text(para.strip() + "\n\n")
-            yield (
-                "literature_brief_assessment",
-                {
-                    "core_research_questions": brief_assessment.core_research_questions,
-                    "keywords": brief_assessment.keywords,
-                    "search_query_hint": brief_assessment.search_query_hint,
-                    "confidence": brief_assessment.confidence,
-                },
-            )
-        if first_gate:
-            finalize_ctx.corpus = corpus
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = []
-            async for ev in yield_clarification_pause(
-                first_gate,
-                finalize_ctx,
-                gate_resolved=clar_state.resolved,
-            ):
-                yield ev
-            return
 
-        initial_query = str(
-            session_meta.get("initial_query") or route_message.strip()
-        )
-        session_title = str(session_meta.get("title") or "")
-
-        stored_outline = LiteratureOutline.from_dict(store.load_outline(session_id))
-        use_outline_path, outline_draft, sub_topics_for_search = resolve_outline_plan(
-            outline_mode=outline_mode,
-            intent=intent.intent,
+        outline_obj, sub_topics = build_subtopic_plan(
             user_message=route_message,
-            initial_query=initial_query,
             search_query=search_query_for_plan,
             session_title=session_title,
-            stored_outline=stored_outline,
             search_aspects=router_result.search_aspects,
+            stored_outline=outline_obj,
+            intent=intent.intent,
         )
-        if use_outline_path and outline_draft:
-            g = build_literature_graph(_section_specs_for_graph(outline_draft))
-        else:
-            g = build_literature_graph_legacy()
-        apply_fetch_provider_label(g, fetch_provider)
-        async for ev in _publish_workflow_graph(g, graph_artifact_id):
-            yield ev
 
-        if use_outline_path and sub_topics_for_search:
-            yield (
-                "literature_subtopic_plan",
-                {
-                    "count": len(sub_topics_for_search),
-                    "sub_topics": [
-                        {
-                            "id": st.id,
-                            "title": st.title,
-                            "search_query": st.search_query,
-                        }
-                        for st in sub_topics_for_search
-                    ],
-                },
-            )
+    g = build_literature_graph(
+        _section_specs_for_graph(outline_obj) if outline_obj else None
+    )
+    apply_fetch_provider_label(g, fetch_provider)
+    async for ev in _publish_workflow_graph(g, graph_artifact_id):
+        yield ev
 
-        if intent.intent == "manage_library":
-            async for ev in emit_system_think_line(
-                "正在处理文献库管理指令…",
-                accumulator=think_acc,
-            ):
-                yield ev
-            action = intent.manage_action or "list"
-            targets = intent.manage_targets
-            if not action:
-                from app.agents.literature_intent import parse_manage_command
+    upload_urls = sanitize_fetch_urls(extra_fetch_urls)
+    if intent.new_urls:
+        upload_urls = sanitize_fetch_urls(intent.new_urls + upload_urls)
 
-                action, targets = parse_manage_command(user_message, session_id)
-            main_text = execute_manage_library(action, targets, session_id)
-            yield chat_text(main_text)
-            upsert_stage(execution_trace, "完成", "done")
-            finalize_ctx.corpus = corpus
-            finalize_ctx.fetch_results = []
-            finalize_ctx.cite_records = []
-            finalize_ctx.failed_literature = corpus.failed_literature
-            finalize_ctx.intent = intent
-            finalize_ctx.chat_text = main_text
-            _, end_ev = await finalize_turn(finalize_ctx, main_text=main_text)
+    pipe_ctx = RetrievalPipelineContext(
+        session_id=session_id,
+        user_message=user_message,
+        route_message=route_message,
+        session_title=session_title,
+        search_query_for_plan=search_query_for_plan,
+        intent=intent,
+        router_result=router_result,
+        turn_ctx=turn_ctx,
+        finalize_ctx=finalize_ctx,
+        store=store,
+        pipeline_llm=pipeline_llm,
+        emitter=emitter,
+        graph=g,
+        graph_artifact_id=graph_artifact_id,
+        execution_trace=execution_trace,
+        think_acc=think_acc,
+        planner_ctx=planner_ctx,
+        citation_format=citation_format,
+        fmt_label=fmt_label,
+        search_api_key=await get_web_search_api_key(),
+        search_max_results=await get_search_max_results(),
+        search_retry_count=await get_search_retry_count(),
+        fetch_retry_delay_ms=await get_fetch_retry_delay_ms(),
+        search_include_domains=await get_search_include_domains(),
+        search_exclude_domains=await get_search_exclude_domains(),
+        search_depth=await get_search_depth(),
+        search_enforce_domain_filter=await get_search_enforce_domain_filter(),
+        search_enable_junk_filter=await get_search_enable_junk_filter(),
+        max_fetch_urls=await get_max_fetch_urls(),
+        max_source_chars=await get_max_source_chars(),
+        fetch_api_key=await get_fetch_api_key(),
+        parallel=await get_fetch_parallel(),
+        timeout_sec=await get_fetch_timeout_sec(),
+        fetch_retry_count=await get_fetch_retry_count(),
+        working=working,
+        outline_obj=outline_obj,
+        sub_topics_for_search=sub_topics,
+        search_provider=search_provider,
+        fetch_provider=fetch_provider,
+    )
+    async for ev in run_retrieval_pipeline(pipe_ctx):
+        yield ev
+    if pipe_ctx.early_return:
+        return
+
+    working = pipe_ctx.working
+    outline_obj = pipe_ctx.outline_obj or outline_obj
+
+    if intent.intent == "query_corpus":
+        if not working.sources_md and not working.fetch_hits:
+            fail_msg = "当前会话尚无文献材料，无法回答。"
+            yield chat_text(fail_msg)
+            finalize_ctx.chat_text = fail_msg
+            _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
             yield end_ev
-            yield ("stage", {"name": "完成", "state": "done"})
             return
 
-        if intent.use_existing_corpus and turn_ctx.has_corpus:
-            working = SessionCorpus.from_dict(corpus.to_dict()) or SessionCorpus()
+    if not runs_generate(intent):
+        return
 
-        fetch_api_key = await get_fetch_api_key()
-        parallel = await get_fetch_parallel()
-        timeout_sec = await get_fetch_timeout_sec()
-
-        pipe_ctx = RetrievalPipelineContext(
-            session_id=session_id,
-            user_message=user_message,
-            route_message=route_message,
-            session_title=session_title,
-            search_query_for_plan=search_query_for_plan,
-            intent=intent,
-            router_result=router_result,
-            turn_ctx=turn_ctx,
-            clar_state=clar_state,
-            finalize_ctx=finalize_ctx,
-            store=store,
-            planner_llm=planner_llm,
-            pipeline_llm=pipeline_llm,
-            emitter=emitter,
-            graph=g,
-            graph_artifact_id=graph_artifact_id,
-            execution_trace=execution_trace,
-            think_acc=think_acc,
-            planner_ctx=planner_ctx,
-            citation_format=citation_format,
-            fmt_label=fmt_label,
-            source_mode=source_mode,
-            search_api_key=search_api_key,
-            search_max_results=search_max_results,
-            search_retry_count=search_retry_count,
-            fetch_retry_delay_ms=fetch_retry_delay_ms,
-            search_include_domains=search_include_domains,
-            search_exclude_domains=search_exclude_domains,
-            search_depth=search_depth,
-            search_enforce_domain_filter=search_enforce_domain_filter,
-            search_enable_junk_filter=search_enable_junk_filter,
-            enable_query_expansion=enable_query_expansion,
-            search_expansion_count=search_expansion_count,
-            enable_paper_attributes=enable_paper_attributes,
-            max_fetch_urls=max_fetch_urls,
-            max_source_chars=max_source_chars,
-            fetch_api_key=fetch_api_key,
-            parallel=parallel,
-            timeout_sec=timeout_sec,
-            fetch_retry_count=fetch_retry_count,
-            upload_urls=upload_urls,
-            working=working,
-            fetch_results=fetch_results,
-            cite_records=cite_records,
-            failed_literature=failed_literature,
-            hits=hits,
-            answer=answer,
-            fetch_ok=fetch_ok,
-            fetch_failed=fetch_failed,
-            use_outline_path=use_outline_path,
-            outline_draft=outline_draft,
-            outline_obj=outline_obj,
-            sub_topics_for_search=sub_topics_for_search,
-            search_provider=search_provider,
-            fetch_provider=fetch_provider,
-            search_parallel=search_parallel,
-        )
-        async for ev in run_retrieval_pipeline(pipe_ctx):
-            yield ev
-        if pipe_ctx.early_return:
-            return
-        working = pipe_ctx.working
-        fetch_results = pipe_ctx.fetch_results
-        cite_records = pipe_ctx.cite_records
-        failed_literature = pipe_ctx.failed_literature
-        hits = pipe_ctx.hits
-        answer = pipe_ctx.answer
-        fetch_ok = pipe_ctx.fetch_ok
-        fetch_failed = pipe_ctx.fetch_failed
-        outline_obj = pipe_ctx.outline_obj
-        outline_draft = pipe_ctx.outline_draft
-
-    if not skip_to_generate and not working.sources_md and not working.fetch_hits:
-        fail_msg = "没有可用的文献材料。请先提供研究问题或文献链接。"
+    if not working.sources_md and not working.fetch_hits:
+        fail_msg = "没有可用的文献材料。"
         yield chat_text(fail_msg)
-        finalize_ctx.corpus = working
-        finalize_ctx.fetch_results = fetch_results
-        finalize_ctx.cite_records = cite_records
-        finalize_ctx.failed_literature = failed_literature
-        finalize_ctx.intent = intent
         finalize_ctx.chat_text = fail_msg
         _, end_ev = await finalize_turn(finalize_ctx, main_text=fail_msg)
         yield end_ev
         return
 
-    if intent.defer_generate:
-        summary = (
-            f"已补充/更新文献语料（共 {working.source_block_count()} 个材料块）。"
-            " 按你的要求暂未生成综述；需要时请说明写作要求。"
-        )
-        yield chat_text(summary)
-        upsert_stage(execution_trace, "完成", "done")
-        finalize_ctx.corpus = working
-        finalize_ctx.fetch_results = fetch_results
-        finalize_ctx.cite_records = cite_records
-        finalize_ctx.failed_literature = failed_literature
-        finalize_ctx.intent = intent
-        finalize_ctx.chat_text = summary
-        lib_result, end_ev = await finalize_turn(finalize_ctx, main_text=summary)
-        yield end_ev
-        yield (
-            "extension",
-            {"name": "library_updated", "version": "1.0", "data": lib_result},
-        )
-        yield ("stage", {"name": "完成", "state": "done"})
-        return
+    if outline_obj:
+        outline_obj = mount_papers_by_subtopic_tags(outline_obj, working.papers)
+        store.save_outline(session_id, outline_obj.to_dict())
 
     gen_ctx = GenerateTurnContext(
         session_id=session_id,
@@ -719,7 +326,6 @@ async def stream_literature_turn(
         gen_constraints=gen_constraints,
         citation_format=citation_format,
         fmt_label=fmt_label,
-        post_refine_mode=post_refine_mode,
         finalize_ctx=finalize_ctx,
         store=store,
         llm=review_llm,
@@ -730,14 +336,12 @@ async def stream_literature_turn(
         think_acc=think_acc,
         planner_ctx=planner_ctx,
         working=working,
-        fetch_results=fetch_results,
-        cite_records=cite_records,
-        failed_literature=failed_literature,
-        fetch_ok=fetch_ok,
-        fetch_failed=fetch_failed,
-        use_outline_path=use_outline_path,
+        fetch_results=pipe_ctx.fetch_results,
+        cite_records=pipe_ctx.cite_records,
+        failed_literature=pipe_ctx.failed_literature,
+        fetch_ok=pipe_ctx.fetch_ok,
+        fetch_failed=pipe_ctx.fetch_failed,
         outline_obj=outline_obj,
     )
     async for ev in stream_generate_turn(gen_ctx):
         yield ev
-

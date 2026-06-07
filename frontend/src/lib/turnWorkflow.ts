@@ -50,7 +50,6 @@ export type TurnWorkflow = {
   intent: string;
   summary: string;
   cards: WorkflowCard[];
-  clarifying: boolean;
 };
 
 const CARD_TITLES: Record<WorkflowCardType, string> = {
@@ -105,101 +104,13 @@ function processLineToStep(line: ProcessLine): WorkflowStep {
 
 function extensionInlineStep(name: string, data: Record<string, unknown>): WorkflowStep | null {
   if (
-    name === "literature_search_pass_start" ||
-    name === "literature_search_source_start" ||
-    name === "literature_search_source_done" ||
-    name === "literature_search_pass_done" ||
-    name === "literature_search_refine"
+    name === "literature_subtopic_plan" ||
+    name === "literature_subtopic_search_done" ||
+    name === "literature_subtopic_filter_done" ||
+    name === "literature_subtopic_fetch_done" ||
+    name === "literature_generate_done"
   ) {
     return null;
-  }
-  if (name === "literature_fetch_start") {
-    const title = String(data.title ?? "").trim();
-    const idx = data.index;
-    const total = data.total;
-    const n =
-      typeof idx === "number" && typeof total === "number"
-        ? ` ${idx}/${total}`
-        : "";
-    const url = String(data.url ?? "").trim();
-    let host = "";
-    if (url) {
-      try {
-        host = new URL(url).hostname;
-      } catch {
-        host = url.slice(0, 40);
-      }
-    }
-    const label = title || host || "网页";
-    return {
-      key: `ext-${name}-${url || idx || 0}`,
-      kind: "inline",
-      title: `抓取${n}：${label.slice(0, 72)}`,
-      status: "running",
-    };
-  }
-  if (name === "literature_search_merge") {
-    const deduped = data.deduped;
-    const raw = data.raw_total;
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: `合并 ${raw ?? "?"} → 去重 ${deduped ?? "?"}`,
-      status: "done",
-    };
-  }
-  if (name === "literature_relevance_filter") {
-    const kept = data.kept_count;
-    const rejected = data.rejected_count;
-    const warn = data.query_warning === true;
-    const base =
-      typeof kept === "number" && typeof rejected === "number"
-        ? `相关性筛选 保留 ${kept} · 剔除 ${rejected}`
-        : "相关性筛选";
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: warn ? `${base}（建议优化检索式）` : base,
-      status: "done",
-    };
-  }
-  if (name === "literature_source") {
-    const total = data.total_fetch;
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: typeof total === "number" ? `抓取队列 ${total} 篇` : "抓取队列",
-      status: "done",
-    };
-  }
-  if (name === "literature_subtopic_plan") {
-    return null;
-  }
-  if (name === "literature_section_refine") {
-    const titles = data.target_titles;
-    if (Array.isArray(titles) && titles.length) {
-      return {
-        key: `ext-${name}`,
-        kind: "inline",
-        title: `修订：${titles.join("、")}`,
-        status: "done",
-      };
-    }
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: "整篇修订",
-      status: "done",
-    };
-  }
-  if (name === "literature_paper_index") {
-    const count = data.count;
-    return {
-      key: `ext-${name}`,
-      kind: "inline",
-      title: typeof count === "number" ? `结构化 ${count} 篇` : "文献索引",
-      status: "done",
-    };
   }
   if (name === "library_updated") {
     const total = data.total;
@@ -213,7 +124,7 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
   return null;
 }
 
-const CHAT_INTENTS = new Set(["query_corpus", "clarify", "plan_confirm"]);
+const CHAT_INTENTS = new Set(["query_corpus"]);
 
 export function workflowNeedsChat(intent: string): boolean {
   return CHAT_INTENTS.has(intent);
@@ -315,7 +226,7 @@ export function buildTurnWorkflowFromTrace(
 
   for (const ext of opts.extensions ?? []) {
     if (ext.name === "literature_subtopic_plan") {
-      const raw = ext.data.sub_topics;
+      const raw = ext.data.subtopics ?? ext.data.sub_topics;
       if (Array.isArray(raw)) {
         subTopics = raw.map((st, i) => {
           const row = st as Record<string, unknown>;
@@ -427,10 +338,6 @@ export function buildTurnWorkflowFromTrace(
     });
   }
 
-  const clarifying = cards.some(
-    (c) => c.type === "clarify" && (c.locked || c.state === "running"),
-  );
-
   const summarizeCtx = {
     trace,
     extensions: opts.extensions,
@@ -442,13 +349,20 @@ export function buildTurnWorkflowFromTrace(
     return c;
   });
 
+  let mergedKept = 0;
+  let hasFilter = false;
   for (const ext of opts.extensions ?? []) {
-    if (ext.name !== "literature_search_merge") continue;
-    const deduped = ext.data.deduped;
-    if (typeof deduped !== "number") continue;
+    if (ext.name !== "literature_subtopic_filter_done") continue;
+    const kept = ext.data.kept_count;
+    if (typeof kept === "number") {
+      mergedKept += kept;
+      hasFilter = true;
+    }
+  }
+  if (hasFilter) {
     const searchCard = enrichedCards.find((c) => c.type === "search");
     if (searchCard) {
-      searchCard.summary = `纳入 ${deduped} 篇`;
+      searchCard.summary = `纳入 ${mergedKept} 篇`;
     }
   }
 
@@ -462,7 +376,6 @@ export function buildTurnWorkflowFromTrace(
     intent,
     summary: summaryParts.join(" · ") || formatLiteratureIntentLabel(intent),
     cards: enrichedCards,
-    clarifying,
   };
 }
 
@@ -480,7 +393,6 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
     turnIndex: raw.turnIndex ?? 1,
     intent: raw.intent ?? "new_topic",
     summary: raw.summary ?? "",
-    clarifying: Boolean(raw.clarifying),
     cards: (raw.cards ?? []).map((c, i) => ({
       id: c.id ?? `card-${i}`,
       type: c.type,
@@ -489,7 +401,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,
-      locked: c.locked ?? c.type === "clarify",
+      locked: c.locked ?? false,
       subTopics: c.subTopics,
     })),
   };

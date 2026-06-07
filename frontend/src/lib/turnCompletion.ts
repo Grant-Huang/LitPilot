@@ -61,13 +61,17 @@ function mergedHitsFromWorkflow(workflow: TurnWorkflow): number | null {
 function mergedHitsFromExtensions(
   extensions: Array<{ name: string; data: Record<string, unknown> }>,
 ): number | null {
-  for (let i = extensions.length - 1; i >= 0; i -= 1) {
-    const ext = extensions[i];
-    if (ext.name !== "literature_search_merge") continue;
-    const deduped = ext.data.deduped;
-    if (typeof deduped === "number") return deduped;
+  let total = 0;
+  let seen = false;
+  for (const ext of extensions) {
+    if (ext.name !== "literature_subtopic_filter_done") continue;
+    const kept = ext.data.kept_count;
+    if (typeof kept === "number") {
+      total += kept;
+      seen = true;
+    }
   }
-  return null;
+  return seen ? total : null;
 }
 
 function searchPassCount(trace: ExecutionTrace | undefined): number {
@@ -82,14 +86,8 @@ export type SummarizeCardContext = {
 };
 
 function relevanceHintFromExtensions(
-  extensions: Array<{ name: string; data: Record<string, unknown> }>,
+  _extensions: Array<{ name: string; data: Record<string, unknown> }>,
 ): string | null {
-  for (const ext of extensions) {
-    if (ext.name !== "literature_relevance_filter") continue;
-    if (ext.data.query_warning === true) {
-      return "部分检索式命中偏少，可补充关键词或使用 expand_search 扩检。";
-    }
-  }
   return null;
 }
 
@@ -215,7 +213,21 @@ export function buildTurnCompletionSummary(
     brief = brief ? `${brief} ${relevanceHint}` : relevanceHint;
   }
 
-  let weakHints = weakSubtopicsFromExtensions(extensions);
+  const planSubTopics = workflow.cards.flatMap((c) => c.subTopics ?? []);
+  for (const ext of extensions) {
+    if (ext.name !== "literature_subtopic_plan") continue;
+    const raw = ext.data.subtopics ?? ext.data.sub_topics;
+    if (!Array.isArray(raw)) continue;
+    for (const row of raw) {
+      const r = row as Record<string, unknown>;
+      planSubTopics.push({
+        id: String(r.id ?? ""),
+        title: String(r.title ?? ""),
+        search_query: String(r.search_query ?? ""),
+      });
+    }
+  }
+  let weakHints = weakSubtopicsFromExtensions(extensions, planSubTopics);
   if (!weakHints.length) {
     weakHints = weakSubtopicsFromTrace(opts?.trace);
   }

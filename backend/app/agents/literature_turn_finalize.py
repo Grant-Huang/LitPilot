@@ -1,11 +1,9 @@
-"""Turn finalization: corpus/meta/library persistence and clarification pauses."""
+"""Turn finalization: corpus/meta/library persistence."""
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from typing import Any
 
 from app.agents.agent_settings import get_citation_format
-from app.agents.execution_trace import upsert_stage
-from app.agents.literature_clarification import ClarificationGate, format_gate_message
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.session_corpus import save_session_corpus
 from app.agents.turn_workflow import build_turn_workflow_meta
@@ -95,30 +93,3 @@ async def finalize_turn(
         summary=str(turn_wf.get("summary") or ctx.intent.intent),
     )
     return lib_result, end_ev
-
-
-async def yield_clarification_pause(
-    gate: ClarificationGate,
-    ctx: TurnFinalizeContext,
-    *,
-    gate_resolved: dict[str, bool],
-    resume_mode: str | None = None,
-) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    if ctx.corpus.fetch_hits or ctx.corpus.sources_md:
-        save_session_corpus(ctx.store, ctx.session_id, ctx.corpus)
-    msg = format_gate_message(gate)
-    yield ("literature_clarification", gate.to_sse_payload())
-    yield chat_text(msg)
-    ctx.chat_text = msg
-    meta_patch: dict[str, Any] = {
-        "pending_gate": gate.to_dict(),
-        "gate_resolved": dict(gate_resolved),
-    }
-    if resume_mode:
-        meta_patch["resume_mode"] = resume_mode
-    ctx.store.patch_session_meta(ctx.session_id, meta_patch)
-    upsert_stage(ctx.execution_trace, "等待澄清", "done")
-    yield ("stage", {"name": "等待澄清", "state": "done"})
-    _, end_ev = await finalize_turn(ctx, main_text=msg)
-    yield end_ev
-    yield ("stage", {"name": "完成", "state": "done"})

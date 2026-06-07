@@ -7,7 +7,10 @@ from typing import Any
 from app.agents.url_list import sanitize_fetch_urls
 from app.library.canonical import canonical_key, normalize_url
 from app.library.store import LibraryStore
+from app.schemas.corpus_paper import CorpusPaperRecord, merge_corpus_papers
 from app.storage.file_store import FileStore, get_store
+
+CORPUS_SCHEMA_VERSION = 3
 
 MAX_BLOCK_CHARS = 14_000
 
@@ -25,10 +28,12 @@ class SessionCorpus:
     failed_literature: list[dict[str, str]] = field(default_factory=list)
     known_url_keys: set[str] = field(default_factory=set)
     paper_index: list[dict[str, Any]] = field(default_factory=list)
+    papers: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        paper_rows = self.papers or self.paper_index
         payload: dict[str, Any] = {
-            "version": 2 if self.paper_index else 1,
+            "version": CORPUS_SCHEMA_VERSION if paper_rows else 1,
             "search_answer": self.search_answer,
             "sources_md": self.sources_md,
             "fetch_hits": self.fetch_hits,
@@ -39,8 +44,12 @@ class SessionCorpus:
             "failed_literature": self.failed_literature,
             "known_url_keys": sorted(self.known_url_keys),
         }
-        if self.paper_index:
-            payload["paper_index"] = self.paper_index
+        if paper_rows:
+            payload["papers"] = paper_rows
+            if self.paper_index and not self.papers:
+                payload["paper_index"] = self.paper_index
+            elif self.paper_index:
+                payload["paper_index"] = self.paper_index
         return payload
 
     @classmethod
@@ -63,12 +72,35 @@ class SessionCorpus:
             ctx = str(row[1] or "")
             err = str(row[2]) if len(row) > 2 and row[2] else None
             corpus.fetch_results.append((hit, ctx, err))
-        corpus.paper_index = [
-            dict(p) for p in (data.get("paper_index") or []) if isinstance(p, dict)
+        raw_papers = data.get("papers") or data.get("paper_index") or []
+        corpus.papers = [
+            CorpusPaperRecord.from_legacy_paper_index(dict(p)).to_dict()
+            for p in raw_papers
+            if isinstance(p, dict)
         ]
+        corpus.paper_index = list(corpus.papers)
+        ver = int(data.get("version") or 1)
+        if ver < CORPUS_SCHEMA_VERSION and corpus.papers:
+            corpus.papers = [
+                CorpusPaperRecord.from_legacy_paper_index(dict(p)).to_dict()
+                for p in corpus.papers
+            ]
+            corpus.paper_index = list(corpus.papers)
         if not corpus.known_url_keys:
             corpus.known_url_keys = corpus._keys_from_hits()
         return corpus
+
+    def merge_papers(self, records: list[CorpusPaperRecord]) -> None:
+        self.papers = merge_corpus_papers(self.papers, records)
+        self.paper_index = list(self.papers)
+
+    def papers_for_review(self) -> list[dict[str, Any]]:
+        return [
+            p
+            for p in self.papers
+            if bool(p.get("cite_in_review", True))
+            and str(p.get("fetch_status") or "ok") == "ok"
+        ]
 
     def _keys_from_hits(self) -> set[str]:
         keys: set[str] = set()

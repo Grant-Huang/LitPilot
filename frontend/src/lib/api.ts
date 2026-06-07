@@ -50,7 +50,6 @@ export type AgentSettings = {
   search_retry_count?: number;
   fetch_retry_count?: number;
   fetch_retry_delay_ms?: number;
-  plan_confirm?: boolean;
   citation_format?: "apa" | "acm";
   llm_group_id?: string;
   has_web_search?: boolean;

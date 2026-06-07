@@ -3,9 +3,9 @@ import { formatLiteratureIntentLabel } from "./literatureIntent";
 
 describe("literatureIntent", () => {
   it("maps known intents", () => {
-    expect(formatLiteratureIntentLabel("supplement")).toContain("补充");
-    expect(formatLiteratureIntentLabel("refine_gen")).toContain("要求");
-    expect(formatLiteratureIntentLabel("synthesis_matrix")).toContain("矩阵");
+    expect(formatLiteratureIntentLabel("append_urls")).toContain("追加");
+    expect(formatLiteratureIntentLabel("review_refine")).toContain("修订");
+    expect(formatLiteratureIntentLabel("subtopic_change")).toContain("子主题");
   });
 
   it("falls back to raw intent", () => {

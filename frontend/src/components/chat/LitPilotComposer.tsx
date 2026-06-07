@@ -30,6 +30,8 @@ type LitPilotComposerProps = {
   streamParallelismChips?: string[];
   onSend: () => void;
   onAbort: () => void;
+  /** 首轮 new_topic 禁用「+」上传；多轮 append_urls 可用 */
+  uploadDisabled?: boolean;
 };
 
 export function LitPilotComposer({
@@ -47,6 +49,7 @@ export function LitPilotComposer({
   streamParallelismChips = [],
   onSend,
   onAbort,
+  uploadDisabled = false,
 }: LitPilotComposerProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -84,7 +87,9 @@ export function LitPilotComposer({
     [handleFile],
   );
 
-  const canSend = Boolean(input.trim()) && !isStreamBusy;
+  const canSend =
+    (Boolean(input.trim()) || (fetchUrls.length > 0 && !uploadDisabled)) &&
+    !isStreamBusy;
 
   return (
     <div className="litpilot-composer">
@@ -172,12 +177,16 @@ export function LitPilotComposer({
           />
           <div className="litpilot-composer__bar">
             <Tooltip
-              title={`上传链接列表（.txt / .csv / .json），最多 ${maxFetchUrls} 条（与设置一致）`}
+              title={
+                uploadDisabled
+                  ? "首轮请用文字描述主题；完成首轮后可追加文献链接"
+                  : `上传链接列表（.txt / .csv / .json），最多 ${maxFetchUrls} 条（与设置一致）`
+              }
             >
               <button
                 type="button"
                 className="litpilot-composer__attach"
-                disabled={isStreamBusy}
+                disabled={isStreamBusy || uploadDisabled}
                 aria-label="上传链接列表"
                 onClick={() => fileRef.current?.click()}
               >

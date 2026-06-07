@@ -65,7 +65,7 @@ def test_turn_system_prompt_holds_constraints() -> None:
         None,
         initial_query="LLM hallucination survey",
         gen_constraints=["增加伦理一节"],
-        intent="refine_gen",
+        intent="review_refine",
     )
     assert "伦理" in out
     assert "不得复述" in out

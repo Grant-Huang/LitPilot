@@ -2,7 +2,6 @@ import { apiRequestData } from "@/lib/http";
 
 export type PersonalPreferences = {
   citation_format: "apa" | "acm";
-  plan_confirm: boolean;
 };
 
 export type StorageSettings = {

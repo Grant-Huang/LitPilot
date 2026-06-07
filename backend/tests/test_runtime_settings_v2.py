@@ -21,7 +21,6 @@ def _seed_v2(
     review_model: str = "gpt-test",
     web_search_params: dict | None = None,
     web_fetch_params: dict | None = None,
-    literature_source_mode: str = "merge",
     citation_format: str = "apa",
 ) -> None:
     store.ensure_settings_v2_migrated()
@@ -41,8 +40,6 @@ def _seed_v2(
             cap["params"] = {**(cap.get("params") or {}), **web_search_params}
         if cap.get("capability_id") == "web_fetch" and web_fetch_params:
             cap["params"] = {**(cap.get("params") or {}), **web_fetch_params}
-        if cap.get("capability_id") == "literature_source":
-            cap["params"] = {"literature_source_mode": literature_source_mode}
     store.save_system_capabilities(caps)
 
     insts = store.list_system_instances()
@@ -51,7 +48,7 @@ def _seed_v2(
             inst["model_name"] = review_model
     store.save_system_instances(insts)
 
-    store.save_personal_preferences({"citation_format": citation_format, "plan_confirm": True})
+    store.save_personal_preferences({"citation_format": citation_format})
 
 
 def test_build_runtime_settings_from_v2(store: FileStore) -> None:
@@ -59,14 +56,12 @@ def test_build_runtime_settings_from_v2(store: FileStore) -> None:
         {
             "web_search_api_key": "legacy-should-not-win",
             "fetch_parallel": 6,
-            "literature_source_mode": "user_only",
         }
     )
     _seed_v2(
         store,
         tavily_secret="tvly-runtime",
         review_model="MiniMax-M3",
-        literature_source_mode="user_only",
         citation_format="ieee",
         web_search_params={"search_provider": "tavily"},
     )
@@ -81,9 +76,7 @@ def test_build_runtime_settings_from_v2(store: FileStore) -> None:
     assert runtime["web_search_api_key"] == "tvly-runtime"
     assert runtime["fetch_parallel"] == 6
     assert runtime["llm_model"] == "MiniMax-M3"
-    assert runtime["literature_source_mode"] == "user_only"
     assert runtime["citation_format"] == "ieee"
-    assert runtime["plan_confirm"] is True
     assert runtime["search_include_domains"] == list(ACADEMIC_SEARCH_DOMAINS)
 
 

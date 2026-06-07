@@ -30,3 +30,7 @@ logo of litpilot.zip
 
 # Logs
 *.log
+
+# Local scratch / benchmark artifacts
+.tmp/
+tmp/

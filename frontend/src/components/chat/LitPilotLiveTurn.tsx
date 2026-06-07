@@ -29,9 +29,7 @@ export function LitPilotLiveTurn({
     data: (e.payload.data ?? {}) as Record<string, unknown>,
   }));
   const showChat =
-    intent === "query_corpus" ||
-    workflow.clarifying ||
-    Boolean(chatText.trim());
+    intent === "query_corpus" || Boolean(chatText.trim());
 
   return (
     <div className="meso-message-list__live litpilot-message-list__live">

@@ -120,7 +120,6 @@ class AgentSettingsBody(BaseModel):
     search_retry_count: int | None = None
     fetch_retry_count: int | None = None
     fetch_retry_delay_ms: int | None = None
-    plan_confirm: bool | None = None
     citation_format: str | None = None
     use_llm_planner: bool | None = None
     orchestrator_mode: str | None = None
@@ -158,6 +157,8 @@ async def save_agent_settings(body: AgentSettingsBody):
         partial["literature_source_mode"] = normalize_literature_source_mode(
             partial["literature_source_mode"]
         )
+    else:
+        partial.pop("literature_source_mode", None)
     if "search_retry_count" in partial:
         partial["search_retry_count"] = max(0, min(int(partial["search_retry_count"]), 3))
     if "fetch_retry_count" in partial:
@@ -193,7 +194,6 @@ async def save_agent_settings(body: AgentSettingsBody):
 # -------------------- personal --------------------
 class PersonalPreferencesBody(BaseModel):
     citation_format: str | None = None
-    plan_confirm: bool | None = None
 
 
 @router.get("/personal/preferences")
