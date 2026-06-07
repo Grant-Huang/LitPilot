@@ -53,6 +53,14 @@ def normalize_chat_event(
             {"id": art_id, "lang": lang, "delta": content, "done": True},
         )]
 
+    if event_type == "extension":
+        if payload.get("name"):
+            return [("extension", payload)]
+        return [(
+            "extension",
+            {"name": "extension", "version": "1.0", "data": payload},
+        )]
+
     if event_type in EXTENSION_TYPES:
         return [(
             "extension",

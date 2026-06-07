@@ -5,6 +5,11 @@ export const STREAM_SILENCE_SLOW_SEC = 20;
 
 export type StreamActivityLevel = "active" | "waiting" | "slow";
 
+export type StreamParallelismInfo = {
+  searchLabel: string | null;
+  fetchParallel: number | null;
+};
+
 export type StreamProgressSnapshot = {
   stage: string;
   detail: string;
@@ -22,6 +27,7 @@ export type StreamActivitySnapshot = {
   silenceSec: number;
   level: StreamActivityLevel;
   progress?: StreamProgressSnapshot;
+  parallelism: StreamParallelismInfo;
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -53,6 +59,60 @@ function latestSearchDetail(
     }
   }
   return "";
+}
+
+export function extractStreamParallelism(
+  log: StreamState["extensionLog"],
+): StreamParallelismInfo {
+  let searchLabel: string | null = null;
+  let fetchParallel: number | null = null;
+  let maxInflight = 0;
+
+  for (const ext of log) {
+    const name = ext.payload.name;
+    const data = (ext.payload.data ?? {}) as Record<string, unknown>;
+    if (name === "literature_search_plan") {
+      const mode = String(data.parallel_mode ?? "");
+      if (mode === "by_source") {
+        const n =
+          typeof data.source_parallel === "number" ? data.source_parallel : 5;
+        searchLabel = `检索 ${n} 源并行`;
+      } else if (mode === "by_topic") {
+        const n =
+          typeof data.topic_parallel === "number"
+            ? data.topic_parallel
+            : typeof data.search_parallel === "number"
+              ? data.search_parallel
+              : 1;
+        if (n > 1) searchLabel = `检索 ${n} 主题并行`;
+      }
+    }
+    if (name === "literature_progress" && data.stage === "fetch") {
+      if (typeof data.parallel === "number") {
+        fetchParallel = Math.max(fetchParallel ?? 0, data.parallel);
+      }
+      if (typeof data.in_flight === "number") {
+        maxInflight = Math.max(maxInflight, data.in_flight);
+      }
+    }
+  }
+
+  if (!fetchParallel && maxInflight > 1) {
+    fetchParallel = maxInflight;
+  }
+
+  return { searchLabel, fetchParallel };
+}
+
+export function formatParallelismChips(
+  info: StreamParallelismInfo,
+): string[] {
+  const chips: string[] = [];
+  if (info.searchLabel) chips.push(info.searchLabel);
+  if (info.fetchParallel != null && info.fetchParallel > 1) {
+    chips.push(`抓取 ${info.fetchParallel} 路并行`);
+  }
+  return chips;
 }
 
 function latestProgress(
@@ -143,6 +203,7 @@ export function buildStreamActivitySnapshot(
     silenceSec,
     level,
     progress,
+    parallelism: extractStreamParallelism(stream.extensionLog),
   };
 }
 

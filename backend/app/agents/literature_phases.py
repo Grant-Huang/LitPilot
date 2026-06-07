@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.agents.execution_trace import append_tool, append_workflow, upsert_stage
+from app.agents.execution_trace import append_tool, append_workflow, record_literature_stats, upsert_stage
 from app.agents.literature_planner import (
     FetchNarrationThrottle,
     format_cite_context,
@@ -899,6 +899,31 @@ async def stream_expanded_search_phase(
         merged = [h for h in merged if not corpus.has_url(str(h.get("url") or ""))]
         corpus_dropped = before - len(merged)
 
+    per_query = (
+        max(2, int(search_max_results) // max(1, total))
+        if search_max_results and total
+        else 8
+    )
+    weak_threshold = max(3, int(per_query * 0.25))
+    weak_subtopics: list[dict[str, Any]] = []
+    if total >= 2:
+        for idx in range(1, total + 1):
+            hits_taken = pass_hit_counts[idx - 1] if idx - 1 < len(pass_hit_counts) else 0
+            if hits_taken >= weak_threshold:
+                continue
+            title = (
+                titles[idx - 1].strip()
+                if idx - 1 < len(titles) and titles[idx - 1].strip()
+                else f"主题 {idx}"
+            )
+            weak_subtopics.append(
+                {
+                    "pass_index": idx,
+                    "title": title,
+                    "hits_taken": hits_taken,
+                }
+            )
+
     yield (
         "literature_search_merge",
         {
@@ -910,7 +935,22 @@ async def stream_expanded_search_phase(
             "corpus_dropped": corpus_dropped,
             "per_source_cap": merge_cap,
             "pass_hit_counts": pass_hit_counts,
+            "weak_subtopics": weak_subtopics,
         },
+    )
+    record_literature_stats(
+        execution_trace,
+        searchMerged=len(merged),
+        searchRawTotal=raw_total,
+        searchPasses=total,
+        weakSubtopics=[
+            {
+                "passIndex": row["pass_index"],
+                "title": row["title"],
+                "hitsTaken": row["hits_taken"],
+            }
+            for row in weak_subtopics
+        ],
     )
 
     combined_answer = " ".join(answers).strip()
@@ -1154,6 +1194,7 @@ async def stream_fetch_phase(
                         "completed": fetch_ok + fetch_failed,
                         "total": fetch_total,
                         "in_flight": max(0, fetch_idx - fetch_ok - fetch_failed),
+                        "parallel": parallel,
                     },
                 )
                 continue
@@ -1191,6 +1232,7 @@ async def stream_fetch_phase(
                         "completed": max(0, idx - 1),
                         "total": fetch_total,
                         "in_flight": min(parallel, fetch_total - idx + 1),
+                        "parallel": parallel,
                     },
                 )
                 continue
@@ -1323,6 +1365,7 @@ async def stream_fetch_phase(
                     "total": fetch_total,
                     "ok": fetch_ok,
                     "failed": fetch_failed,
+                    "parallel": parallel,
                 },
             )
 

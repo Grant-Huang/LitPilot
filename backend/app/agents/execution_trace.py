@@ -55,6 +55,13 @@ def append_tool(
     tools.append(entry)
 
 
+def record_literature_stats(trace: dict[str, Any], **kwargs: Any) -> None:
+    stats = trace.setdefault("literatureStats", {})
+    for key, value in kwargs.items():
+        if value is not None:
+            stats[key] = value
+
+
 def append_workflow(
     trace: dict[str, Any],
     *,

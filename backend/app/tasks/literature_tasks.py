@@ -10,6 +10,7 @@ from typing import Any
 from app.agents.agent_skills import capabilities_payload
 from app.agents.literature_workflow import stream_literature_turn
 from app.core.streaming import normalize_chat_event, sse_event
+from app.storage.file_store import get_store
 from app.tasks.task_store import (
     TERMINAL_STATUSES,
     TaskRecord,
@@ -71,7 +72,6 @@ class LiteratureTaskRegistry:
     def __init__(self) -> None:
         self._store = get_task_store()
         self._local_runners: dict[str, asyncio.Task[None]] = {}
-        self._source_mode_by_task: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     def get(self, task_id: str) -> TaskRecord | None:
@@ -88,17 +88,19 @@ class LiteratureTaskRegistry:
         fetch_urls: list[str] | None = None,
         literature_source_mode: str | None = None,
     ) -> TaskRecord:
+        normalized_mode: str | None = None
+        if literature_source_mode:
+            from app.agents.literature_source import normalize_literature_source_mode
+
+            normalized_mode = normalize_literature_source_mode(literature_source_mode)
+
         record = self._store.create_task(
             session_id=session_id,
             message=message,
             fetch_urls=fetch_urls,
+            literature_source_mode=normalized_mode,
         )
-        if literature_source_mode:
-            from app.agents.literature_source import normalize_literature_source_mode
-
-            self._source_mode_by_task[record.id] = normalize_literature_source_mode(
-                literature_source_mode
-            )
+        get_store().append_message(session_id, "user", message)
         await self._maybe_start_runner(record.id)
         refreshed = self._store.get_task(record.id)
         return refreshed or record
@@ -210,7 +212,8 @@ class LiteratureTaskRegistry:
                 record.session_id,
                 record.message,
                 extra_fetch_urls=record.fetch_urls or None,
-                literature_source_mode=self._source_mode_by_task.get(task_id),
+                literature_source_mode=record.literature_source_mode,
+                persist_user_message=False,
             ):
                 if self._store.is_cancel_requested(task_id):
                     finished = time.time()
@@ -272,7 +275,6 @@ class LiteratureTaskRegistry:
             )
         finally:
             self._local_runners.pop(task_id, None)
-            self._source_mode_by_task.pop(task_id, None)
 
     async def iter_stream(self, task_id: str, since: int = 0):
         cursor = max(0, since)

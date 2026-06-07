@@ -24,9 +24,6 @@ function isNearScrollBottom(el: HTMLElement): boolean {
 export type LitPilotMessageListProps = {
   messages: LitPilotMessage[];
   streaming?: StreamState;
-  liveIntent?: string;
-  liveProcessText?: string;
-  liveChatText?: string;
   hasArtifact?: boolean;
   emptyState?: React.ReactNode;
   emptyStateAlign?: "center" | "top";
@@ -39,9 +36,6 @@ export type LitPilotMessageListProps = {
 export function LitPilotMessageList({
   messages,
   streaming,
-  liveIntent = "new_topic",
-  liveProcessText = "",
-  liveChatText = "",
   hasArtifact = false,
   emptyState,
   emptyStateAlign = "center",
@@ -130,13 +124,7 @@ export function LitPilotMessageList({
         )}
 
         {streaming && streaming.status !== "idle" && (
-          <LitPilotLiveTurn
-            streaming={streaming}
-            liveIntent={liveIntent}
-            liveProcessText={liveProcessText}
-            liveChatText={liveChatText}
-            hasArtifact={hasArtifact}
-          />
+          <LitPilotLiveTurn streaming={streaming} hasArtifact={hasArtifact} />
         )}
 
         <div ref={bottomRef} />

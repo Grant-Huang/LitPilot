@@ -72,7 +72,7 @@ describe("web_fetch char count display", () => {
   });
 
   it("humanizeDurationMs", () => {
-    expect(humanizeDurationMs(500)).toBe("500ms");
+    expect(humanizeDurationMs(500)).toBeNull();
     expect(humanizeDurationMs(5000)).toBe("5s");
   });
 });

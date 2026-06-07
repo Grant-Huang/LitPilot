@@ -105,9 +105,11 @@ async def stream_literature_turn(
     *,
     extra_fetch_urls: list[str] | None = None,
     literature_source_mode: str | None = None,
+    persist_user_message: bool = True,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     store = get_store()
-    store.append_message(session_id, "user", user_message)
+    if persist_user_message:
+        store.append_message(session_id, "user", user_message)
 
     citation_format = await get_citation_format()
     fmt_label = citation_format_label(citation_format)

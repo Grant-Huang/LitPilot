@@ -48,6 +48,7 @@ async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
     out: dict = {}
     events: list[tuple[str, dict]] = []
     think_acc = ThinkAccumulator()
+    execution_trace: dict = {}
 
     with (
         patch("app.agents.literature_phases.cached_web_search", mock_search),
@@ -66,7 +67,7 @@ async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
             upload_urls=[],
             think_acc=think_acc,
             planner_ctx=None,
-            execution_trace={},
+            execution_trace=execution_trace,
             result=out,
             search_provider="tavily",
         ):
@@ -78,6 +79,13 @@ async def test_expanded_search_does_not_abort_when_last_pass_empty() -> None:
     assert merge_ev[1]["deduped"] == 14
     assert merge_ev[1]["pass_hit_counts"] == [4, 5, 5, 0]
     assert merge_ev[1]["tool_hit_total"] == 14
+    weak = merge_ev[1].get("weak_subtopics") or []
+    assert len(weak) == 1
+    assert weak[0]["pass_index"] == 4
+    assert weak[0]["hits_taken"] == 0
+    persisted = execution_trace.get("literatureStats", {}).get("weakSubtopics") or []
+    assert persisted[0]["passIndex"] == 4
+    assert persisted[0]["hitsTaken"] == 0
 
 
 async def _narrate_fail_on_phase_c(phase: str, *args, **kwargs):

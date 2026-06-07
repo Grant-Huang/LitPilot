@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.tasks.literature_tasks import get_task_registry, reset_task_registry_for_tests
-from app.tasks.task_store import FileTaskStore, reset_task_store_for_tests
+from app.tasks.task_store import FileTaskStore, get_task_store, reset_task_store_for_tests
 
 
 async def _fake_turn(*_args, **_kwargs):
@@ -145,3 +145,65 @@ async def test_sweep_picks_up_pending_task():
             pytest.fail("sweeper did not pick up pending task")
 
         assert row.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_create_task_persists_source_mode(tmp_path, monkeypatch):
+    with patch(
+        "app.tasks.literature_tasks.stream_literature_turn",
+        side_effect=lambda *a, **k: _fake_turn(),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            created = await client.post(
+                "/api/tasks",
+                json={
+                    "message": "user only",
+                    "literature_source_mode": "user_only",
+                },
+            )
+            task_id = created.json()["data"]["task_id"]
+            record = get_task_store().get_task(task_id)
+            assert record is not None
+            assert record.literature_source_mode == "user_only"
+
+
+@pytest.mark.asyncio
+async def test_task_rerun_skips_duplicate_user_message(tmp_path, monkeypatch):
+    from app.storage.file_store import FileStore
+
+    data_root = tmp_path / "data"
+    store = FileStore(data_root)
+    monkeypatch.setattr("app.tasks.literature_tasks.get_store", lambda: store)
+
+    session = store.create_session("idem")
+    record = get_task_store().create_task(
+        session_id=session["id"],
+        message="once",
+    )
+    store.append_message(session["id"], "user", "once")
+
+    calls: list[bool] = []
+
+    async def tracked_turn(*_args, persist_user_message=True, **_kwargs):
+        calls.append(persist_user_message)
+        async for ev in _fake_turn():
+            yield ev
+
+    with patch(
+        "app.tasks.literature_tasks.stream_literature_turn",
+        side_effect=tracked_turn,
+    ):
+        registry = get_task_registry()
+        await registry._run(record.id)
+
+        for _ in range(30):
+            row = get_task_store().get_task(record.id)
+            assert row is not None
+            if row.status == "completed":
+                break
+            await asyncio.sleep(0.05)
+
+        msgs = store.load_messages(session["id"])
+        assert sum(1 for m in msgs if m.get("role") == "user") == 1
+        assert calls == [False]

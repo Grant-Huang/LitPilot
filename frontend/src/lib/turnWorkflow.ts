@@ -213,6 +213,65 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
   return null;
 }
 
+const CHAT_INTENTS = new Set(["query_corpus", "clarify", "plan_confirm"]);
+
+export function workflowNeedsChat(intent: string): boolean {
+  return CHAT_INTENTS.has(intent);
+}
+
+export function deriveLiveFieldsFromStream(stream: StreamState): {
+  intent: string;
+  processText: string;
+  chatText: string;
+} {
+  let intent = "new_topic";
+  let processDelta = "";
+  let progressDetail = "";
+  let briefParts = "";
+
+  for (const ext of stream.extensionLog) {
+    const name = ext.payload.name;
+    const data = (ext.payload.data ?? {}) as Record<string, unknown>;
+    if (name === "turn_start" && typeof data.intent === "string") {
+      intent = data.intent;
+      processDelta = "";
+    }
+    if (name === "literature_intent" && typeof data.intent === "string") {
+      intent = data.intent;
+    }
+    if (name === "process_text" && typeof data.delta === "string") {
+      processDelta += data.delta;
+    }
+    if (name === "literature_brief_assessment") {
+      const rq = Array.isArray(data.core_research_questions)
+        ? (data.core_research_questions as string[]).join("；")
+        : "";
+      const kw = Array.isArray(data.keywords)
+        ? (data.keywords as string[]).join("、")
+        : "";
+      const hint =
+        typeof data.search_query_hint === "string" ? data.search_query_hint : "";
+      const parts = [
+        rq ? `RQ：${rq}` : "",
+        kw ? `关键词：${kw}` : "",
+        hint ? `检索 hint：${hint}` : "",
+      ].filter(Boolean);
+      if (parts.length) briefParts = parts.join("\n");
+    }
+    if (name === "literature_progress" && typeof data.detail === "string") {
+      const detail = data.detail.trim();
+      if (detail) progressDetail = detail;
+    }
+  }
+
+  const processText = progressDetail || processDelta || briefParts;
+  const chatText = workflowNeedsChat(intent)
+    ? (stream.textContent ?? "").slice(0, 800)
+    : "";
+
+  return { intent, processText, chatText };
+}
+
 export function buildTurnWorkflowFromStream(
   stream: StreamState,
   opts?: {
@@ -222,15 +281,16 @@ export function buildTurnWorkflowFromStream(
     turnIndex?: number;
   },
 ): TurnWorkflow {
+  const derived = deriveLiveFieldsFromStream(stream);
   const trace = collectExecutionTraceFromStream(stream);
   return buildTurnWorkflowFromTrace(trace, {
     extensions: stream.extensionLog.map((e) => ({
       name: e.payload.name,
       data: (e.payload.data ?? {}) as Record<string, unknown>,
     })),
-    processText: opts?.processText ?? "",
-    chatText: opts?.chatText ?? stream.textContent ?? "",
-    intent: opts?.intent,
+    processText: opts?.processText ?? derived.processText,
+    chatText: opts?.chatText ?? derived.chatText,
+    intent: opts?.intent ?? derived.intent,
     turnIndex: opts?.turnIndex ?? 1,
     streaming: stream.status === "streaming",
   });
@@ -371,12 +431,26 @@ export function buildTurnWorkflowFromTrace(
     (c) => c.type === "clarify" && (c.locked || c.state === "running"),
   );
 
-  const enrichedCards = enrichWorkflowCardSummaries(cards).map((c) => {
+  const summarizeCtx = {
+    trace,
+    extensions: opts.extensions,
+  };
+  const enrichedCards = enrichWorkflowCardSummaries(cards, summarizeCtx).map((c) => {
     if (subTopics?.length && (c.type === "understand" || c.type === "search")) {
       return { ...c, subTopics };
     }
     return c;
   });
+
+  for (const ext of opts.extensions ?? []) {
+    if (ext.name !== "literature_search_merge") continue;
+    const deduped = ext.data.deduped;
+    if (typeof deduped !== "number") continue;
+    const searchCard = enrichedCards.find((c) => c.type === "search");
+    if (searchCard) {
+      searchCard.summary = `纳入 ${deduped} 篇`;
+    }
+  }
 
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")

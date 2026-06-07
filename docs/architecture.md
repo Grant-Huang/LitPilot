@@ -13,7 +13,7 @@
 | `config/agent.json` | 非敏感 Agent 设置 |
 | `sessions/` | 会话索引 + 每会话 `meta.json` / `messages.jsonl` |
 | `refs/ref-list.txt` | APA 引用追加列表 |
-| `refs/index.json` | 文献库结构化索引 |
+| `refs/library.json` | 文献库结构化索引 |
 | `artifacts/{session_id}/` | 生成的综述 Markdown |
 | `pdfs/` | 可选 PDF 缓存 |
 
@@ -25,4 +25,8 @@
 
 ## 设计文档
 
-见 [design/README.md](./design/README.md)（M1–M3、能力参数、多轮精化）。
+见 [design/README.md](./design/README.md)：
+
+- M1–M3 文献管线、多轮精化
+- 检索 / FetchCoordinator、后台任务 SSE
+- 主会话体验（P0–P4）、能力参数

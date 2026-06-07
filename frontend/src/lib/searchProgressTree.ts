@@ -37,6 +37,7 @@ export type SearchProgressSummary = {
   completedTopics: number;
   totalTopics: number;
   merged: boolean;
+  mergedDeduped: number | null;
   allDone: boolean;
 };
 
@@ -126,9 +127,6 @@ function sourceFor(topic: SearchTopicNode, source: string, label?: string): Sear
   return row;
 }
 
-function sumSourceHitsFound(topic: SearchTopicNode): number {
-  return topic.sources.reduce((n, s) => n + (s.hitsFound || 0), 0);
-}
 
 function recountTopic(topic: SearchTopicNode): void {
   topic.sourcesDone = topic.sources.filter(
@@ -142,6 +140,7 @@ export function buildSearchProgressTree(
 ): SearchProgressSummary {
   const map = new Map<string, SearchTopicNode>();
   let merged = false;
+  let mergedDeduped: number | null = null;
   let passTotal = 0;
 
   for (const st of subTopics ?? []) {
@@ -261,9 +260,7 @@ export function buildSearchProgressTree(
             ? data.hits
             : topic.hitsTaken;
       const found =
-        typeof data.hits_found === "number"
-          ? data.hits_found
-          : sumSourceHitsFound(topic) || taken;
+        typeof data.hits_found === "number" ? data.hits_found : taken;
       topic.hitsTaken = taken;
       topic.hitsFound = found;
       topic.hits = taken;
@@ -282,6 +279,7 @@ export function buildSearchProgressTree(
 
     if (ext.name === "literature_search_merge") {
       merged = true;
+      if (typeof data.deduped === "number") mergedDeduped = data.deduped;
       for (const topic of map.values()) {
         topic.status = "done";
       }
@@ -298,6 +296,7 @@ export function buildSearchProgressTree(
     completedTopics,
     totalTopics,
     merged,
+    mergedDeduped,
     allDone,
   };
 }
@@ -310,9 +309,12 @@ export function topicStatusLabel(topic: SearchTopicNode): string {
   const sourcesDone = topic.sourcesDone;
   const sourceTotal = topic.sourceTotal || SOURCE_ORDER.length;
   if (topic.status === "done") {
-    const found = topic.hitsFound || sumSourceHitsFound(topic);
     const taken = topic.hitsTaken ?? topic.hits;
-    return `检索完成 · 搜到 ${found} 篇，取 ${taken} 篇`;
+    const found = topic.hitsFound ?? taken;
+    if (taken > 0 || found > 0) {
+      return `检索完成 · 搜到 ${found} 篇，取 ${taken} 篇`;
+    }
+    return "检索完成";
   }
   if (topic.status === "running") {
     return `检索中 · ${sourcesDone}/${sourceTotal} 源`;

@@ -73,12 +73,23 @@ export function LitPilotAppShell({ children }: Props) {
   }, [isChat]);
 
   const prevHasArtifact = useRef(false);
+  const [artifactNudge, setArtifactNudge] = useState(false);
   useEffect(() => {
     if (hasArtifact && !prevHasArtifact.current) {
       setArtifactVisible(true);
     }
     prevHasArtifact.current = hasArtifact;
   }, [hasArtifact]);
+
+  useEffect(() => {
+    if (!isChat || !hasArtifact || artifactVisible) {
+      setArtifactNudge(false);
+      return;
+    }
+    setArtifactNudge(true);
+    const t = window.setTimeout(() => setArtifactNudge(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [isChat, hasArtifact, artifactVisible]);
 
   useEffect(() => {
     if (!isChat) return;
@@ -153,6 +164,7 @@ export function LitPilotAppShell({ children }: Props) {
     "litpilot-branded",
     isNavigating ? "litpilot-layout--nav-pending" : "",
     isChat && artifactVisible ? "litpilot-layout--artifact-open" : "",
+    isChat && artifactNudge ? "litpilot-layout--artifact-nudge" : "",
     isChat && chatBridge?.literatureDetailOpen
       ? "litpilot-layout--literature-detail"
       : "",

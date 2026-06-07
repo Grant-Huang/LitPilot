@@ -36,7 +36,7 @@ export function TurnCompletionBar({
           className="litpilot-turn-complete__cta"
           onClick={onOpenArtifact}
         >
-          {summary.stats.hasReview ? "打开综述面板" : "打开右侧面板"}
+          {summary.stats.hasReview ? "综述已生成 → 打开右侧面板" : "打开右侧面板"}
         </button>
       ) : null}
     </div>

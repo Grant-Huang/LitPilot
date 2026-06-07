@@ -372,7 +372,7 @@ export const techStackPage: HelpPage = {
 | **Tailwind CSS** | 补充样式 |
 | **Vitest** | 单元测试 |
 
-SSE 经 \`frontend/src/app/api/chat/literature/execute/route.ts\` **流式透传** 至后端，避免 Next.js rewrite 缓冲。
+文献流经 **Task API**：\`POST /api/tasks\` 创建任务，\`GET /api/tasks/{id}/stream\` 订阅 SSE（支持断线重放）。直连 \`/api/chat/literature/execute\` 已废弃。
 
 ## 后端
 

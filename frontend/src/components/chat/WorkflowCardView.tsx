@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SearchProgressView } from "./SearchProgressView";
 import { SubtopicListView } from "./SubtopicListView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
@@ -67,22 +67,30 @@ export function WorkflowCardView({
   const locked = card.locked || card.type === "clarify";
   const isRunning = card.state === "running";
   const [manualOpen, setManualOpen] = useState(false);
-  const open = forceOpen || locked || isRunning || defaultOpen || manualOpen;
+
+  useEffect(() => {
+    if (!streaming) setManualOpen(false);
+  }, [streaming]);
+
+  const open =
+    forceOpen ||
+    locked ||
+    isRunning ||
+    (streaming && defaultOpen) ||
+    manualOpen;
   const canToggle = !locked && !isRunning && card.state === "done";
 
-  const cardSummary = useMemo(() => summarizeWorkflowCard(card), [card]);
+  const cardSummary = useMemo(
+    () => summarizeWorkflowCard(card, { trace, extensions }),
+    [card, trace, extensions],
+  );
 
   const visibleSteps = useMemo(
     () => filterVisibleWorkflowSteps(card.steps),
     [card.steps],
   );
 
-  const statusLabel =
-    card.state === "running"
-      ? "进行中"
-      : card.state === "error"
-        ? "失败"
-        : null;
+  const statusLabel = isRunning && open ? "进行中" : null;
 
   const marker = cardHeadMarker(card, open, isRunning);
 
@@ -125,6 +133,7 @@ export function WorkflowCardView({
           (card.type === "understand" || card.type === "brief") ? (
             <LitPilotThinkFold
               content={trace.thinkContent}
+              collapsed={!(streaming && isRunning)}
               streaming={streaming && isRunning}
             />
           ) : null}

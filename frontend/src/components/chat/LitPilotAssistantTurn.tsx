@@ -45,7 +45,6 @@ export function LitPilotAssistantTurn({ message }: Props) {
         <TurnWorkflowBlock
           workflow={workflow}
           trace={trace}
-          defaultCollapsed
           hasArtifact={Boolean(bridge?.hasArtifact || extras?.artifactKind)}
           chatText={message.content}
         />

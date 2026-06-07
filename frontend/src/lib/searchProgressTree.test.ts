@@ -126,4 +126,31 @@ describe("buildSearchProgressTree", () => {
     const tree = buildSearchProgressTree(extensions);
     expect(topicStatusLabel(tree.topics[0]!)).toBe("检索中 · 1/5 源");
   });
+
+  it("uses merge deduped for aggregate, not sum of source hits", () => {
+    const extensions = [
+      {
+        name: "literature_search_plan",
+        data: { queries: ["q1"], total_passes: 1 },
+      },
+      {
+        name: "literature_search_pass_done",
+        data: {
+          pass_index: 1,
+          pass_total: 1,
+          hits_taken: 5,
+          hits_found: 25,
+        },
+      },
+      {
+        name: "literature_search_merge",
+        data: { deduped: 5, raw_total: 25 },
+      },
+    ];
+    const tree = buildSearchProgressTree(extensions);
+    expect(tree.mergedDeduped).toBe(5);
+    expect(topicStatusLabel(tree.topics[0]!)).toBe(
+      "检索完成 · 搜到 25 篇，取 5 篇",
+    );
+  });
 });

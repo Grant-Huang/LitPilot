@@ -2,9 +2,19 @@
 
 ## 混合编排模型
 
-- **骨架固定**：fetch → cite → attributes → outline → 章节×N → refine → deliver
+- **骨架固定**：search → **relevance_filter** → fetch → cite → attributes → outline → 章节×N → refine → deliver
+- **检索 / 抓取**：`FetchCoordinator` + 多主题 `by_source` 并行（见 [retrieval-fetch.md](./retrieval-fetch.md)）
 - **章节动态**：按大纲 `sections` 展开 workflow 节点
 - **`outline_mode=off`**：回退 4 节点 legacy + 一次性生成
+- **执行载体**：后台 Task + SSE 流（见 [task-streaming.md](./task-streaming.md)）
+
+## 相关性筛选（relevance_filter）
+
+检索 merge 之后、抓取之前，对命中列表做 LLM 相关性筛选（无设置开关，始终执行）。
+
+- 模块：`app/agents/relevance_filter.py` · `stream_relevance_filter_phase`（`literature_phases.py`）
+- SSE：`literature_relevance_filter` extension
+- 前端：Workflow 卡片「文献检索」阶段内展示筛选进度
 
 ## M1 · 文献结构化（AttributeTree lite）
 
@@ -20,7 +30,7 @@
 
 ### 分主题检索
 
-≥2 子主题时：**每子主题一轮 web_search**，URL 去重合并（优先于 query expansion）。
+≥2 子主题时：**每子主题一轮检索**（`multi_academic` 时按源并行、同源串行），URL 去重合并（优先于 query expansion）。计划事件：`literature_search_plan`（`parallel_mode=by_source`）。
 
 ### mount
 
@@ -53,6 +63,11 @@ Monolithic 路径：整篇 revise 注入上一版 excerpt（6000 字）。
 |------|------|
 | 编排入口 | `app/agents/literature_turn.py` |
 | 检索管线 | `app/agents/literature_turn_pipeline.py` |
+| 统一抓取 | `app/agents/fetch_coordinator.py` |
+| 检索阶段 | `app/agents/literature_phases.py` |
+| 相关性筛选 | `app/agents/relevance_filter.py` |
+| 进度 heartbeat | `app/agents/literature_progress.py` |
+| 后台任务 | `app/tasks/literature_tasks.py` · `app/tasks/task_store.py` |
 | 生成与交付 | `app/agents/literature_turn_generate.py` |
 | 回合收尾 | `app/agents/literature_turn_finalize.py` + `literature_turn_context.py` |
 | 工作流图 SSE | `app/agents/literature_turn_graph.py` |

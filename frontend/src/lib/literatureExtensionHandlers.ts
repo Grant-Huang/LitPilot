@@ -1,4 +1,3 @@
-import { formatLiteratureIntentLabel } from "@/lib/literatureIntent";
 import { toastWarning } from "@/lib/toastFeedback";
 
 type ExtensionData = Record<string, unknown> | undefined;
@@ -41,9 +40,6 @@ export function handleLiteratureExtensionEvent(
   data: ExtensionData,
   ctx: HandlerContext,
 ): void {
-  if (name === "literature_intent" && typeof data?.intent === "string") {
-    void formatLiteratureIntentLabel(data.intent);
-  }
   const handler = HANDLERS[name];
   if (handler) handler(data, ctx);
 }

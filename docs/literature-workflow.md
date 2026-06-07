@@ -8,10 +8,12 @@ router → search (web_search，可跳过) → fetch (web_fetch 并行) → cite
 
 | 模式 | 有用户 URL 列表时 | 无用户 URL 时 |
 |------|------------------|---------------|
-| `merge`（默认） | web_search 检索 + **用户链接优先**合并去重后 `web_fetch` | 仅 web_search |
+| `merge`（默认） | web_search 检索 + **用户链接与检索命中共享 FetchCoordinator**（用户链立即开抓） | 仅 web_search |
 | `user_only` | **跳过 web_search**，只抓取用户 URL | 仍执行 web_search（未强制要求上传） |
 
 用户 URL 通过聊天输入框「+」上传 `.txt` / `.csv` / `.json`，请求体字段 `fetch_urls`。
+
+设计细节：[design/retrieval-fetch.md](./design/retrieval-fetch.md)。
 
 ## 检索与抓取设置
 
@@ -43,7 +45,9 @@ cite 之后、generate 之前（`enable_paper_attributes`，默认开）：
 
 1. 由编排 LLM（或规则回退）生成 2–4 条检索式
 2. 分轮 web_search 检索，按 URL 去重合并，总量不超过 `search_max_results`
-3. SSE：`literature_search_plan`、`literature_search_merge`
+3. SSE：`literature_search_plan`、`literature_search_merge` 等（完整列表见 [design/retrieval-fetch.md](./design/retrieval-fetch.md)）
+
+多 aspect brief + `multi_academic`：检索按 **搜索源并行、同源串行**（`parallel_mode=by_source`），避免 Semantic Scholar 等限流。
 
 ## 大纲驱动分章写作（M2）
 
@@ -156,20 +160,26 @@ SSE：`literature_refine_report`
 | F | 引用抽取后 | | ✓ |
 | G | 综述生成前 | | ✓ |
 
-## Meso SSE
+## Meso SSE（后台 Task）
 
-后端 `app/core/streaming.py` 输出 Meso v1.0 envelope；前端 `useSSEStream('/api/chat/literature/execute')`。
+后端 `app/core/streaming.py` 输出 Meso v1.0 envelope；前端经 **Task API** 订阅流：
+
+1. `POST /api/tasks` — 创建任务（含 `literature_source_mode`、可选 `fetch_urls`）
+2. `GET /api/tasks/{id}/stream?since=N` — SSE 推送并支持断线重放
 
 执行过程中会推送：
 - `stage` — 阶段时间线（理解问题 / 检索 / 抓取 / 引用 / 生成）
 - `think` — **Planner 模型流式解说**（默认 lite：理解 / 检索后 / 抓取后）；极短系统注记以 `⟦sys⟧…⟦/sys⟧` 标记并灰色展示
 - `tool_call` / `tool_result` — web_search、引用抽取等
-- `workflow_node` — 右侧 DAG 节点状态（配合初始 `workflow-graph` artifact）
-- `text` — 综述正文流式增量
+- `extension` — LitPilot 扩展（`turn_start`、`literature_progress`、`literature_search_*` 等）
+- `text` — 综述正文流式增量（`delivery=chat` / `process`）
+- `artifact` — 输出物（`markdown` 综述、`literature-matrix+markdown`、大纲 JSON）
 
-右侧 Artifact 在收到 `workflow_node` 后即可展示实时 DAG（`mergeWorkflowRunsIntoGraph`）。
+**主聊天区**以 Workflow 卡片展示执行过程；**右侧 Artifact** 仅展示输出物（综述 / 矩阵 / 大纲 / 文献列表），不展示 SVG DAG 或步骤列表。`workflow-graph` 不入主窗。
 
-关键事件：`stage`、`tool_call`、`workflow_node`、`artifact`（`workflow-graph` / `markdown`）、`text`、`literature_intent`、`done`。
+直连 `POST /api/chat/literature/execute` 已废弃（410），统一走 Task API。详见 [design/task-streaming.md](./design/task-streaming.md)。
+
+关键事件：`stage`、`tool_call`、`extension`、`artifact`（`markdown` / 矩阵 / 大纲）、`text`、`literature_intent`、`done`。
 
 ## 续聊意图（P0–P2）
 

@@ -35,6 +35,8 @@ export type ExecutionTrace = {
   tools: SerializedToolStep[];
   workflows: SerializedWorkflowStep[];
   thinkContent?: string;
+  literatureStats?: Record<string, unknown>;
+  weakSubtopics?: Array<{ passIndex: number; title: string; hitsTaken: number }>;
 };
 
 /** 将 msg_meta.think 合并进 execution_trace，供历史消息展示思考过程。 */

@@ -1,4 +1,9 @@
 import type { ExecutionTrace } from "@/lib/executionTrace";
+import {
+  formatWeakSubtopicBrief,
+  weakSubtopicsFromExtensions,
+  weakSubtopicsFromTrace,
+} from "@/lib/subtopicWeakHints";
 import type { TurnWorkflow, WorkflowCard } from "@/lib/turnWorkflow";
 import { humanizeDurationMs } from "@/lib/toolLabels";
 
@@ -33,6 +38,26 @@ function countFetchTools(trace: ExecutionTrace | undefined): {
   return { ok, failed };
 }
 
+function mergedHitsFromTrace(trace: ExecutionTrace | undefined): number | null {
+  const merged = trace?.literatureStats?.searchMerged;
+  return typeof merged === "number" ? merged : null;
+}
+
+function mergedHitsFromWorkflow(workflow: TurnWorkflow): number | null {
+  for (const card of workflow.cards) {
+    if (card.type !== "search") continue;
+    if (card.summary?.trim()) {
+      const fromSummary = /纳入\s+(\d+)\s+篇/.exec(card.summary);
+      if (fromSummary) return parseInt(fromSummary[1], 10);
+    }
+    for (const step of card.steps) {
+      const fromStep = /去重\s+(\d+)/.exec(step.title);
+      if (fromStep) return parseInt(fromStep[1], 10);
+    }
+  }
+  return null;
+}
+
 function mergedHitsFromExtensions(
   extensions: Array<{ name: string; data: Record<string, unknown> }>,
 ): number | null {
@@ -51,43 +76,79 @@ function searchPassCount(trace: ExecutionTrace | undefined): number {
     .length;
 }
 
-export function summarizeWorkflowCard(card: WorkflowCard): string {
+export type SummarizeCardContext = {
+  trace?: ExecutionTrace;
+  extensions?: Array<{ name: string; data: Record<string, unknown> }>;
+};
+
+function relevanceHintFromExtensions(
+  extensions: Array<{ name: string; data: Record<string, unknown> }>,
+): string | null {
+  for (const ext of extensions) {
+    if (ext.name !== "literature_relevance_filter") continue;
+    if (ext.data.query_warning === true) {
+      return "部分检索式命中偏少，可补充关键词或使用 expand_search 扩检。";
+    }
+  }
+  return null;
+}
+
+export function summarizeWorkflowCard(
+  card: WorkflowCard,
+  ctx?: SummarizeCardContext,
+): string {
   if (card.summary?.trim()) return card.summary.trim();
+  if (card.state === "error") return "失败";
   const toolDone = card.steps.filter(
     (s) => s.kind === "tool" && s.status === "done",
   ).length;
   const toolErr = card.steps.filter(
     (s) => s.kind === "tool" && s.status === "error",
   ).length;
+  const merged =
+    ctx?.extensions != null
+      ? mergedHitsFromExtensions(ctx.extensions)
+      : null;
+  const fetchCounts = countFetchTools(ctx?.trace);
 
   if (card.type === "search") {
+    if (merged != null) return `纳入 ${merged} 篇`;
     const merge = card.steps.find((s) => s.title.includes("去重"));
     if (merge) {
       const m = /去重\s+(\d+)/.exec(merge.title);
       if (m) return `纳入 ${m[1]} 篇`;
     }
+    const passes = searchPassCount(ctx?.trace);
+    if (passes > 0) return `${passes} 轮检索`;
     if (toolDone) return `${toolDone} 轮检索`;
   }
   if (card.type === "fetch") {
+    if (fetchCounts.ok > 0 || fetchCounts.failed > 0) {
+      return fetchCounts.failed
+        ? `${fetchCounts.ok} 篇 · ${fetchCounts.failed} 失败`
+        : `${fetchCounts.ok} 篇`;
+    }
     if (toolDone || toolErr) {
       return toolErr ? `${toolDone} 篇 · ${toolErr} 失败` : `${toolDone} 篇`;
     }
     const queue = card.steps.find((s) => s.title.includes("抓取队列"));
     if (queue) return queue.title.replace("抓取队列 ", "");
   }
-  if (card.type === "generate") return "已完成";
+  if (card.type === "generate") {
+    const hasMatrix = ctx?.trace?.stages.some((s) => s.name.includes("矩阵"));
+    return hasMatrix ? "矩阵已生成" : "综述已生成";
+  }
+  if (card.type === "matrix") return "矩阵已生成";
   if (card.type === "brief" && card.body) {
     const first = card.body.split(/\r?\n/).find((l) => l.trim());
     return first ? first.slice(0, 48) : "已完成";
   }
   if (card.type === "understand" && card.subTopics?.length) {
-    const titles = card.subTopics
-      .map((st) => (st.title ?? "").trim())
-      .filter(Boolean);
-    if (titles.length) {
-      const preview = titles.slice(0, 2).join("、");
-      return titles.length > 2 ? `${preview} 等 ${titles.length} 个子主题` : preview;
-    }
+    const n = card.subTopics.length;
+    return `${n} 个子主题`;
+  }
+  if (card.type === "brief" && card.subTopics?.length) {
+    return `${card.subTopics.length} 个子主题`;
   }
   if (toolDone) return `${toolDone} 步`;
   return "已完成";
@@ -106,7 +167,10 @@ export function buildTurnCompletionSummary(
 ): TurnCompletionSummary {
   const extensions = opts?.extensions ?? [];
   const fetch = countFetchTools(opts?.trace);
-  const merged = mergedHitsFromExtensions(extensions);
+  const merged =
+    mergedHitsFromExtensions(extensions) ??
+    mergedHitsFromTrace(opts?.trace) ??
+    mergedHitsFromWorkflow(workflow);
   const searchPasses = searchPassCount(opts?.trace);
   const hasReview = Boolean(opts?.hasReview);
   const hasMatrix = Boolean(opts?.hasMatrix);
@@ -146,13 +210,30 @@ export function buildTurnCompletionSummary(
     brief = `检索与抓取已完成，共纳入 ${merged} 篇，可继续追问或补充链接。`;
   }
 
+  const relevanceHint = relevanceHintFromExtensions(extensions);
+  if (relevanceHint && !brief.includes(relevanceHint)) {
+    brief = brief ? `${brief} ${relevanceHint}` : relevanceHint;
+  }
+
+  let weakHints = weakSubtopicsFromExtensions(extensions);
+  if (!weakHints.length) {
+    weakHints = weakSubtopicsFromTrace(opts?.trace);
+  }
+  const weakBrief = formatWeakSubtopicBrief(weakHints);
+  if (weakBrief && !brief.includes(weakBrief)) {
+    brief = brief ? `${brief} ${weakBrief}` : weakBrief;
+  }
+
   return { headline, stats, brief };
 }
 
-export function enrichWorkflowCardSummaries(cards: WorkflowCard[]): WorkflowCard[] {
+export function enrichWorkflowCardSummaries(
+  cards: WorkflowCard[],
+  ctx?: SummarizeCardContext,
+): WorkflowCard[] {
   return cards.map((c) => ({
     ...c,
-    summary: summarizeWorkflowCard(c),
+    summary: summarizeWorkflowCard(c, ctx),
   }));
 }
 

@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { message } from "antd";
 import { createInitialStreamState } from "@meso.ai/ui/runtime";
 import { LitPilotBrandLockup } from "@/components/brand/LitPilotBrandLockup";
 import { LitPilotComposer } from "@/components/chat/LitPilotComposer";
 import { LitPilotMessageList } from "@/components/chat/LitPilotMessageList";
 import { LitPilotScrollToBottom } from "@/components/chat/LitPilotScrollToBottom";
 import { useStreamActivity } from "@/hooks/useStreamActivity";
-import { formatStreamActivityHint } from "@/lib/streamActivity";
+import {
+  formatStreamActivityHint,
+  formatParallelismChips,
+} from "@/lib/streamActivity";
 import { useChatLayoutBridge } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { useLiteratureStream } from "@/contexts/LiteratureStreamContext";
@@ -21,9 +23,10 @@ import {
 } from "@/lib/buildArtifactStream";
 import { cloneStreamState } from "@/lib/streamState";
 import { loadLibraryItems } from "@/lib/loadLibraryItems";
+import { isLiteratureStreamActive } from "@/lib/literatureStreamPhase";
 import { LitPilotArtifactSlot } from "./LitPilotArtifactSlot";
 import { stripWorkflowArtifacts } from "./stripWorkflowArtifacts";
-import { sessionsApi, type ChatMessage } from "@/lib/api";
+import { sessionsApi } from "@/lib/api";
 import type { LibraryItem } from "@/lib/libraryTypes";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
 
@@ -33,23 +36,19 @@ export function LitPilotChatPage() {
   const {
     streamState,
     liveMessages,
-    streaming,
-    streamPending,
-    streamSettling,
-    liveIntent,
-    liveProcessText,
-    liveChatText,
+    streamPhase,
+    isStreamBusy,
     send: sendStream,
     stop,
   } = useLiteratureStream();
 
-  const streamActivity = useStreamActivity(
-    streamState,
-    streaming || streamPending,
-  );
+  const streamActivity = useStreamActivity(streamState, isStreamBusy);
   const streamActivityHint = streamActivity
     ? formatStreamActivityHint(streamActivity)
     : null;
+  const streamParallelismChips = streamActivity
+    ? formatParallelismChips(streamActivity.parallelism)
+    : [];
 
   const [input, setInput] = useState("");
   const [fetchUrls, setFetchUrls] = useState<string[]>([]);
@@ -93,10 +92,7 @@ export function LitPilotChatPage() {
     setLibraryItems(await loadLibraryItems());
   }, []);
 
-  const streamDone = streamState.status === "done";
-  const streamError = streamState.status === "error";
-  const activeStreaming =
-    streaming || streamDone || streamError || streamSettling;
+  const activeStreaming = isLiteratureStreamActive(streamPhase);
 
   const pendingStreamState = useMemo(() => {
     const base = createInitialStreamState();
@@ -104,9 +100,9 @@ export function LitPilotChatPage() {
   }, []);
 
   const liveStreaming =
-    streaming && !streamSettling
+    streamPhase === "streaming"
       ? stripWorkflowArtifacts(streamState)
-      : streamPending
+      : streamPhase === "pending"
         ? pendingStreamState
         : undefined;
 
@@ -241,11 +237,11 @@ export function LitPilotChatPage() {
   }, [loadLibrary]);
 
   useEffect(() => {
-    if (streamDone || streamError) {
+    if (streamPhase === "done" || streamPhase === "error") {
       void loadLibrary();
       if (activeSessionId) void loadSessionArtifacts(activeSessionId);
     }
-  }, [streamDone, streamError, loadLibrary, activeSessionId, loadSessionArtifacts]);
+  }, [streamPhase, loadLibrary, activeSessionId, loadSessionArtifacts]);
 
   const historyMessages: LitPilotMessage[] = useMemo(() => {
     return [...chatMessagesToLitPilot(storedMessages), ...liveMessages];
@@ -253,12 +249,12 @@ export function LitPilotChatPage() {
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text || isStreamBusy) return;
     setInput("");
     const urlsToSend = fetchUrls;
     setFetchUrls([]);
     await sendStream(text, urlsToSend, literatureSourceMode);
-  }, [input, fetchUrls, streaming, sendStream, literatureSourceMode]);
+  }, [input, fetchUrls, isStreamBusy, sendStream, literatureSourceMode]);
 
   return (
     <div className="litpilot-chat-pane">
@@ -267,15 +263,12 @@ export function LitPilotChatPage() {
           <LitPilotMessageList
             messages={historyMessages}
             streaming={liveStreaming}
-            liveIntent={liveIntent}
-            liveProcessText={liveProcessText}
-            liveChatText={liveChatText}
             hasArtifact={hasArtifactPane}
             scrollContainerRef={chatScrollRef}
             scrollResetKey={activeSessionId}
             emptyStateAlign="top"
             emptyState={
-              historyMessages.length === 0 && !streaming && !streamSettling ? (
+              historyMessages.length === 0 && streamPhase === "idle" ? (
                 <div className="litpilot-chat-welcome">
                   <LitPilotBrandLockup
                     markSize={40}
@@ -300,10 +293,11 @@ export function LitPilotChatPage() {
           maxFetchUrls={maxFetchUrls}
           literatureSourceMode={literatureSourceMode}
           onLiteratureSourceModeChange={setLiteratureSourceMode}
-          streaming={streaming || streamPending}
-          streamPending={streamPending}
+          streamPhase={streamPhase}
+          isStreamBusy={isStreamBusy}
           streamActivityHint={streamActivityHint}
           streamActivityLevel={streamActivity?.level ?? null}
+          streamParallelismChips={streamParallelismChips}
           onSend={() => void send()}
           onAbort={() => void stop()}
         />

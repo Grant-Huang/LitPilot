@@ -8,6 +8,7 @@ import {
   PlusOutlined,
 } from "@ant-design/icons";
 import { parseUrlListFile } from "@/lib/parseUrlList";
+import type { LiteratureStreamPhase } from "@/lib/literatureStreamPhase";
 
 const { TextArea } = Input;
 
@@ -22,10 +23,11 @@ type LitPilotComposerProps = {
   maxFetchUrls?: number;
   literatureSourceMode?: LiteratureSourceMode;
   onLiteratureSourceModeChange?: (mode: LiteratureSourceMode) => void;
-  streaming: boolean;
-  streamPending?: boolean;
+  streamPhase: LiteratureStreamPhase;
+  isStreamBusy: boolean;
   streamActivityHint?: string | null;
   streamActivityLevel?: "active" | "waiting" | "slow" | null;
+  streamParallelismChips?: string[];
   onSend: () => void;
   onAbort: () => void;
 };
@@ -38,10 +40,11 @@ export function LitPilotComposer({
   maxFetchUrls = 50,
   literatureSourceMode = "merge",
   onLiteratureSourceModeChange,
-  streaming,
-  streamPending = false,
+  streamPhase,
+  isStreamBusy,
   streamActivityHint = null,
   streamActivityLevel = null,
+  streamParallelismChips = [],
   onSend,
   onAbort,
 }: LitPilotComposerProps) {
@@ -81,8 +84,7 @@ export function LitPilotComposer({
     [handleFile],
   );
 
-  const isBusy = streaming || streamPending;
-  const canSend = Boolean(input.trim()) && !isBusy;
+  const canSend = Boolean(input.trim()) && !isStreamBusy;
 
   return (
     <div className="litpilot-composer">
@@ -98,7 +100,7 @@ export function LitPilotComposer({
                       ? " litpilot-composer__chip--active"
                       : ""
                   }`}
-                  disabled={isBusy}
+                  disabled={isStreamBusy}
                   aria-pressed={literatureSourceMode === "merge"}
                   onClick={() => onLiteratureSourceModeChange?.("merge")}
                 >
@@ -119,7 +121,7 @@ export function LitPilotComposer({
                       ? " litpilot-composer__chip--active"
                       : ""
                   }`}
-                  disabled={isBusy}
+                  disabled={isStreamBusy}
                   aria-pressed={literatureSourceMode === "user_only"}
                   onClick={() => onLiteratureSourceModeChange?.("user_only")}
                 >
@@ -127,6 +129,22 @@ export function LitPilotComposer({
                 </button>
               </Tooltip>
             </div>
+            {isStreamBusy && streamParallelismChips.length > 0 ? (
+              <div
+                className="litpilot-composer__readonly-chips"
+                aria-label="当前并行度"
+              >
+                {streamParallelismChips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="litpilot-composer__chip litpilot-composer__chip--readonly"
+                    title="当前任务并行度（只读）"
+                  >
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {fetchUrls.length > 0 ? (
               <Tag
                 closable
@@ -150,7 +168,7 @@ export function LitPilotComposer({
                 if (canSend) onSend();
               }
             }}
-            disabled={isBusy}
+            disabled={isStreamBusy}
           />
           <div className="litpilot-composer__bar">
             <Tooltip
@@ -159,7 +177,7 @@ export function LitPilotComposer({
               <button
                 type="button"
                 className="litpilot-composer__attach"
-                disabled={isBusy}
+                disabled={isStreamBusy}
                 aria-label="上传链接列表"
                 onClick={() => fileRef.current?.click()}
               >
@@ -180,16 +198,16 @@ export function LitPilotComposer({
                   : ""
               }`}
             >
-              {isBusy
+              {isStreamBusy
                 ? streamActivityHint ||
-                  (streamPending && !streaming
+                  (streamPhase === "pending"
                     ? "准备中…"
                     : streamActivityLevel === "slow"
                       ? `仍在执行（已等待较久，可停止后重试）`
                       : "执行中…")
                 : "Enter 发送 · Shift+Enter 换行"}
             </span>
-            {isBusy ? (
+            {isStreamBusy ? (
               <button
                 type="button"
                 className="litpilot-composer__stop"

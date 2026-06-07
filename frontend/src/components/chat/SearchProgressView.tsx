@@ -146,7 +146,9 @@ export function SearchProgressView({
   const aggregatePending =
     streaming && !summary.allDone && summary.completedTopics < summary.totalTopics;
   const aggregateLabel = summary.allDone
-    ? `检索完成 · ${summary.completedTopics}/${summary.totalTopics} 主题`
+    ? summary.mergedDeduped != null
+      ? `检索完成 · ${summary.completedTopics}/${summary.totalTopics} 主题 · 纳入 ${summary.mergedDeduped} 篇`
+      : `检索完成 · ${summary.completedTopics}/${summary.totalTopics} 主题`
     : aggregatePending
       ? `检索中 · ${summary.completedTopics}/${summary.totalTopics} 主题`
       : null;

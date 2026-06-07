@@ -13,7 +13,6 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { toastError } from "@/lib/toastFeedback";
 import { useBatchedSSEStream } from "@/hooks/useBatchedSSEStream";
-import { useThrottledRAFState } from "@/hooks/useThrottledRAFState";
 import { useChatSession } from "@/contexts/ChatSessionContext";
 import { useLiteratureTask } from "@/contexts/LiteratureTaskContext";
 import type { LitPilotMessage } from "@/lib/chatTypes";
@@ -21,11 +20,13 @@ import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
 import { materializeAssistantFromStream } from "@/lib/streamMaterialize";
 import { persistActiveSession } from "@/lib/sessionStorage";
+import { deriveLiveFieldsFromStream } from "@/lib/turnWorkflow";
 import {
-  ASSISTANT_RELOAD_ATTEMPTS,
-  ASSISTANT_RELOAD_BASE_MS,
-  sessionHasAssistantReply,
-} from "@/lib/streamTurnFinalize";
+  computeLiteratureStreamPhase,
+  isLiteratureStreamBusy,
+  type LiteratureStreamPhase,
+} from "@/lib/literatureStreamPhase";
+import { sessionHasAssistantReply } from "@/lib/streamTurnFinalize";
 import { sessionsApi } from "@/lib/api";
 import { tasksApi } from "@/lib/tasksApi";
 import { clearClarificationUnreadTitle } from "@/lib/clarificationTitle";
@@ -38,23 +39,18 @@ import {
 type LiteratureStreamContextValue = {
   streamState: ReturnType<typeof useBatchedSSEStream>["state"];
   liveMessages: LitPilotMessage[];
-  streaming: boolean;
-  streamPending: boolean;
-  streamSettling: boolean;
-  liveIntent: string;
-  liveProcessText: string;
-  liveChatText: string;
-  send: (text: string, fetchUrls: string[], sourceMode?: "merge" | "user_only") => Promise<void>;
+  streamPhase: LiteratureStreamPhase;
+  isStreamBusy: boolean;
+  send: (
+    text: string,
+    fetchUrls: string[],
+    sourceMode?: "merge" | "user_only",
+  ) => Promise<void>;
   stop: () => Promise<void>;
-  resetStreamUi: () => void;
 };
 
 const LiteratureStreamContext =
   createContext<LiteratureStreamContextValue | null>(null);
-
-function workflowNeedsChat(intent: string): boolean {
-  return intent === "query_corpus" || intent === "clarify" || intent === "plan_confirm";
-}
 
 function taskStreamUrl(taskId: string, since: number): string {
   return `/api/tasks/${encodeURIComponent(taskId)}/stream?since=${since}`;
@@ -67,7 +63,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     activeSessionId,
     messages: storedMessages,
     loadSessions,
-    handleSelectSession,
     reloadSessionMessages,
     setActiveSessionId,
     clearMessages,
@@ -85,19 +80,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     "/api/tasks/idle/stream",
   );
 
-  const {
-    state: liveTextState,
-    update: updateLiveText,
-    commitNow: commitLiveText,
-  } = useThrottledRAFState({
-    liveIntent: "new_topic",
-    liveProcessText: "",
-    liveChatText: "",
-  });
-  const liveIntent = liveTextState.liveIntent;
-  const liveProcessText = liveTextState.liveProcessText;
-  const liveChatText = liveTextState.liveChatText;
-
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
   const [streamPending, setStreamPending] = useState(false);
   const [streamSettling, setStreamSettling] = useState(false);
@@ -113,6 +95,17 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   const reconnectingRef = useRef(false);
   const stopMaterializedRef = useRef(false);
 
+  const streamPhase = useMemo(
+    () =>
+      computeLiteratureStreamPhase(
+        streamState.status,
+        streamPending,
+        streamSettling,
+      ),
+    [streamState.status, streamPending, streamSettling],
+  );
+  const isStreamBusy = isLiteratureStreamBusy(streamPhase);
+
   const resetStreamLocalState = useCallback(
     (sessionId: string | null = activeSessionId) => {
       streamStartedRef.current = false;
@@ -125,13 +118,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       setStreamSettling(false);
       setStreamPending(false);
       setLiveMessages([]);
-      commitLiveText({
-        liveIntent: "new_topic",
-        liveProcessText: "",
-        liveChatText: "",
-      });
     },
-    [activeSessionId, commitLiveText],
+    [activeSessionId],
   );
 
   const connectTaskStream = useCallback(
@@ -150,12 +138,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           registerEventSeq(since + index);
         },
       });
-      void refreshFromServer();
     },
-    [registerEventSeq, refreshFromServer, start],
+    [registerEventSeq, start],
   );
 
-  const streaming = streamState.status === "streaming";
   const streamDone = streamState.status === "done";
   const streamError = streamState.status === "error";
 
@@ -166,23 +152,22 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   }, [streamState.status]);
 
   useEffect(() => {
-    if (streamState.status === "error" || streamState.status === "done") {
-      setStreamPending(false);
-      void refreshFromServer();
-    }
-  }, [streamState.status, refreshFromServer]);
-
-  useEffect(() => {
     const prev = prevActiveSessionRef.current;
     prevActiveSessionRef.current = activeSessionId;
     if (prev === activeSessionId) return;
 
-    if (streaming) {
+    if (streamPhase === "streaming") {
       abort();
     }
     reset();
     resetStreamLocalState(activeSessionId);
-  }, [activeSessionId, streaming, abort, reset, resetStreamLocalState]);
+  }, [
+    activeSessionId,
+    streamPhase,
+    abort,
+    reset,
+    resetStreamLocalState,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -192,12 +177,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (isChat) return;
-    if (streamState.status === "streaming") {
+    if (streamPhase === "streaming") {
       abort();
     }
-  }, [isChat, streamState.status, abort]);
+  }, [isChat, streamPhase, abort]);
 
-  // Entering /chat: refresh task snapshot and reload the selected session only.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -224,11 +208,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       resetStreamLocalState(activeSessionId);
     } else {
       pendingUserTextRef.current = null;
-      commitLiveText({
-        liveIntent: "new_topic",
-        liveProcessText: "",
-        liveChatText: "",
-      });
       stopMaterializedRef.current = false;
     }
     clearTask();
@@ -239,7 +218,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     resetStreamLocalState,
     activeSessionId,
     clearTask,
-    commitLiveText,
   ]);
 
   useEffect(() => {
@@ -248,24 +226,22 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
     if (
       isTerminalTaskStatus(activeTask.status) &&
-      !streaming &&
-      !streamSettling
+      streamPhase === "idle"
     ) {
-      void (async () => {
-        await loadSessions();
-        await handleSelectSession(activeTask.sessionId);
-      })();
+      void reloadSessionMessages(activeTask.sessionId);
       return;
     }
 
     if (!isRunningTaskStatus(activeTask.status)) return;
-    if (streaming || reconnectingRef.current) return;
-    if (connectedTaskIdRef.current === activeTask.taskId && streamStartedRef.current) {
+    if (streamPhase === "streaming" || reconnectingRef.current) return;
+    if (
+      connectedTaskIdRef.current === activeTask.taskId &&
+      streamStartedRef.current
+    ) {
       return;
     }
 
     reconnectingRef.current = true;
-    // Full replay rebuilds stream UI after leaving /chat (provider remounts with empty state).
     void connectTaskStream(activeTask.taskId, 0, false)
       .catch((e: unknown) => {
         if (e instanceof Error && e.name === "AbortError") return;
@@ -279,11 +255,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     isChat,
     activeTask,
     activeSessionId,
-    streaming,
-    streamSettling,
+    streamPhase,
     connectTaskStream,
-    loadSessions,
-    handleSelectSession,
     reloadSessionMessages,
   ]);
 
@@ -297,6 +270,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     const sid =
       streamSessionRef.current || turnSessionRef.current || activeSessionId;
     const pendingUser = pendingUserTextRef.current;
+    const { chatText } = deriveLiveFieldsFromStream(streamState);
     const trace = collectExecutionTraceFromStream(streamState);
     const hasTrace =
       trace.stages.length > 0 ||
@@ -319,7 +293,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
               ]
             : [];
       const placeholderContent =
-        liveChatText.trim() ||
+        chatText.trim() ||
         (streamError ? "请求失败，请查看提示或重试。" : "（正在保存回答…）");
       return [
         ...baseUsers,
@@ -341,14 +315,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       try {
         await loadSessions();
         if (sid) {
-          for (let attempt = 0; attempt < ASSISTANT_RELOAD_ATTEMPTS; attempt += 1) {
-            await handleSelectSession(sid);
-            const msgs = await sessionsApi.messages(sid);
-            if (sessionHasAssistantReply(msgs, pendingUser)) break;
-            await new Promise((resolve) => {
-              setTimeout(resolve, ASSISTANT_RELOAD_BASE_MS + attempt * 80);
-            });
-          }
+          await reloadSessionMessages(sid, { pendingUserText: pendingUser });
         }
         await refreshFromServer();
       } finally {
@@ -368,11 +335,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     streamDone,
     streamError,
     streamState,
-    liveChatText,
     reset,
     loadSessions,
     activeSessionId,
-    handleSelectSession,
+    reloadSessionMessages,
     refreshFromServer,
   ]);
 
@@ -395,68 +361,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           turnSessionRef.current = sid;
         }
       }
-      if (name === "turn_start" && typeof data.intent === "string") {
-        updateLiveText((prev) => ({
-          ...prev,
-          liveIntent: data.intent as string,
-          liveProcessText: "",
-          liveChatText: "",
-        }));
-      }
-      if (name === "process_text" && typeof data.delta === "string") {
-        updateLiveText((prev) => ({
-          ...prev,
-          liveProcessText: prev.liveProcessText + data.delta,
-        }));
-      }
-      if (name === "literature_intent" && typeof data.intent === "string") {
-        updateLiveText((prev) => ({ ...prev, liveIntent: data.intent as string }));
-      }
-      if (name === "literature_brief_assessment") {
-        const rq = Array.isArray(data.core_research_questions)
-          ? (data.core_research_questions as string[]).join("；")
-          : "";
-        const kw = Array.isArray(data.keywords)
-          ? (data.keywords as string[]).join("、")
-          : "";
-        const hint = typeof data.search_query_hint === "string" ? data.search_query_hint : "";
-        const parts = [
-          rq ? `RQ：${rq}` : "",
-          kw ? `关键词：${kw}` : "",
-          hint ? `检索 hint：${hint}` : "",
-        ].filter(Boolean);
-        if (parts.length) {
-          updateLiveText((prev) => ({
-            ...prev,
-            liveProcessText: prev.liveProcessText || parts.join("\n"),
-          }));
-        }
-      }
-      if (name === "literature_progress" && typeof data.detail === "string") {
-        const detail = data.detail.trim();
-        if (detail) {
-          updateLiveText((prev) => ({
-            ...prev,
-            liveProcessText: detail,
-          }));
-        }
-      }
       handleLiteratureExtensionEvent(name, data, extCtx);
     }
     extensionHandledRef.current = log.length;
-  }, [streamState.extensionLog, streamState.textContent, isChat, setActiveSessionId, loadSessions, updateLiveText]);
-
-  useEffect(() => {
-    if (streamState.status !== "streaming") return;
-    const text = streamState.textContent ?? "";
-    if (!text) return;
-    if (workflowNeedsChat(liveIntent)) {
-      updateLiveText((prev) => ({
-        ...prev,
-        liveChatText: text.slice(0, 800),
-      }));
-    }
-  }, [streamState.textContent, streamState.status, liveIntent, updateLiveText]);
+  }, [streamState.extensionLog, isChat, setActiveSessionId, loadSessions]);
 
   useEffect(() => {
     const pending = pendingUserTextRef.current;
@@ -477,16 +385,20 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   }, [storedMessages, streamSettling]);
 
   useEffect(() => {
-    if (streaming || streamSettling) return;
+    if (isStreamBusy) return;
     if (turnSessionRef.current && turnSessionRef.current !== activeSessionId) {
       setLiveMessages([]);
     }
-  }, [activeSessionId, streaming, streamSettling]);
+  }, [activeSessionId, isStreamBusy]);
 
   const send = useCallback(
-    async (text: string, fetchUrls: string[], sourceMode: "merge" | "user_only" = "merge") => {
+    async (
+      text: string,
+      fetchUrls: string[],
+      sourceMode: "merge" | "user_only" = "merge",
+    ) => {
       const trimmed = text.trim();
-      if (!trimmed || streaming || streamSettling) return;
+      if (!trimmed || isStreamBusy) return;
 
       let sessionId = activeSessionId;
       if (!sessionId) {
@@ -514,18 +426,15 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       ]);
       reset();
       streamStartedRef.current = true;
-      commitLiveText({
-        liveIntent: "new_topic",
-        liveProcessText: "",
-        liveChatText: "",
-      });
 
       try {
         const row = await tasksApi.create({
           message: trimmed,
           session_id: sessionId ?? undefined,
           ...(fetchUrls.length ? { fetch_urls: fetchUrls } : {}),
-          ...(sourceMode !== "merge" ? { literature_source_mode: sourceMode } : {}),
+          ...(sourceMode !== "merge"
+            ? { literature_source_mode: sourceMode }
+            : {}),
         });
         const task = {
           ...mapStatusRow(row),
@@ -560,13 +469,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     },
     [
       activeSessionId,
-      streaming,
-      streamSettling,
+      isStreamBusy,
       setActiveSessionId,
       loadSessions,
       clearMessages,
       reset,
-      commitLiveText,
       setActiveTask,
       connectTaskStream,
       clearTask,
@@ -574,17 +481,13 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   );
 
   const stop = useCallback(async () => {
-    if (!streaming && !streamPending && !streamSettling) return;
+    if (!isStreamBusy) return;
 
     streamFinalizeRef.current = true;
     stopMaterializedRef.current = true;
 
     const pendingUser = pendingUserTextRef.current;
-    const materialized = materializeAssistantFromStream(streamState, {
-      intent: liveIntent,
-      processText: liveProcessText,
-      chatText: liveChatText,
-    });
+    const materialized = materializeAssistantFromStream(streamState);
 
     setLiveMessages((prev) => {
       const users = prev.filter((m) => m.role === "user");
@@ -605,10 +508,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       }
       const assistants = prev.filter((m) => m.role === "assistant");
       if (assistants.length > 0) return [...baseUsers, ...assistants];
+      const { processText, chatText } = deriveLiveFieldsFromStream(streamState);
       if (
         baseUsers.length > 0 &&
-        (liveProcessText.trim() ||
-          liveChatText.trim() ||
+        (processText.trim() ||
+          chatText.trim() ||
           streamState.status !== "idle")
       ) {
         const trace = collectExecutionTraceFromStream(streamState);
@@ -622,7 +526,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           {
             id: `stopped-assistant-${Date.now()}`,
             role: "assistant" as const,
-            content: liveChatText.trim() || "（已停止）",
+            content: chatText.trim() || "（已停止）",
             extras: hasTrace
               ? {
                   executionTrace: trace,
@@ -642,11 +546,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     connectedTaskIdRef.current = null;
     setStreamPending(false);
     setStreamSettling(false);
-    commitLiveText({
-      liveIntent: "new_topic",
-      liveProcessText: "",
-      liveChatText: "",
-    });
 
     if (activeTask && isRunningTaskStatus(activeTask.status)) {
       await cancelTask();
@@ -656,56 +555,25 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       clearTask();
     }
   }, [
-    streaming,
-    streamPending,
-    streamSettling,
+    isStreamBusy,
     streamState,
-    liveIntent,
-    liveProcessText,
-    liveChatText,
     abort,
     reset,
-    commitLiveText,
     activeTask,
     cancelTask,
     clearTask,
   ]);
 
-  const resetStreamUi = useCallback(() => {
-    if (!streaming && !streamSettling) {
-      setLiveMessages([]);
-      turnSessionRef.current = null;
-      streamSessionRef.current = null;
-    }
-  }, [streaming, streamSettling]);
-
   const value = useMemo(
     () => ({
       streamState,
       liveMessages,
-      streaming,
-      streamPending,
-      streamSettling,
-      liveIntent,
-      liveProcessText,
-      liveChatText,
+      streamPhase,
+      isStreamBusy,
       send,
       stop,
-      resetStreamUi,
     }),
-    [
-      streamState,
-      liveMessages,
-      streaming,
-      streamPending,
-      streamSettling,
-      liveIntent,
-      liveProcessText,
-      liveChatText,
-      send,
-      stop,
-      resetStreamUi,
-    ],
+    [streamState, liveMessages, streamPhase, isStreamBusy, send, stop],
   );
 
   return (

@@ -49,3 +49,5 @@
 - `literature_section_refine` — partial / full  
 - `literature_refine_report` — 缺节、待核实  
 - 聊天 toast — 子主题数、大纲章节数、澄清提示
+
+续聊回合经 **后台 Task** 推送 SSE；离开 `/chat` 后返回需全量重放，见 [task-streaming.md](./task-streaming.md)。

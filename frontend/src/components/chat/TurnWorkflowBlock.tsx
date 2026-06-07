@@ -12,7 +12,6 @@ type Props = {
   workflow: TurnWorkflow;
   trace?: ExecutionTrace;
   streaming?: boolean;
-  defaultCollapsed?: boolean;
   extensions?: Array<{ name: string; data: Record<string, unknown> }>;
   hasArtifact?: boolean;
   chatText?: string;

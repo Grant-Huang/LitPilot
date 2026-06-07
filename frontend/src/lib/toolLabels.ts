@@ -198,10 +198,10 @@ function callLooksJson(s: string): boolean {
   return t.startsWith("{") && t.endsWith("}");
 }
 
-/** 毫秒 → 用户可读耗时（≥1s 显示秒） */
+/** 毫秒 → 用户可读耗时（内联展示省略 sub-second） */
 export function humanizeDurationMs(ms?: number): string | null {
   if (ms == null || ms <= 0) return null;
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return null;
   const sec = Math.round(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);

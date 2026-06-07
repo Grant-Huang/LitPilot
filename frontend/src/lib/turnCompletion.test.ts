@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatToolLogLine, humanizeDurationMs } from "./toolLabels";
-import { buildTurnCompletionSummary } from "./turnCompletion";
+import { buildTurnCompletionSummary, summarizeWorkflowCard } from "./turnCompletion";
 import { buildTurnWorkflowFromTrace } from "./turnWorkflow";
 import { filterVisibleWorkflowSteps } from "./workflowStepFilter";
 
@@ -81,6 +81,100 @@ describe("buildTurnCompletionSummary", () => {
     expect(summary.headline).toContain("纳入 12 篇");
     expect(summary.headline).toContain("综述已生成");
     expect(summary.brief).toContain("右侧面板");
+  });
+
+  it("summarizes fetch card from trace tools", () => {
+    const summary = summarizeWorkflowCard(
+      {
+        id: "f",
+        type: "fetch",
+        title: "抓取网页",
+        state: "done",
+        steps: [],
+      },
+      {
+        trace: {
+          stages: [],
+          tools: [
+            { id: "1", name: "web_fetch", args: {}, status: "done" },
+            { id: "2", name: "web_fetch", args: {}, status: "error" },
+          ],
+          workflows: [],
+        },
+      },
+    );
+    expect(summary).toBe("1 篇 · 1 失败");
+  });
+
+  it("reads merged hits from persisted search card summary", () => {
+    const wf = {
+      turnIndex: 1,
+      intent: "new_topic",
+      summary: "",
+      clarifying: false,
+      cards: [
+        {
+          id: "search",
+          type: "search" as const,
+          title: "文献检索",
+          state: "done" as const,
+          summary: "纳入 9 篇",
+          steps: [],
+        },
+      ],
+    };
+    const summary = buildTurnCompletionSummary(wf, {});
+    expect(summary.headline).toContain("纳入 9 篇");
+  });
+
+  it("appends weak subtopic brief from merge extension", () => {
+    const wf = buildTurnWorkflowFromTrace(
+      {
+        stages: [],
+        tools: [
+          { id: "s1", name: "web_search", args: {}, status: "done" },
+          { id: "s2", name: "web_search", args: {}, status: "done" },
+        ],
+        workflows: [],
+      },
+      {
+        extensions: [
+          {
+            name: "literature_search_merge",
+            data: {
+              deduped: 8,
+              weak_subtopics: [
+                { pass_index: 2, title: "子主题 B", hits_taken: 1 },
+              ],
+            },
+          },
+        ],
+      },
+    );
+    const summary = buildTurnCompletionSummary(wf, {
+      trace: {
+        stages: [],
+        tools: [
+          { id: "s1", name: "web_search", args: {}, status: "done" },
+          { id: "s2", name: "web_search", args: {}, status: "done" },
+        ],
+        workflows: [],
+      },
+      extensions: [
+        {
+          name: "literature_search_merge",
+          data: {
+            deduped: 8,
+            weak_subtopics: [
+              { pass_index: 2, title: "子主题 B", hits_taken: 1 },
+            ],
+          },
+        },
+      ],
+      hasReview: true,
+    });
+    expect(summary.brief).toContain("子主题 B");
+    expect(summary.brief).toContain("expand_search");
   });
 });
 

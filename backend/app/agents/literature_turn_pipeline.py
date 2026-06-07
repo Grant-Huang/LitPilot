@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from app.agents.agent_settings import is_plan_confirm_required
-from app.agents.execution_trace import upsert_stage
+from app.agents.execution_trace import record_literature_stats, upsert_stage
 from app.agents.literature_clarification import (
     ClarificationState,
     build_outline_confirm_gate,
@@ -479,6 +479,10 @@ async def run_retrieval_pipeline(
                 "skip_reason": build_result.skip_reason,
                 "fetch_metrics": ctx.fetch_coord_metrics or None,
             },
+        )
+        record_literature_stats(
+            ctx.execution_trace,
+            fetchQueueTotal=len(fetch_hits),
         )
 
         if fetch_hits or ctx.pipelined_fetch_results:

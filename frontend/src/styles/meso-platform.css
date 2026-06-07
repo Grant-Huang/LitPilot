@@ -195,6 +195,20 @@
   animation: none;
 }
 
+.litpilot-branded.litpilot-layout--artifact-nudge .meso-artifact-pane {
+  animation: litpilot-artifact-nudge 1.2s ease-in-out 2;
+}
+
+@keyframes litpilot-artifact-nudge {
+  0%,
+  100% {
+    box-shadow: none;
+  }
+  50% {
+    box-shadow: inset 3px 0 0 var(--color-primary, #2563eb);
+  }
+}
+
 .litpilot-chat-pane {
   display: flex;
   flex-direction: column;
@@ -492,20 +506,6 @@
   overflow: hidden;
 }
 
-.litpilot-composer__urls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px 0;
-}
-
-.litpilot-composer__source-hint {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-
 .litpilot-composer__input.ant-input {
   border: none;
   box-shadow: none;
@@ -685,131 +685,7 @@
   background: var(--color-text-muted);
 }
 
-/* —— 工具步骤（替代 meso ToolCallBlock 卡片） —— */
-.litpilot-tool-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 4px 0 10px;
-  padding-left: 2px;
-  border-left: 1px solid var(--color-border);
-}
-
-.litpilot-tool-step {
-  padding: 6px 0 6px 12px;
-}
-
-.litpilot-tool-step__row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.litpilot-tool-step__icon {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.litpilot-tool-step__icon-mark {
-  line-height: 1;
-  font-weight: 600;
-}
-
-.litpilot-tool-step__spinner {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid var(--color-border);
-  border-top-color: var(--color-text-muted);
-  animation: meso-spin 0.7s linear infinite;
-}
-
-.litpilot-tool-step__main {
-  flex: 1;
-  min-width: 0;
-}
-
-.litpilot-tool-step__title {
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--color-text);
-  font-weight: 400;
-}
-
-.litpilot-tool-step__link {
-  color: var(--color-primary, #2563eb);
-  text-decoration: none;
-  font-weight: 400;
-}
-
-.litpilot-tool-step__link:hover {
-  text-decoration: underline;
-}
-
-.litpilot-tool-step--error .litpilot-tool-step__link {
-  color: inherit;
-  text-decoration: underline;
-}
-
-.litpilot-tool-step__char-count {
-  margin-left: 2px;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--color-text-muted);
-}
-
-.litpilot-tool-step__preview {
-  display: block;
-  width: 100%;
-  margin-top: 4px;
-  padding: 0;
-  border: none;
-  background: none;
-  text-align: left;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.litpilot-tool-step__preview:hover {
-  color: var(--color-text-secondary);
-}
-
-.litpilot-tool-step__duration {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  margin-top: 3px;
-}
-
-.litpilot-tool-step__detail {
-  margin: 6px 0 0 24px;
-  padding: 8px 10px;
-  max-height: 220px;
-  overflow: auto;
-  font-size: 11px;
-  line-height: 1.5;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-light);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.litpilot-tool-step--error .litpilot-tool-step__title {
-  color: var(--color-error);
-}
+/* Legacy tool-step card layout removed — use .litpilot-log-line* (LitPilotToolStep). */
 
 /* —— 右侧 Artifact：DAG / 综述 + 原文·渲染 —— */
 .litpilot-artifact-pane {
@@ -1032,59 +908,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-/* —— 执行过程（阶段 + 工具 + 工作流，含成功与失败） —— */
-.litpilot-process {
-  margin: 8px 0 12px;
-  border: 1px solid var(--color-border-light);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-text) 3%, var(--color-bg));
-}
-
-.litpilot-process__header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  text-align: left;
-}
-
-.litpilot-process__header:hover {
-  color: var(--color-text);
-}
-
-.litpilot-process__chevron {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-.litpilot-process__body {
-  padding: 0 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.litpilot-process__body .litpilot-think {
-  margin: 0;
-}
-
-.litpilot-process__stages {
-  padding: 4px 0 0;
-}
-
-.litpilot-process__steps {
-  margin: 0;
 }
 
 .litpilot-artifact-pane__md {
@@ -4245,6 +4068,21 @@ a.library-badge--action:hover {
   color: var(--color-accent);
   border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.litpilot-composer__readonly-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.litpilot-composer__chip--readonly {
+  cursor: default;
+  opacity: 1;
+  color: var(--color-text-muted);
+  border-color: var(--color-border-light);
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
 }
 
 .litpilot-composer__url-tag {

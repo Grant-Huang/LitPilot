@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { StreamState } from "@meso.ai/ui";
 import {
   buildStreamActivitySnapshot,
+  extractStreamParallelism,
+  formatParallelismChips,
   formatStreamActivityHint,
   STREAM_SILENCE_WARN_SEC,
 } from "./streamActivity";
@@ -66,5 +68,56 @@ describe("buildStreamActivitySnapshot", () => {
     );
     expect(snap.stage).toBe("抓取全文");
     expect(formatStreamActivityHint(snap)).toContain("3/10");
+  });
+});
+
+describe("extractStreamParallelism", () => {
+  it("builds search and fetch chips from extension log", () => {
+    const info = extractStreamParallelism([
+      {
+        type: "extension",
+        schema_version: "1.0",
+        payload: {
+          name: "literature_search_plan",
+          version: "1.0",
+          data: {
+            parallel_mode: "by_topic",
+            topic_parallel: 3,
+          },
+        },
+      },
+      {
+        type: "extension",
+        schema_version: "1.0",
+        payload: {
+          name: "literature_progress",
+          version: "1.0",
+          data: {
+            stage: "fetch",
+            parallel: 4,
+            in_flight: 2,
+          },
+        },
+      },
+    ] as StreamState["extensionLog"]);
+    expect(formatParallelismChips(info)).toEqual([
+      "检索 3 主题并行",
+      "抓取 4 路并行",
+    ]);
+  });
+
+  it("falls back to in_flight when parallel is missing", () => {
+    const info = extractStreamParallelism([
+      {
+        type: "extension",
+        schema_version: "1.0",
+        payload: {
+          name: "literature_progress",
+          version: "1.0",
+          data: { stage: "fetch", in_flight: 3 },
+        },
+      },
+    ] as StreamState["extensionLog"]);
+    expect(formatParallelismChips(info)).toEqual(["抓取 3 路并行"]);
   });
 });
