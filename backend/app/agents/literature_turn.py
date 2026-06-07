@@ -177,6 +177,20 @@ async def stream_literature_turn(
         turn_index=user_turns,
     )
 
+    if intent.intent == "short_answer":
+        msg = (
+            "如需调整文献综述，请明确说明操作，例如：\n"
+            "• 「增加子主题：XXX」—— 新增检索方向与章节\n"
+            "• 「修改子主题 N 为 XXX」—— 替换现有章节\n"
+            "• 「重写第 N 章 …」—— 只修改综述表述\n"
+            "• 「我的文献库里有 … 吗？」—— 查询已有文献"
+        )
+        yield chat_text(msg)
+        finalize_ctx.chat_text = msg
+        _, end_ev = await finalize_turn(finalize_ctx, main_text=msg)
+        yield end_ev
+        return
+
     needs_understanding = intent.intent in ("new_topic", "subtopic_change", "append_urls")
     if needs_understanding:
         yield ("stage", {"name": "理解研究问题", "state": "active"})

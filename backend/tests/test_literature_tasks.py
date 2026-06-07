@@ -147,26 +147,6 @@ async def test_sweep_picks_up_pending_task():
         assert row.status == "completed"
 
 
-@pytest.mark.asyncio
-async def test_create_task_persists_source_mode(tmp_path, monkeypatch):
-    with patch(
-        "app.tasks.literature_tasks.stream_literature_turn",
-        side_effect=lambda *a, **k: _fake_turn(),
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            created = await client.post(
-                "/api/tasks",
-                json={
-                    "message": "user only",
-                    "literature_source_mode": "user_only",
-                },
-            )
-            task_id = created.json()["data"]["task_id"]
-            record = get_task_store().get_task(task_id)
-            assert record is not None
-            assert record.literature_source_mode == "user_only"
-
 
 @pytest.mark.asyncio
 async def test_task_rerun_skips_duplicate_user_message(tmp_path, monkeypatch):

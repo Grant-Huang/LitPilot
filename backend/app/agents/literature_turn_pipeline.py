@@ -84,7 +84,15 @@ def _to_subtopic_ctx(ctx: RetrievalPipelineContext) -> SubtopicPipelineContext:
     sub_topics = ctx.sub_topics_for_search or list(outline.sub_topics)
     changed: list[str] = []
     if ctx.intent.intent == "subtopic_change":
-        changed = [st.id for st in sub_topics]
+        existing_ids: set[str] = {
+            str(tag)
+            for p in ctx.working.papers
+            for tag in (p.get("subtopic_tags") or [])
+            if tag
+        }
+        changed = [st.id for st in sub_topics if st.id not in existing_ids]
+        if not changed:
+            changed = [st.id for st in sub_topics]
     return SubtopicPipelineContext(
         session_id=ctx.session_id,
         user_message=ctx.user_message,

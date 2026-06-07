@@ -3,13 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.agents.agent_settings import (
-    get_orchestrator_max_tokens,
     get_use_llm_planner,
 )
 from app.agents.prompt_registry import NARRATE_CHECKPOINT_KEYS
@@ -42,34 +40,8 @@ from app.services.llm_service import get_planner_llm
 
 _log = logging.getLogger(__name__)
 
-FETCH_NARRATE_EVERY_N = 5
-FETCH_NARRATE_INTERVAL_SEC = 8.0
-
-# Lite narration: retrieval after, fetch after, attributes after.
-LITE_NARRATE_CHECKPOINTS = frozenset({"C", "E", "F2"})
-
-
-@dataclass
-class FetchNarrationThrottle:
-    """Legacy throttle helper (unused after removing full orchestrator mode)."""
-
-    every_n: int = FETCH_NARRATE_EVERY_N
-    interval_sec: float = FETCH_NARRATE_INTERVAL_SEC
-    _since_narrate: int = field(default=0, init=False)
-    _last_narrate: float = field(default_factory=time.monotonic, init=False)
-
-    def should_narrate(self) -> bool:
-        if self._since_narrate >= self.every_n:
-            return True
-        return (time.monotonic() - self._last_narrate) >= self.interval_sec
-
-    def note_completed(self) -> bool:
-        self._since_narrate += 1
-        return self.should_narrate()
-
-    def mark_narrated(self) -> None:
-        self._since_narrate = 0
-        self._last_narrate = time.monotonic()
+# Lite narration: retrieval after, fetch after.
+LITE_NARRATE_CHECKPOINTS = frozenset({"C", "E"})
 
 
 @dataclass
@@ -85,7 +57,7 @@ async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
         use_reasoning=False,
-        max_tokens=await get_orchestrator_max_tokens(),
+        max_tokens=280,
     )
 
 

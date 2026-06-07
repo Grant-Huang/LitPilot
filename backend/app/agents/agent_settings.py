@@ -249,9 +249,6 @@ async def get_use_llm_planner() -> bool:
     return bool((await get_merged_settings()).get("use_llm_planner", True))
 
 
-async def get_orchestrator_use_reasoning() -> bool:
-    """Reasoning mode is disabled (hard-coded off)."""
-    return False
 
 
 
@@ -271,15 +268,6 @@ async def get_orchestrator_model() -> str:
 
 
 
-async def get_orchestrator_max_tokens() -> int:
-
-    n = int(
-
-        (await get_merged_settings()).get("orchestrator_max_tokens_per_phase") or 280
-
-    )
-
-    return max(80, min(n, 500))
 
 
 
@@ -380,17 +368,7 @@ def _llm_cfg_from_flat(s: dict[str, Any], *, prefix: str = "") -> dict[str, Any]
 
 
 async def get_review_llm_config() -> dict[str, Any]:
-
     """review_main 能力绑定的主模型（综述撰写、矩阵、语料问答）。"""
-
-    return _llm_cfg_from_flat(await get_merged_settings())
-
-
-
-async def get_review_llm_config() -> dict[str, Any]:
-
-    """review_main 能力绑定的主模型（综述撰写、矩阵、语料问答）。"""
-
     return _llm_cfg_from_flat(await get_merged_settings())
 
 

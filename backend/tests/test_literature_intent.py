@@ -86,15 +86,15 @@ def test_subtopic_modify_explicit() -> None:
     assert result.subtopic_op == "modify"
 
 
-def test_expand_search_hint_becomes_query_corpus() -> None:
+def test_expand_search_hint_falls_to_llm() -> None:
     ctx = _turn_ctx()
     result = detect_intent_rules(
         "再搜一些 trust 相关文献",
         turn_ctx=ctx,
         corpus=_make_corpus(),
     )
-    assert result is not None
-    assert result.intent == "query_corpus"
+    # No rule matches — falls through to LLM (returns None from rules)
+    assert result is None
 
 
 def test_review_refine_keywords() -> None:
@@ -150,7 +150,9 @@ def test_merge_gen_constraints() -> None:
 def test_normalize_legacy_intents() -> None:
     assert normalize_intent("supplement") == "append_urls"
     assert normalize_intent("refine_gen") == "review_refine"
-    assert normalize_intent("expand_search") == "query_corpus"
+    assert normalize_intent("regen_only") == "review_refine"
+    assert normalize_intent("expand_search") == "short_answer"
+    assert normalize_intent("unknown_intent") == "short_answer"
 
 
 def test_build_append_urls_notice() -> None:

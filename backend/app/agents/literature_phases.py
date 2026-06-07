@@ -9,7 +9,6 @@ from typing import Any
 
 from app.agents.execution_trace import append_tool, append_workflow, record_literature_stats, upsert_stage
 from app.agents.literature_planner import (
-    FetchNarrationThrottle,
     format_cite_context,
     format_fetch_context,
     format_fetch_progress_context,
@@ -700,11 +699,6 @@ async def stream_fetch_phase(
     fetch_ok = 0
     fetch_failed = 0
     failed_hosts: list[str] = []
-    fetch_throttle = (
-        FetchNarrationThrottle()
-        if should_narrate("D", planner_ctx)
-        else None
-    )
     recent_fetch_labels: list[str] = []
 
     upload_queue = [h for h in fetch_hits if str(h.get("source") or "") == "upload"]
@@ -881,24 +875,6 @@ async def stream_fetch_phase(
             recent_fetch_labels.append(label[:60])
             if len(recent_fetch_labels) > 5:
                 recent_fetch_labels.pop(0)
-            if fetch_throttle and fetch_throttle.note_completed():
-                progress_ctx = format_fetch_progress_context(
-                    total=len(fetch_hits),
-                    completed=fetch_idx,
-                    ok=fetch_ok,
-                    failed=fetch_failed,
-                    recent_labels=recent_fetch_labels,
-                )
-                async for ev in narrate_phase_stream(
-                    "D",
-                    user_message,
-                    progress_ctx,
-                    think_acc=think_acc,
-                    ctx=planner_ctx,
-                ):
-                    yield ev
-                fetch_throttle.mark_narrated()
-
             done_count = fetch_ok + fetch_failed
             yield (
                 "literature_progress",
