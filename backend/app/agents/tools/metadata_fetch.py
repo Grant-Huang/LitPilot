@@ -214,6 +214,33 @@ def format_metadata_text(
     return header[:120_000]
 
 
+def format_metadata_only_text(
+    *,
+    title: str,
+    source_url: str,
+    doi: str = "",
+    metadata_source: str = "OpenAlex",
+) -> str:
+    header = f"# {title or 'Untitled'}\n\n"
+    header += f"来源: {source_url}\n"
+    if doi:
+        header += f"DOI: {doi}\n"
+    header += f"元数据来源: {metadata_source}\n"
+    header += "获取状态: 仅元数据（未能获取摘要或全文）\n\n"
+    header += "## 摘要\n\n（未能获取摘要或全文，仅保留书目元数据。）\n"
+    return header[:120_000]
+
+
+def _meta_tuple(
+    text: str,
+    final_url: str,
+    *,
+    resolved_pdf_url: str | None = None,
+    is_pdf: bool = False,
+) -> tuple[str, str, str | None, bool]:
+    return text, final_url, resolved_pdf_url, is_pdf
+
+
 async def fetch_crossref_abstract_by_doi(
     doi: str,
     *,
@@ -669,48 +696,14 @@ async def _fetch_pdf_bytes(
     return text[:120_000], final_url
 
 
-async def _try_unpaywall_oa_content(
-    doi: str,
-    *,
-    source_url: str,
-    timeout: float,
-    pdf_extract_backend: str,
-) -> tuple[str, str, str | None, bool] | None:
-    oa_url = await fetch_unpaywall_oa_pdf(doi, timeout=min(timeout, 12.0))
-    if not oa_url:
-        return None
-    if is_paywalled_host(oa_url) or "idp.springer.com" in oa_url:
-        return None
-    abs_url = arxiv_abs_url(oa_url)
-    if abs_url:
-        try:
-            text = await fetch_arxiv_abs_page(abs_url, timeout=min(timeout, 30.0))
-            if text and not is_junk_fetch_content(text):
-                return text, abs_url, oa_url, False
-        except Exception:
-            pass
-    try:
-        text, final = await _fetch_pdf_bytes(
-            oa_url,
-            timeout=timeout,
-            pdf_extract_backend=pdf_extract_backend,
-        )
-        if len(text.strip()) >= _MIN_USEFUL_CHARS and not is_junk_fetch_content(text):
-            return text, final, oa_url, True
-    except Exception:
-        pass
-    return None
-
-
-async def try_metadata_fetch(
+async def try_api_abstract_fetch(
     url: str,
     *,
     timeout: float = 60.0,
-    pdf_extract_backend: str = "pymupdf4llm",
 ) -> tuple[str, str, str | None, bool] | None:
     """
-    Metadata-first pipeline.
-    Returns (text, final_url, resolved_pdf_url, is_pdf) or None to fall back to direct fetch.
+    Stage ① — structured APIs only (no publisher HTML/PDF fetch).
+    OpenAlex → Crossref → PMC(NCBI) → Semantic Scholar.
     """
     target = url.strip()
     if not target.startswith(("http://", "https://")):
@@ -719,7 +712,6 @@ async def try_metadata_fetch(
     parsed = urlparse(target)
     host = (parsed.netloc or "").lower()
 
-    # ① PMC → Europe PMC API (avoid reCAPTCHA pages)
     pmc_id = extract_pmc_id_from_url(target)
     if pmc_id:
         title, abstract, pmc_doi = await fetch_pmc_metadata_by_pmcid(
@@ -727,7 +719,7 @@ async def try_metadata_fetch(
             timeout=min(timeout, 20.0),
         )
         if len(abstract) >= _MIN_USEFUL_CHARS:
-            return (
+            return _meta_tuple(
                 format_metadata_text(
                     title=title,
                     abstract=abstract,
@@ -736,29 +728,7 @@ async def try_metadata_fetch(
                     metadata_source="PMC",
                 ),
                 target,
-                None,
-                False,
             )
-
-    # ② SSRN landing page metadata
-    if is_ssrn_host(host):
-        try:
-            text = await fetch_ssrn_page(target, timeout=min(timeout, 30.0))
-            if text:
-                return text, target, None, False
-        except Exception:
-            pass
-
-    # ③ arXiv /abs/: HTML abstract with browser UA
-    if "arxiv.org" in host:
-        abs_url = arxiv_abs_url(target)
-        if abs_url and "/abs/" in abs_url:
-            try:
-                text = await fetch_arxiv_abs_page(abs_url, timeout=min(timeout, 30.0))
-                if text:
-                    return text, abs_url, None, False
-            except Exception:
-                pass
 
     doi = extract_doi_from_url(target)
     if not doi and is_doi_url(target):
@@ -769,16 +739,14 @@ async def try_metadata_fetch(
         or is_paywalled_host(target)
         or any(frag in host for frag in _PAYWALLED_HOST_FRAGMENTS)
     )
-
     if not doi or not use_api:
         return None
 
-    # ① OpenAlex abstract
     work = await fetch_openalex_work_by_doi(doi, timeout=min(timeout, 15.0))
     if work:
         abstract = reconstruct_openalex_abstract(work)
         if len(abstract) >= _MIN_USEFUL_CHARS:
-            return (
+            return _meta_tuple(
                 format_metadata_text(
                     title=_openalex_title(work),
                     abstract=abstract,
@@ -787,17 +755,14 @@ async def try_metadata_fetch(
                     metadata_source="OpenAlex",
                 ),
                 target,
-                None,
-                False,
             )
 
-    # ② Crossref abstract
     cr_title, abstract = await fetch_crossref_abstract_by_doi(
         doi,
         timeout=min(timeout, 10.0),
     )
     if len(abstract) >= _MIN_USEFUL_CHARS:
-        return (
+        return _meta_tuple(
             format_metadata_text(
                 title=cr_title,
                 abstract=abstract,
@@ -806,17 +771,14 @@ async def try_metadata_fetch(
                 metadata_source="Crossref",
             ),
             target,
-            None,
-            False,
         )
 
-    # ④ PMC by DOI (e.g. Springer OA copy indexed in PMC)
     pmc_title, pmc_abstract, _pmc_doi = await fetch_pmc_metadata_by_doi(
         doi,
         timeout=min(timeout, 20.0),
     )
     if len(pmc_abstract) >= _MIN_USEFUL_CHARS:
-        return (
+        return _meta_tuple(
             format_metadata_text(
                 title=pmc_title,
                 abstract=pmc_abstract,
@@ -825,17 +787,14 @@ async def try_metadata_fetch(
                 metadata_source="PMC",
             ),
             target,
-            None,
-            False,
         )
 
-    # ⑤ Semantic Scholar abstract (e.g. Springer paywall with S2 index)
     s2_title, s2_abstract = await fetch_s2_abstract_by_doi(
         doi,
         timeout=min(timeout, 15.0),
     )
     if len(s2_abstract) >= _MIN_USEFUL_CHARS:
-        return (
+        return _meta_tuple(
             format_metadata_text(
                 title=s2_title,
                 abstract=s2_abstract,
@@ -844,44 +803,128 @@ async def try_metadata_fetch(
                 metadata_source="Semantic Scholar",
             ),
             target,
-            None,
-            False,
         )
 
-    # ⑥ SSRN DOI → SSRN page metadata (Cloudflare may block; skip redirect)
-    if is_ssrn_doi(doi):
-        ssrn_page = ssrn_page_url_from_doi(doi)
-        if ssrn_page:
-            try:
-                text = await fetch_ssrn_page(ssrn_page, timeout=min(timeout, 30.0))
-                if text and not is_junk_fetch_content(text):
-                    return text, ssrn_page, None, False
-            except Exception:
-                pass
+    return None
 
-    # ⑦ DOI redirect → arXiv abs
+
+async def resolve_oa_fetch_urls(
+    url: str,
+    *,
+    timeout: float = 30.0,
+) -> list[str]:
+    """
+    Stage ② — Unpaywall resolves OA URLs for stage ③ direct HTTP fetch.
+    Returns deduplicated candidate URLs (arxiv abs preferred before PDF).
+    """
+    target = url.strip()
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+
+    parsed = urlparse(target)
+    host = (parsed.netloc or "").lower()
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(candidate: str) -> None:
+        c = (candidate or "").strip()
+        if not c.startswith(("http://", "https://")):
+            return
+        if c in seen:
+            return
+        seen.add(c)
+        out.append(c)
+
+    if "arxiv.org" in host:
+        abs_u = arxiv_abs_url(target)
+        if abs_u:
+            _add(abs_u)
+        _add(normalize_native_fetch_url(target))
+
+    doi = extract_doi_from_url(target)
+    if not doi and is_doi_url(target):
+        doi = normalize_doi(parsed.path.lstrip("/"))
+    if not doi:
+        return out
+
+    oa_url = await fetch_unpaywall_oa_pdf(doi, timeout=min(timeout, 12.0))
+    if oa_url and not is_paywalled_host(oa_url) and "idp.springer.com" not in oa_url:
+        abs_u = arxiv_abs_url(oa_url)
+        if abs_u:
+            _add(abs_u)
+        _add(oa_url)
+
     redirect = await resolve_doi_redirect_url(
         f"https://doi.org/{doi}",
         timeout=min(timeout, 15.0),
     )
     if redirect and "arxiv.org" in redirect:
-        abs_url = arxiv_abs_url(redirect)
-        if abs_url:
-            try:
-                text = await fetch_arxiv_abs_page(abs_url, timeout=min(timeout, 30.0))
-                if text:
-                    return text, abs_url, None, False
-            except Exception:
-                pass
+        abs_u = arxiv_abs_url(redirect)
+        if abs_u:
+            _add(abs_u)
 
-    # ⑧ Unpaywall → arXiv abs first, then OA PDF (skip Springer login PDF)
-    oa_result = await _try_unpaywall_oa_content(
-        doi,
-        source_url=target,
-        timeout=timeout,
-        pdf_extract_backend=pdf_extract_backend,
+    if is_ssrn_doi(doi):
+        ssrn_page = ssrn_page_url_from_doi(doi)
+        if ssrn_page:
+            _add(ssrn_page)
+
+    return out
+
+
+async def try_metadata_only_fallback(
+    url: str,
+    *,
+    timeout: float = 30.0,
+) -> tuple[str, str, str | None, bool] | None:
+    """Stage ⑤ — title/DOI from OpenAlex when full text is unavailable."""
+    target = url.strip()
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+
+    doi = extract_doi_from_url(target)
+    if not doi and is_doi_url(target):
+        doi = normalize_doi(urlparse(target).path.lstrip("/"))
+    if not doi:
+        return None
+
+    work = await fetch_openalex_work_by_doi(doi, timeout=min(timeout, 15.0))
+    if not work:
+        return None
+    title = _openalex_title(work)
+    if not title:
+        return None
+    return _meta_tuple(
+        format_metadata_only_text(
+            title=title,
+            source_url=target,
+            doi=doi,
+            metadata_source="OpenAlex",
+        ),
+        target,
     )
-    if oa_result:
-        return oa_result
 
-    return None
+
+async def try_jina_reader_fetch(
+    url: str,
+    *,
+    api_key: str | None = None,
+    timeout: float = 60.0,
+) -> str:
+    """Stage ④ — Jina Reader (headless) fallback."""
+    from app.agents.tools.providers import jina as jina_provider
+
+    text = await jina_provider.fetch(url, api_key=api_key, timeout=timeout)
+    if is_junk_fetch_content(text):
+        return ""
+    return text
+
+
+async def try_metadata_fetch(
+    url: str,
+    *,
+    timeout: float = 60.0,
+    pdf_extract_backend: str = "pymupdf4llm",
+) -> tuple[str, str, str | None, bool] | None:
+    """Backward-compatible alias for stage ① API abstract fetch."""
+    _ = pdf_extract_backend
+    return await try_api_abstract_fetch(url, timeout=timeout)

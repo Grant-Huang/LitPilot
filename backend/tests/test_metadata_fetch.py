@@ -9,6 +9,7 @@ from app.agents.tools.metadata_fetch import (
     extract_doi_from_url,
     extract_pmc_id_from_url,
     extract_ssrn_abstract,
+    format_metadata_only_text,
     format_metadata_text,
     is_doi_url,
     is_junk_fetch_content,
@@ -17,7 +18,10 @@ from app.agents.tools.metadata_fetch import (
     ssrn_page_url_from_doi,
     normalize_native_fetch_url,
     reconstruct_openalex_abstract,
+    resolve_oa_fetch_urls,
+    try_api_abstract_fetch,
     try_metadata_fetch,
+    try_metadata_only_fallback,
 )
 
 
@@ -137,50 +141,27 @@ async def test_try_metadata_fetch_openalex(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_try_metadata_fetch_unpaywall_prefers_arxiv_abs(
+async def test_resolve_oa_fetch_urls_prefers_arxiv_abs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_openalex(doi: str, **kwargs):
-        return None
-
     async def fake_unpaywall(doi: str, **kwargs):
         return "https://arxiv.org/pdf/1706.03762.pdf"
 
-    async def fake_arxiv(abs_url: str, **kwargs):
-        return format_metadata_text(
-            title="Attention",
-            abstract="x" * 120,
-            source_url=abs_url,
-            metadata_source="arXiv",
-        )
+    async def fake_redirect(doi_url: str, **kwargs):
+        return None
 
-    monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_openalex_work_by_doi",
-        fake_openalex,
-    )
-
-    async def fake_crossref(doi: str, **kwargs):
-        return "", ""
-
-    monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_crossref_abstract_by_doi",
-        fake_crossref,
-    )
     monkeypatch.setattr(
         "app.agents.tools.metadata_fetch.fetch_unpaywall_oa_pdf",
         fake_unpaywall,
     )
     monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_arxiv_abs_page",
-        fake_arxiv,
+        "app.agents.tools.metadata_fetch.resolve_doi_redirect_url",
+        fake_redirect,
     )
-    result = await try_metadata_fetch("https://doi.org/10.5555/paywalled", timeout=5.0)
-    assert result is not None
-    text, final_url, pdf_url, is_pdf = result
-    assert not is_pdf
-    assert "/abs/" in final_url
-    assert pdf_url and "arxiv.org/pdf" in pdf_url
-    assert "arXiv" in text
+    urls = await resolve_oa_fetch_urls("https://doi.org/10.5555/paywalled", timeout=5.0)
+    assert urls
+    assert urls[0] == "https://arxiv.org/abs/1706.03762"
+    assert any("arxiv.org/pdf/1706.03762" in u for u in urls)
 
 
 @pytest.mark.asyncio
@@ -204,45 +185,54 @@ async def test_try_metadata_fetch_europe_pmc(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_try_metadata_fetch_ssrn_doi(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_openalex(doi: str, **kwargs):
+async def test_resolve_oa_fetch_urls_includes_ssrn(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_unpaywall(doi: str, **kwargs):
         return None
 
-    async def fake_crossref(doi: str, **kwargs):
-        return "", ""
+    async def fake_redirect(doi_url: str, **kwargs):
+        return None
 
-    async def fake_ssrn(page_url: str, **kwargs):
-        return format_metadata_text(
-            title="SSRN Paper",
-            abstract="z" * 120,
-            source_url=page_url,
-            metadata_source="SSRN",
-        )
+    monkeypatch.setattr(
+        "app.agents.tools.metadata_fetch.fetch_unpaywall_oa_pdf",
+        fake_unpaywall,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.metadata_fetch.resolve_doi_redirect_url",
+        fake_redirect,
+    )
+    urls = await resolve_oa_fetch_urls(
+        "https://doi.org/10.2139/ssrn.5276793",
+        timeout=5.0,
+    )
+    assert any("abstract_id=5276793" in u for u in urls)
+
+
+def test_format_metadata_only_text() -> None:
+    text = format_metadata_only_text(
+        title="Sample Paper Title",
+        source_url="https://doi.org/10.1/x",
+        doi="10.1/x",
+    )
+    assert "仅元数据" in text
+    assert len(text) >= 80
+
+
+@pytest.mark.asyncio
+async def test_try_api_abstract_fetch_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_abstract = " ".join(f"word{i}" for i in range(20))
+
+    async def fake_openalex(doi: str, **kwargs):
+        words = long_abstract.split()
+        inv: dict[str, list[int]] = {}
+        for i, w in enumerate(words):
+            inv[w] = [i]
+        return {"title": "Paper", "abstract_inverted_index": inv}
 
     monkeypatch.setattr(
         "app.agents.tools.metadata_fetch.fetch_openalex_work_by_doi",
         fake_openalex,
     )
-    monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_crossref_abstract_by_doi",
-        fake_crossref,
-    )
-    async def fake_s2(doi: str, **kwargs):
-        return "", ""
-
-    monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_s2_abstract_by_doi",
-        fake_s2,
-    )
-    monkeypatch.setattr(
-        "app.agents.tools.metadata_fetch.fetch_ssrn_page",
-        fake_ssrn,
-    )
-    result = await try_metadata_fetch(
-        "https://doi.org/10.2139/ssrn.5276793",
-        timeout=5.0,
-    )
-    assert result is not None
-    text, _final, _pdf, is_pdf = result
-    assert "SSRN" in text
-    assert not is_pdf
+    api = await try_api_abstract_fetch("https://doi.org/10.1109/TEST.2024.1", timeout=5.0)
+    legacy = await try_metadata_fetch("https://doi.org/10.1109/TEST.2024.1", timeout=5.0)
+    assert api is not None and legacy is not None
+    assert api[0] == legacy[0]

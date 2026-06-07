@@ -110,19 +110,26 @@ async def web_fetch_url_with_meta(
     if p == "native":
         backend = await _resolve_pdf_extract_backend(pdf_extract_backend)
         s2_key = await _resolve_s2_api_key(s2_api_key)
+        from app.agents.agent_settings import get_jina_reader_api_key
+
+        jina_key = await get_jina_reader_api_key()
         result = await native_fetch_provider.fetch_bytes(
             url,
             timeout=timeout,
             pdf_extract_backend=backend,
             s2_api_key=s2_key,
+            jina_api_key=jina_key or None,
         )
+        effective_provider = "jina" if result.via_jina else p
         return {
             "text": result.text,
             "final_url": result.final_url,
             "resolved_pdf_url": result.resolved_pdf_url,
             "is_pdf": result.is_pdf,
-            "provider": p,
+            "provider": effective_provider,
             "pdf_extract_backend": backend,
+            "via_jina": result.via_jina,
+            "metadata_only": result.metadata_only,
         }
     text = await jina_provider.fetch(url, api_key=api_key, timeout=timeout)
     return {

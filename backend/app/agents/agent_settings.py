@@ -74,6 +74,11 @@ async def get_fetch_api_key() -> str:
     return str((await get_merged_settings()).get("fetch_api_key") or "")
 
 
+async def get_jina_reader_api_key() -> str:
+    """Jina Reader key for native-pipeline Cloudflare fallback (optional)."""
+    return str((await get_merged_settings()).get("fetch_api_key") or "").strip()
+
+
 
 
 

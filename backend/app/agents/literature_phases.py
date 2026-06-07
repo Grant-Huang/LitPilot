@@ -1415,6 +1415,63 @@ async def stream_cite_phase(
     out["cite_ok"] = cite_ok
 
 
+async def stream_relevance_filter_phase(
+    *,
+    user_message: str,
+    search_query: str,
+    hits: list[dict[str, str]],
+    llm,
+    think_acc: ThinkAccumulator,
+    execution_trace: dict[str, Any],
+    result: dict[str, Any] | None = None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """LLM relevance screen after search merge, before fetch."""
+    from app.agents.relevance_filter import (
+        filter_hits_by_relevance,
+        format_reject_report_lines,
+    )
+    from app.core.stream_events import chat_text
+
+    out = result if result is not None else {}
+    yield ("stage", {"name": "相关性筛选", "state": "active"})
+    upsert_stage(execution_trace, "相关性筛选", "active")
+
+    async for ev in emit_system_think_line(
+        f"正在用 LLM 评估合并后 {len(hits)} 篇命中的相关性…",
+        accumulator=think_acc,
+    ):
+        yield ev
+
+    filter_result = await filter_hits_by_relevance(
+        hits,
+        user_message=user_message,
+        search_query=search_query,
+        llm=llm,
+    )
+    report = filter_result.to_report()
+    out["filter_result"] = filter_result
+    out["kept_hits"] = filter_result.kept_hits
+
+    for line in format_reject_report_lines(filter_result):
+        async for ev in emit_system_think_line(line, accumulator=think_acc):
+            yield ev
+
+    yield ("literature_relevance_filter", report)
+
+    if filter_result.query_warning:
+        pct = int(round(filter_result.reject_ratio * 100))
+        warn = (
+            f"本轮检索剔除比例达 {pct}%（{filter_result.rejected_count}/"
+            f"{filter_result.input_count}），命中与主题偏差较大。"
+            "建议优化检索式：补充领域、方法、应用场景或核心对象，"
+            "并尝试更具体的英文术语与同义词组合后重新检索。"
+        )
+        yield chat_text(warn)
+
+    yield ("stage", {"name": "相关性筛选", "state": "done"})
+    upsert_stage(execution_trace, "相关性筛选", "done")
+
+
 def build_fetch_queue(
     *,
     source_mode: str,

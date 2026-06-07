@@ -19,6 +19,7 @@ from app.agents.literature_phases import (
     stream_expanded_search_phase,
     stream_fetch_phase,
     stream_outline_phase,
+    stream_relevance_filter_phase,
     stream_search_phase,
     user_url_hits,
 )
@@ -296,19 +297,6 @@ async def run_retrieval_pipeline(
                 )
 
             async for ev in search_stream:
-                if pipe_coord and ev[0] == "literature_search_pass_hits":
-                    n = pipe_coord.enqueue_pass_hits(list(ev[1].get("hits") or []))
-                    if n:
-                        pass_label = (
-                            f"第 {ev[1].get('pass_index')}/{ev[1].get('pass_total')} 轮"
-                            if use_expanded
-                            else "单轮"
-                        )
-                        async for think_ev in emit_system_think_line(
-                            f"⟦sys⟧检索{pass_label}命中 {n} 篇，已加入后台 fetch 队列。⟦/sys⟧",
-                            accumulator=ctx.think_acc,
-                        ):
-                            yield think_ev
                 yield ev
             if pipe_coord:
                 pipe_coord.mark_search_ended()
@@ -361,6 +349,27 @@ async def run_retrieval_pipeline(
 
         ctx.hits = list(search_out.get("hits") or [])
         ctx.answer = str(search_out.get("answer") or "")
+
+        if (
+            run_search
+            and ctx.hits
+            and not skip_web_search
+            and not intent.skip_web_search
+        ):
+            rel_out: dict[str, Any] = {}
+            async for ev in stream_relevance_filter_phase(
+                user_message=ctx.route_message,
+                search_query=ctx.search_query_for_plan or query,
+                hits=ctx.hits,
+                llm=ctx.planner_llm,
+                think_acc=ctx.think_acc,
+                execution_trace=ctx.execution_trace,
+                result=rel_out,
+            ):
+                yield ev
+            filtered = rel_out.get("kept_hits")
+            if isinstance(filtered, list):
+                ctx.hits = [dict(h) for h in filtered if isinstance(h, dict)]
 
         search_zero_gate = detect_search_zero_gate(
             hits=ctx.hits,

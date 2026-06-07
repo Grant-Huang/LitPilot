@@ -383,6 +383,47 @@ async def test_web_search_query_native_accepts_include_and_exclude_domains(
 
 
 @pytest.mark.asyncio
+async def test_native_fetch_jina_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5276793"
+
+    async def fake_api(*_args, **_kwargs):
+        return None
+
+    async def fake_oa(*_args, **_kwargs):
+        return [url]
+
+    async def fake_direct(*_args, **_kwargs):
+        return None
+
+    async def fake_jina(candidate: str, **kwargs):
+        return "# SSRN via Jina\n\n" + ("x" * 120)
+
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.try_api_abstract_fetch",
+        fake_api,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.resolve_oa_fetch_urls",
+        fake_oa,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch._direct_http_fetch",
+        fake_direct,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.try_jina_reader_fetch",
+        fake_jina,
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.providers.native_fetch.try_metadata_only_fallback",
+        lambda *a, **k: None,
+    )
+    result = await fetch_bytes(url, timeout=10.0, jina_api_key="test-key")
+    assert result.via_jina
+    assert len(result.text) >= 80
+
+
+@pytest.mark.asyncio
 async def test_openalex_search_returns_results_shape() -> None:
     data = await openalex_search("transformer efficiency", max_results=3)
     assert "results" in data
