@@ -632,6 +632,34 @@
   cursor: not-allowed;
 }
 
+.litpilot-composer__stop {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: var(--color-text-secondary);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.12s ease;
+}
+
+.litpilot-composer__stop:hover {
+  filter: brightness(1.08);
+}
+
+.litpilot-composer__stop-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
 /* —— 阶段时间线：弱化完成态绿底（参考 Claude） —— */
 .litpilot-message-list .meso-stage--done .meso-stage__dot {
   border-color: var(--color-border);

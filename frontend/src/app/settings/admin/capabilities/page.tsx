@@ -435,32 +435,7 @@ function CapabilityCard({
       );
     }
     if (cap.capability_id === "orchestrator") {
-      return (
-        <>
-          <div className="settings-cap-params-grid">
-            <InlineField
-              label="Token/阶段"
-              htmlFor={`${cap.capability_id}-tok`}
-              tip={CAP_TIPS.orchestrator_tokens}
-            >
-              <input
-                id={`${cap.capability_id}-tok`}
-                className="input"
-                type="number"
-                min={80}
-                max={500}
-                value={Number(params.orchestrator_max_tokens_per_phase ?? 280)}
-                onChange={(e) =>
-                  setParams((p) => ({
-                    ...p,
-                    orchestrator_max_tokens_per_phase: Number(e.target.value),
-                  }))
-                }
-              />
-            </InlineField>
-          </div>
-        </>
-      );
+      return null;
     }
     if (cap.capability_id === "literature_source") {
       const sourceTip = `${CAP_TIPS.literature_source_merge}\n${CAP_TIPS.literature_source_user_only}`;

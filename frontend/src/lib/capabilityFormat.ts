@@ -102,7 +102,7 @@ export function formatCapabilityParams(
     return `${prov} · 抓取 ${Number(p.max_fetch_urls ?? 5)} · 并行 ${Number(p.fetch_parallel ?? 3)}${pdfPart}`;
   }
   if (capId === "orchestrator") {
-    return `${Number(p.orchestrator_max_tokens_per_phase ?? 280)} tok/阶段`;
+    return "";
   }
   return "";
 }

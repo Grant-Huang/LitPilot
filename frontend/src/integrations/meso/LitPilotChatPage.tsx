@@ -40,7 +40,7 @@ export function LitPilotChatPage() {
     liveProcessText,
     liveChatText,
     send: sendStream,
-    abort,
+    stop,
   } = useLiteratureStream();
 
   const streamActivity = useStreamActivity(
@@ -304,7 +304,7 @@ export function LitPilotChatPage() {
           streamActivityHint={streamActivityHint}
           streamActivityLevel={streamActivity?.level ?? null}
           onSend={() => void send()}
-          onAbort={abort}
+          onAbort={() => void stop()}
         />
       </div>
     </div>

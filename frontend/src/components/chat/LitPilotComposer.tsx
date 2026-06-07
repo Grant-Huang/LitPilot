@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Button, Input, Tag, Tooltip, message } from "antd";
+import { Input, Tag, Tooltip, message } from "antd";
 import {
   ArrowUpOutlined,
   CloseOutlined,
@@ -170,9 +170,14 @@ export function LitPilotComposer({
                 : "Enter 发送 · Shift+Enter 换行"}
             </span>
             {isBusy ? (
-              <Button size="small" onClick={onAbort} danger>
-                停止
-              </Button>
+              <button
+                type="button"
+                className="litpilot-composer__stop"
+                aria-label="停止"
+                onClick={onAbort}
+              >
+                <span className="litpilot-composer__stop-icon" aria-hidden />
+              </button>
             ) : (
               <button
                 type="button"

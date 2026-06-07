@@ -19,6 +19,7 @@ import { useLiteratureTask } from "@/contexts/LiteratureTaskContext";
 import type { LitPilotMessage } from "@/lib/chatTypes";
 import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
+import { materializeAssistantFromStream } from "@/lib/streamMaterialize";
 import { persistActiveSession } from "@/lib/sessionStorage";
 import {
   ASSISTANT_RELOAD_ATTEMPTS,
@@ -44,7 +45,7 @@ type LiteratureStreamContextValue = {
   liveProcessText: string;
   liveChatText: string;
   send: (text: string, fetchUrls: string[]) => Promise<void>;
-  abort: () => void;
+  stop: () => Promise<void>;
   resetStreamUi: () => void;
 };
 
@@ -77,6 +78,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     registerEventSeq,
     refreshFromServer,
     clearTask,
+    cancelTask,
   } = useLiteratureTask();
 
   const { state: streamState, start, abort, reset } = useBatchedSSEStream(
@@ -109,6 +111,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   const prevActiveSessionRef = useRef<string | null>(null);
   const connectedTaskIdRef = useRef<string | null>(null);
   const reconnectingRef = useRef(false);
+  const stopMaterializedRef = useRef(false);
 
   const resetStreamLocalState = useCallback(
     (sessionId: string | null = activeSessionId) => {
@@ -212,9 +215,32 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     if (activeTask?.status !== "cancelled") return;
     abort();
     reset();
-    resetStreamLocalState(activeSessionId);
+    streamStartedRef.current = false;
+    connectedTaskIdRef.current = null;
+    streamFinalizeRef.current = false;
+    setStreamPending(false);
+    setStreamSettling(false);
+    if (!stopMaterializedRef.current) {
+      resetStreamLocalState(activeSessionId);
+    } else {
+      pendingUserTextRef.current = null;
+      commitLiveText({
+        liveIntent: "new_topic",
+        liveProcessText: "",
+        liveChatText: "",
+      });
+      stopMaterializedRef.current = false;
+    }
     clearTask();
-  }, [activeTask?.status, abort, reset, resetStreamLocalState, activeSessionId, clearTask]);
+  }, [
+    activeTask?.status,
+    abort,
+    reset,
+    resetStreamLocalState,
+    activeSessionId,
+    clearTask,
+    commitLiveText,
+  ]);
 
   useEffect(() => {
     if (!isChat || !activeTask) return;
@@ -444,9 +470,10 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       setLiveMessages([]);
       return;
     }
-    setLiveMessages((prev) =>
-      prev.filter((m) => !(m.role === "user" && m.content === pending)),
-    );
+    setLiveMessages((prev) => {
+      if (prev.some((m) => m.role === "assistant")) return prev;
+      return prev.filter((m) => !(m.role === "user" && m.content === pending));
+    });
   }, [storedMessages, streamSettling]);
 
   useEffect(() => {
@@ -545,6 +572,104 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     ],
   );
 
+  const stop = useCallback(async () => {
+    if (!streaming && !streamPending && !streamSettling) return;
+
+    streamFinalizeRef.current = true;
+    stopMaterializedRef.current = true;
+
+    const pendingUser = pendingUserTextRef.current;
+    const materialized = materializeAssistantFromStream(streamState, {
+      intent: liveIntent,
+      processText: liveProcessText,
+      chatText: liveChatText,
+    });
+
+    setLiveMessages((prev) => {
+      const users = prev.filter((m) => m.role === "user");
+      const baseUsers =
+        users.length > 0
+          ? users
+          : pendingUser
+            ? [
+                {
+                  id: `pending-user-${Date.now()}`,
+                  role: "user" as const,
+                  content: pendingUser,
+                },
+              ]
+            : [];
+      if (materialized) {
+        return [...baseUsers, materialized];
+      }
+      const assistants = prev.filter((m) => m.role === "assistant");
+      if (assistants.length > 0) return [...baseUsers, ...assistants];
+      if (
+        baseUsers.length > 0 &&
+        (liveProcessText.trim() ||
+          liveChatText.trim() ||
+          streamState.status !== "idle")
+      ) {
+        const trace = collectExecutionTraceFromStream(streamState);
+        const hasTrace =
+          trace.stages.length > 0 ||
+          trace.tools.length > 0 ||
+          trace.workflows.length > 0 ||
+          Boolean(trace.thinkContent);
+        return [
+          ...baseUsers,
+          {
+            id: `stopped-assistant-${Date.now()}`,
+            role: "assistant" as const,
+            content: liveChatText.trim() || "（已停止）",
+            extras: hasTrace
+              ? {
+                  executionTrace: trace,
+                  thinkContent: trace.thinkContent,
+                }
+              : undefined,
+          },
+        ];
+      }
+      return prev.length > 0 ? prev : baseUsers;
+    });
+
+    pendingUserTextRef.current = null;
+    abort();
+    reset();
+    streamStartedRef.current = false;
+    connectedTaskIdRef.current = null;
+    setStreamPending(false);
+    setStreamSettling(false);
+    commitLiveText({
+      liveIntent: "new_topic",
+      liveProcessText: "",
+      liveChatText: "",
+    });
+
+    if (activeTask && isRunningTaskStatus(activeTask.status)) {
+      await cancelTask();
+    } else {
+      stopMaterializedRef.current = false;
+      streamFinalizeRef.current = false;
+      clearTask();
+    }
+  }, [
+    streaming,
+    streamPending,
+    streamSettling,
+    streamState,
+    liveIntent,
+    liveProcessText,
+    liveChatText,
+    abort,
+    reset,
+    commitLiveText,
+    activeTask,
+    cancelTask,
+    clearTask,
+  ]);
+
   const resetStreamUi = useCallback(() => {
     if (!streaming && !streamSettling) {
       setLiveMessages([]);
@@ -564,7 +689,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       liveProcessText,
       liveChatText,
       send,
-      abort,
+      stop,
       resetStreamUi,
     }),
     [
@@ -577,7 +702,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       liveProcessText,
       liveChatText,
       send,
-      abort,
+      stop,
       resetStreamUi,
     ],
   );

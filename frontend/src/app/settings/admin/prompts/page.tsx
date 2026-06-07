@@ -108,8 +108,6 @@ export default function AdminPromptsPage() {
   const [savedPromptParams, setSavedPromptParams] = useState<Record<string, unknown>>({});
   const [orchRefId, setOrchRefId] = useState("");
   const [savedOrchRefId, setSavedOrchRefId] = useState("");
-  const [orchParams, setOrchParams] = useState<Record<string, unknown>>({});
-  const [savedOrchParams, setSavedOrchParams] = useState<Record<string, unknown>>({});
   const [reviewRefId, setReviewRefId] = useState("");
   const [savedReviewRefId, setSavedReviewRefId] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -149,8 +147,7 @@ export default function AdminPromptsPage() {
     templatesDirty ||
     !paramsEqual(promptParams, savedPromptParams) ||
     orchRefId !== savedOrchRefId ||
-    reviewRefId !== savedReviewRefId ||
-    !paramsEqual(orchParams, savedOrchParams);
+    reviewRefId !== savedReviewRefId;
 
   useUnsavedGuard(dirty);
 
@@ -170,10 +167,6 @@ export default function AdminPromptsPage() {
         const orchId = String(orch?.primary_ref?.id || "");
         setOrchRefId(orchId);
         setSavedOrchRefId(orchId);
-        const orchP = { ...(orch?.params || {}) };
-        setOrchParams(orchP);
-        setSavedOrchParams({ ...orchP });
-
         const reviewId = String(review?.primary_ref?.id || "");
         setReviewRefId(reviewId);
         setSavedReviewRefId(reviewId);
@@ -235,7 +228,7 @@ export default function AdminPromptsPage() {
         saves.push(
           settingsApiV2.updateCapability("orchestrator", {
             primary_ref: orchPrimary,
-            params: orchParams,
+            params: orchestratorCap.params || {},
           }),
         );
       }
@@ -256,7 +249,6 @@ export default function AdminPromptsPage() {
       setSavedTemplates({ ...templates });
       setSavedPromptParams({ ...promptParams });
       setSavedOrchRefId(orchRefId);
-      setSavedOrchParams({ ...orchParams });
       setSavedReviewRefId(reviewRefId);
       setMsg("已保存");
     } catch (e: unknown) {
@@ -310,7 +302,7 @@ export default function AdminPromptsPage() {
       />
 
       <p className="settings-field-note settings-cap-section-note">
-        按分组绑定模型实例；各提示词可单独设置 Token/阶段（未设时编排组 B–G 继承组内默认）。
+        按分组绑定模型实例；各提示词可单独设置 Token/阶段（未设时使用内置默认）。
       </p>
 
       <div className="settings-prompts__toggles">
@@ -420,33 +412,6 @@ export default function AdminPromptsPage() {
                     ))}
                   </select>
                 </InlineField>
-
-                {group.id === "orchestrator" ? (
-                  <div className="settings-prompts__orch-params">
-                    <div className="settings-cap-params-grid">
-                      <InlineField
-                        label="Token/阶段"
-                        htmlFor="orch-tok"
-                        tip="编排组 B–G 解说在未单独设置 Token 时的默认值；Checkpoint A 默认 1200。"
-                      >
-                        <input
-                          id="orch-tok"
-                          className="input"
-                          type="number"
-                          min={80}
-                          max={500}
-                          value={Number(orchParams.orchestrator_max_tokens_per_phase ?? 280)}
-                          onChange={(e) =>
-                            setOrchParams((p) => ({
-                              ...p,
-                              orchestrator_max_tokens_per_phase: Number(e.target.value),
-                            }))
-                          }
-                        />
-                      </InlineField>
-                    </div>
-                  </div>
-                ) : null}
 
                 {group.items.map((item) => {
                   const tokenParam = promptMaxTokensParam(item.key);
