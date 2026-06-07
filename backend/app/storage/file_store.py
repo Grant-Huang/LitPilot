@@ -272,11 +272,6 @@ class FileStore:
                     cfg, defaults, "orchestrator_max_tokens_per_phase", fallback=420
                 )
             ),
-            "review_system_prompt_template": str(
-                self._pick_legacy_value(
-                    cfg, defaults, "review_system_prompt_template", fallback=""
-                )
-            ),
         }
 
     # --- v2 settings helpers ---
@@ -605,15 +600,11 @@ class FileStore:
                 "max_source_chars": int(legacy.get("max_source_chars") or 14_000),
             },
         )
-        prompt_defaults = deploy_settings()
         cap(
             "prompts",
             "提示词模板",
             primary_ref=None,
             params={
-                "review_system_prompt_template": str(
-                    legacy.get("review_system_prompt_template") or ""
-                ),
             },
         )
 
@@ -683,7 +674,6 @@ class FileStore:
         tavily_id = self._credential_id_by_type("tavily")
         ss_id = self._credential_id_by_type("semantic_scholar")
         jina_id = self._credential_id_by_type("jina")
-        prompt_defaults = deploy_settings()
 
         templates: dict[str, dict[str, Any]] = {
             "review_main": {
@@ -760,10 +750,6 @@ class FileStore:
                 "override_params": {},
                 "params": {
                     **PROMPTS_PARAM_DEFAULTS,
-                    "review_system_prompt_template": str(
-                        legacy.get("review_system_prompt_template") or ""
-                    )
-                    or str(prompt_defaults.get("review_system_prompt_template") or ""),
                 },
             },
         }
@@ -1053,11 +1039,6 @@ class FileStore:
             if cap_id == "web_fetch" and "max_source_chars" not in merged:
                 merged["max_source_chars"] = 14_000
                 cap_changed = True
-            if cap_id == "prompts" and not str(merged.get("review_system_prompt_template") or "").strip():
-                seeded = str(deploy_settings().get("review_system_prompt_template") or "").strip()
-                if seeded:
-                    merged["review_system_prompt_template"] = seeded
-                    cap_changed = True
             if cap_changed:
                 cap["params"] = merged
                 changed = True

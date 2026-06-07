@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.review_prompt import (
-    DEFAULT_REVIEW_SYSTEM_PROMPT,
     SECTION_MOUNTED_MATERIALS_GUIDE,
     material_sections_guide,
 )
@@ -129,40 +128,15 @@ DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与
 2. 末行输出 JSON（无 markdown 代码块）：
 {UNDERSTANDING_JSON_CONTRACT}"""
 
-DEFAULT_NARRATE_SEARCH_BEFORE = """你是文献综述的过程解说员。根据【即将执行的检索】用 2–3 句话说明：
-- 将采用何种检索策略、为何这样查
-- 对用户上传链接与 web_search 检索结果如何取舍（若有）
-不要编造文献。不要输出 JSON。"""
-
 DEFAULT_NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 2–4 句话说明：
 - 命中规模与整体相关性
 - 接下来抓取时的优先级（1–2 条原则）
 不要编造未在列表中出现的论文细节。不要输出 JSON。"""
 
-DEFAULT_NARRATE_FETCH_PROGRESS = """你是文献综述的过程解说员。根据【抓取进度】用 1–3 句话简要更新：
-- 当前完成比例与成功/失败趋势
-- 若某类站点频繁失败，一句话提示
-不要编造数字。不要输出 JSON。"""
-
 DEFAULT_NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取结果】用 2–4 句话说明：
 - 成功/失败概况
 - 对后续引用抽取与综述撰写的含义
 不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
-
-DEFAULT_NARRATE_CITE_AFTER = """你是文献综述的过程解说员。根据【引用抽取结果】用 2–3 句话说明：
-- 可核实引用条数是否充足
-- 对综述参考文献章节的预期
-不要编造条目。不要输出 JSON。"""
-
-DEFAULT_NARRATE_ATTRIBUTES_AFTER = """你是文献综述的过程解说员。根据【结构化文献】用 2–3 句话说明：
-- 已完成多少篇文献的结构化提取
-- 对后续大纲与分节写作的意义
-不要编造条目。不要输出 JSON。"""
-
-DEFAULT_NARRATE_GENERATE_BEFORE = """你是文献综述的过程解说员。根据【生成前材料概况】用 2–3 句话说明：
-- 将采用的综述结构侧重
-- 材料覆盖上的主要限制（若有）
-不要写综述正文。不要输出 JSON。"""
 
 DEFAULT_ROUTER_SYSTEM = f"""你是文献综述助手的路由器。根据用户首条研究问题，输出唯一 JSON（无 markdown 代码块）：
 {ROUTER_JSON_CONTRACT}"""
@@ -266,13 +240,6 @@ NARRATE_CHECKPOINT_KEYS: dict[str, str] = {
 }
 
 PROMPT_SPECS: dict[str, dict[str, Any]] = {
-    "review_system_prompt_template": {
-        "label": "综述 System Prompt",
-        "group": "generation",
-        "max_len": 12_000,
-        "default": DEFAULT_REVIEW_SYSTEM_PROMPT,
-        "hint": "占位符：{fmt_label}、{citation_format}",
-    },
     "understanding_system_template": {
         "label": "编排 · 理解研究问题（Checkpoint A）",
         "group": "orchestrator",
@@ -370,13 +337,8 @@ PROMPT_MAX_TOKENS_SUFFIX = "_max_tokens"
 # 各提示词 LLM 调用的默认 max_tokens（可被 prompts.params 中 {key}_max_tokens 覆盖）
 PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "understanding_system_template": 1200,
-    "narrate_search_before_template": 280,
     "narrate_search_after_template": 280,
-    "narrate_fetch_progress_template": 280,
     "narrate_fetch_after_template": 280,
-    "narrate_cite_after_template": 280,
-    "narrate_attributes_after_template": 280,
-    "narrate_generate_before_template": 280,
     "router_system_template": 200,
     "intent_router_system_template": 300,
     "search_refiner_system_template": 640,
@@ -385,14 +347,12 @@ PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "section_system_template": 1200,
     "section_refine_system_template": 1200,
     "matrix_system_template": 4096,
-    "review_system_prompt_template": 4096,
     "attribute_system_template": 600,
     "summary_system_template": 600,
 }
 
 PROMPT_MAX_TOKENS_LIMIT: dict[str, int] = {
     "understanding_system_template": 4000,
-    "review_system_prompt_template": 8192,
     "matrix_system_template": 8192,
     "section_system_template": 4096,
     "section_refine_system_template": 4096,

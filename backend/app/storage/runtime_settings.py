@@ -498,11 +498,9 @@ def build_runtime_settings(
 
         "orchestrator_max_tokens_per_phase": int(orch.get("orchestrator_max_tokens_per_phase") or 280),
 
-        "review_system_prompt_template": str(prompts.get("review_system_prompt_template") or ""),
         **{
             key: str(prompts.get(key) or "")
             for key in PROMPT_TEMPLATE_PARAM_DEFAULTS
-            if key != "review_system_prompt_template"
         },
         **{
             prompt_max_tokens_param(key): clamp_prompt_max_tokens_value(

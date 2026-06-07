@@ -13,10 +13,6 @@ from app.agents.prompt_registry import (
     clamp_prompt_params,
     prompt_registry_metadata,
 )
-from app.agents.review_prompt import (
-    MAX_REVIEW_SYSTEM_PROMPT_LEN,
-    default_review_system_prompt_template,
-)
 from app.agents.search_credential_hint import search_credential_secret_hint
 from app.agents.tools.providers.tavily import search as tavily_provider_search
 from app.agents.tools.web_providers import SEARCH_PROVIDER_LABELS
@@ -95,10 +91,6 @@ def _agent_settings_response(merged: dict) -> dict:
     for k in ("web_search_api_key", "fetch_api_key", "llm_api_key"):
         if safe.get(k):
             safe[k] = _mask_secret(str(merged.get(k) or ""))
-    safe["review_system_prompt_default"] = default_review_system_prompt_template()
-    safe["review_system_prompt_template"] = str(
-        merged.get("review_system_prompt_template") or ""
-    )
     return safe
 
 
@@ -124,7 +116,6 @@ class AgentSettingsBody(BaseModel):
     orchestrator_use_reasoning: bool | None = None
     orchestrator_model: str | None = None
     orchestrator_max_tokens_per_phase: int | None = None
-    review_system_prompt_template: str | None = None
 
 
 @router.get("/agent")
@@ -172,12 +163,6 @@ async def save_agent_settings(body: AgentSettingsBody):
         partial["orchestrator_max_tokens_per_phase"] = max(
             80, min(int(partial["orchestrator_max_tokens_per_phase"]), 500)
         )
-
-    if "review_system_prompt_template" in partial:
-        tpl = str(partial["review_system_prompt_template"])
-        if len(tpl) > MAX_REVIEW_SYSTEM_PROMPT_LEN:
-            return err(f"综述生成 system prompt 过长（最多 {MAX_REVIEW_SYSTEM_PROMPT_LEN} 字符）")
-        partial["review_system_prompt_template"] = tpl
 
     saved = get_store().save_agent_settings(partial)
     return ok(_agent_settings_response(saved), message="设置已保存")

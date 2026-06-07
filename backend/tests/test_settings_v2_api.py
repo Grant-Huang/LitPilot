@@ -196,5 +196,5 @@ def test_prompt_template_defaults_endpoint(client: TestClient) -> None:
     meta = body["data"]["meta"]
     assert "understanding_system_template" in defaults
     assert "narration_focus" in defaults["understanding_system_template"]
-    assert any(m.get("key") == "review_system_prompt_template" for m in meta)
+    assert any(m.get("key") == "section_system_template" for m in meta)
 

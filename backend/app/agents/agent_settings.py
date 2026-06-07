@@ -228,20 +228,6 @@ async def get_citation_format() -> str:
 
 
 
-async def get_review_system_prompt_template() -> str | None:
-
-    raw = (await get_merged_settings()).get("review_system_prompt_template")
-
-    if raw is None:
-
-        return None
-
-    text = str(raw).strip()
-
-    return text or None
-
-
-
 
 
 async def get_use_llm_planner() -> bool:

@@ -87,8 +87,8 @@ def test_migration_seeds_prompt_from_deploy_defaults(
 
     caps = store.list_system_capabilities()
     prompts = next(c for c in caps if c.get("capability_id") == "prompts")
-    tpl = str(prompts.get("params", {}).get("review_system_prompt_template") or "")
-    assert "你是学术文献综述助手" in tpl
+    tpl = str(prompts.get("params", {}).get("section_system_template") or "")
+    assert tpl == ""
 
 
 def test_migration_uses_stable_instance_ids_and_binds_credentials(
