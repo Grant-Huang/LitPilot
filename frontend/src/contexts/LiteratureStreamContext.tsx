@@ -67,6 +67,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     messages: storedMessages,
     loadSessions,
     handleSelectSession,
+    reloadSessionMessages,
     setActiveSessionId,
     clearMessages,
   } = useChatSession();
@@ -132,6 +133,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   const connectTaskStream = useCallback(
     async (taskId: string, since: number, preserveState: boolean) => {
+      if (since === 0) {
+        extensionHandledRef.current = 0;
+      }
       connectedTaskIdRef.current = taskId;
       streamStartedRef.current = true;
       setStreamPending(false);
@@ -190,6 +194,33 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     }
   }, [isChat, streamState.status, abort]);
 
+  // Entering /chat: refresh task snapshot, sync session, reload persisted messages.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await refreshFromServer();
+      if (cancelled) return;
+
+      const sid = activeTask?.sessionId ?? activeSessionId;
+      if (
+        activeTask &&
+        isRunningTaskStatus(activeTask.status) &&
+        activeTask.sessionId &&
+        activeTask.sessionId !== activeSessionId
+      ) {
+        await handleSelectSession(activeTask.sessionId);
+        return;
+      }
+      if (sid) {
+        await reloadSessionMessages(sid);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only chat rehydrate
+  }, []);
+
   useEffect(() => {
     if (activeTask?.status !== "cancelled") return;
     abort();
@@ -200,6 +231,13 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!isChat || !activeTask) return;
+    if (
+      activeTask.sessionId !== activeSessionId &&
+      isRunningTaskStatus(activeTask.status)
+    ) {
+      void handleSelectSession(activeTask.sessionId);
+      return;
+    }
     if (activeTask.sessionId !== activeSessionId) return;
 
     if (
@@ -221,7 +259,8 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     }
 
     reconnectingRef.current = true;
-    void connectTaskStream(activeTask.taskId, activeTask.lastEventSeq, activeTask.lastEventSeq > 0)
+    // Full replay rebuilds stream UI after leaving /chat (provider remounts with empty state).
+    void connectTaskStream(activeTask.taskId, 0, false)
       .catch((e: unknown) => {
         if (e instanceof Error && e.name === "AbortError") return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -239,6 +278,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     connectTaskStream,
     loadSessions,
     handleSelectSession,
+    reloadSessionMessages,
   ]);
 
   useEffect(() => {

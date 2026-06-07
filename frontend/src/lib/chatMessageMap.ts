@@ -28,7 +28,11 @@ export function chatMessagesToLitPilot(msgs: ChatMessage[]): LitPilotMessage[] {
       (think || failed?.length || trace || turnWorkflow);
     const delivery = meta?.delivery === "chat" ? "chat" : "process";
     const showContent =
-      delivery === "chat" && m.content?.trim() && meta?.artifact_kind !== "review";
+      m.role === "user"
+        ? Boolean(m.content?.trim())
+        : delivery === "chat" &&
+          Boolean(m.content?.trim()) &&
+          meta?.artifact_kind !== "review";
     return {
       id: `hist-${i}`,
       role: m.role as "user" | "assistant",
