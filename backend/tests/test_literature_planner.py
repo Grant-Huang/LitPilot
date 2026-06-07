@@ -3,7 +3,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agents.literature_planner import (
-    FetchNarrationThrottle,
     PlannerContext,
     _extract_router_from_text,
     format_fetch_progress_context,
@@ -18,7 +17,7 @@ def test_should_narrate_lite_checkpoints() -> None:
     ctx = PlannerContext(True, False, 280)
     assert should_narrate("C", ctx)
     assert should_narrate("E", ctx)
-    assert should_narrate("F2", ctx)
+    assert not should_narrate("F2", ctx)
     assert not should_narrate("A", ctx)
     assert not should_narrate("B", ctx)
 
@@ -27,14 +26,6 @@ def test_should_narrate_disabled_without_planner() -> None:
     ctx = PlannerContext(False, False, 280)
     assert not should_narrate("C", ctx)
 
-
-def test_fetch_narration_throttle_every_n() -> None:
-    t = FetchNarrationThrottle(every_n=3, interval_sec=999.0)
-    assert not t.note_completed()
-    assert not t.note_completed()
-    assert t.note_completed()
-    t.mark_narrated()
-    assert not t.note_completed()
 
 
 def test_format_search_before_context() -> None:

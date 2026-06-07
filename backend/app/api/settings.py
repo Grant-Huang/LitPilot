@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.agent_settings import MAX_FETCH_URLS_CAP, SEARCH_MAX_RESULTS_CAP
-from app.agents.literature_source import normalize_literature_source_mode
 from app.agents.prompt_registry import (
     all_prompt_defaults,
     clamp_prompt_params,
@@ -116,7 +115,6 @@ class AgentSettingsBody(BaseModel):
     fetch_timeout_sec: float | None = None
     search_max_results: int | None = None
     max_fetch_urls: int | None = None
-    literature_source_mode: str | None = None
     search_retry_count: int | None = None
     fetch_retry_count: int | None = None
     fetch_retry_delay_ms: int | None = None
@@ -153,12 +151,6 @@ async def save_agent_settings(body: AgentSettingsBody):
         partial["max_fetch_urls"] = max(
             1, min(int(partial["max_fetch_urls"]), MAX_FETCH_URLS_CAP)
         )
-    if "literature_source_mode" in partial:
-        partial["literature_source_mode"] = normalize_literature_source_mode(
-            partial["literature_source_mode"]
-        )
-    else:
-        partial.pop("literature_source_mode", None)
     if "search_retry_count" in partial:
         partial["search_retry_count"] = max(0, min(int(partial["search_retry_count"]), 3))
     if "fetch_retry_count" in partial:

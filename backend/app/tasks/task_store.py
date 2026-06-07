@@ -46,7 +46,6 @@ class TaskRecord:
     session_id: str
     message: str
     fetch_urls: list[str]
-    literature_source_mode: str | None = None
     status: TaskStatus = "pending"
     progress: int = 0
     stage: str = "starting"
@@ -85,7 +84,6 @@ class TaskStore(ABC):
         session_id: str,
         message: str,
         fetch_urls: list[str] | None = None,
-        literature_source_mode: str | None = None,
         task_id: str | None = None,
     ) -> TaskRecord:
         raise NotImplementedError
@@ -173,7 +171,6 @@ class FileTaskStore(TaskStore):
             session_id=str(meta["session_id"]),
             message=str(meta["message"]),
             fetch_urls=list(meta.get("fetch_urls") or []),
-            literature_source_mode=meta.get("literature_source_mode"),
             status=meta.get("status", "pending"),
             progress=int(meta.get("progress") or 0),
             stage=str(meta.get("stage") or "starting"),
@@ -193,7 +190,6 @@ class FileTaskStore(TaskStore):
         session_id: str,
         message: str,
         fetch_urls: list[str] | None = None,
-        literature_source_mode: str | None = None,
         task_id: str | None = None,
     ) -> TaskRecord:
         tid = task_id or uuid.uuid4().hex
@@ -203,7 +199,6 @@ class FileTaskStore(TaskStore):
             "session_id": session_id,
             "message": message,
             "fetch_urls": list(fetch_urls or []),
-            "literature_source_mode": literature_source_mode,
             "status": "pending",
             "progress": 0,
             "stage": "starting",
@@ -373,7 +368,7 @@ class TursoTaskStore(TaskStore):
             session_id,
             message,
             fetch_urls_json,
-            literature_source_mode,
+            _literature_source_mode,
             status,
             progress,
             stage,
@@ -393,9 +388,6 @@ class TursoTaskStore(TaskStore):
             session_id=str(session_id),
             message=str(message),
             fetch_urls=[str(u) for u in fetch_urls] if isinstance(fetch_urls, list) else [],
-            literature_source_mode=(
-                str(literature_source_mode) if literature_source_mode else None
-            ),
             status=status,
             progress=int(progress or 0),
             stage=str(stage or "starting"),
@@ -435,7 +427,6 @@ class TursoTaskStore(TaskStore):
         session_id: str,
         message: str,
         fetch_urls: list[str] | None = None,
-        literature_source_mode: str | None = None,
         task_id: str | None = None,
     ) -> TaskRecord:
         tid = task_id or uuid.uuid4().hex
@@ -443,17 +434,16 @@ class TursoTaskStore(TaskStore):
         self._conn.execute(
             """
             INSERT INTO literature_tasks (
-                id, session_id, message, fetch_urls_json, literature_source_mode,
+                id, session_id, message, fetch_urls_json,
                 status, progress, stage, error, cancel_requested, worker_id,
                 started_at, finished_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 'pending', 0, 'starting', NULL, 0, NULL, ?, NULL, ?)
+            ) VALUES (?, ?, ?, ?, 'pending', 0, 'starting', NULL, 0, NULL, ?, NULL, ?)
             """,
             (
                 tid,
                 session_id,
                 message,
                 json.dumps(list(fetch_urls or []), ensure_ascii=False),
-                literature_source_mode,
                 now,
                 now,
             ),

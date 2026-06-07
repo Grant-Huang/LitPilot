@@ -34,6 +34,7 @@ IntentKind = Literal[
     "append_urls",
     "review_refine",
     "query_corpus",
+    "short_answer",
 ]
 
 VALID_INTENTS: frozenset[str] = frozenset(
@@ -43,18 +44,9 @@ VALID_INTENTS: frozenset[str] = frozenset(
         "append_urls",
         "review_refine",
         "query_corpus",
+        "short_answer",
     }
 )
-
-LEGACY_INTENT_MAP: dict[str, IntentKind] = {
-    "supplement": "append_urls",
-    "refine_gen": "review_refine",
-    "regen_only": "review_refine",
-    "expand_search": "query_corpus",
-    "retry_failed": "query_corpus",
-    "manage_library": "query_corpus",
-    "synthesis_matrix": "query_corpus",
-}
 
 _SUBTOPIC_ADD_RE = re.compile(
     r"增加子主题|加一个子主题|新增子主题|添加子主题",
@@ -124,7 +116,12 @@ def normalize_intent(raw: str) -> IntentKind:
     intent = (raw or "").strip()
     if intent in VALID_INTENTS:
         return intent  # type: ignore[arg-type]
-    return LEGACY_INTENT_MAP.get(intent, "query_corpus")
+    _legacy: dict[str, IntentKind] = {
+        "supplement": "append_urls",
+        "refine_gen": "review_refine",
+        "regen_only": "review_refine",
+    }
+    return _legacy.get(intent, "short_answer")
 
 
 def build_session_turn_context(
@@ -174,6 +171,17 @@ def _extract_urls(user_message: str, extra_urls: list[str] | None) -> list[str]:
 def _query_corpus_result(*, gen_directives: str = "") -> LiteratureIntentResult:
     return LiteratureIntentResult(
         intent="query_corpus",
+        gen_directives=gen_directives[:500],
+        defer_generate=True,
+        skip_web_search=True,
+        skip_fetch=True,
+        use_existing_corpus=True,
+    )
+
+
+def _short_answer_result(*, gen_directives: str = "") -> LiteratureIntentResult:
+    return LiteratureIntentResult(
+        intent="short_answer",
         gen_directives=gen_directives[:500],
         defer_generate=True,
         skip_web_search=True,
@@ -253,18 +261,12 @@ def detect_intent_rules(
     if turn_ctx.has_corpus and _QUERY_RE.search(msg) and len(msg) < 400:
         return _query_corpus_result()
 
-    if _EXPAND_HINT_RE.search(msg):
-        return _query_corpus_result(gen_directives=msg[:500])
-
-    if turn_ctx.has_corpus:
-        return _query_corpus_result(gen_directives=msg[:500])
-
     return None
 
 
 def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
     msg = user_message.strip()
-    fallback = _query_corpus_result(gen_directives=msg[:500])
+    fallback = _short_answer_result(gen_directives=msg[:500])
     if not msg:
         fallback = LiteratureIntentResult(
             intent="new_topic",
@@ -348,7 +350,7 @@ async def route_literature_intent(
         )
         result = _parse_intent_json(resp.content or "", user_message)
     except Exception:
-        result = _query_corpus_result(gen_directives=user_message.strip()[:500])
+        result = _short_answer_result(gen_directives=user_message.strip()[:500])
 
     result.intent = normalize_intent(result.intent)
     urls = _extract_urls(user_message, extra_urls)

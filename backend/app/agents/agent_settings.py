@@ -176,9 +176,6 @@ async def get_max_fetch_urls() -> int:
 
 
 
-async def get_literature_source_mode() -> str:
-    """v2 仅保留 merge 模式（任务级显式 URL 仍受支持）。"""
-    return "merge"
 
 
 
@@ -252,9 +249,6 @@ async def get_use_llm_planner() -> bool:
     return bool((await get_merged_settings()).get("use_llm_planner", True))
 
 
-async def get_orchestrator_use_reasoning() -> bool:
-    """Reasoning mode is disabled (hard-coded off)."""
-    return False
 
 
 
@@ -274,15 +268,6 @@ async def get_orchestrator_model() -> str:
 
 
 
-async def get_orchestrator_max_tokens() -> int:
-
-    n = int(
-
-        (await get_merged_settings()).get("orchestrator_max_tokens_per_phase") or 280
-
-    )
-
-    return max(80, min(n, 500))
 
 
 
@@ -353,13 +338,37 @@ async def get_max_source_chars() -> int:
     return max(2_000, min(n, 50_000))
 
 
+def _llm_cfg_from_flat(s: dict[str, Any], *, prefix: str = "") -> dict[str, Any]:
+    from app.llm.factory import PROVIDER_REGISTRY
 
+    if prefix:
+        provider = s.get(f"{prefix}_provider") or "openai"
+        api_key = s.get(f"{prefix}_api_key") or ""
+        model = s.get(f"{prefix}_model") or ""
+        base_url = s.get(f"{prefix}_base_url") or ""
+        group_id = (s.get(f"{prefix}_group_id") or "").strip()
+    else:
+        provider = s.get("llm_provider") or "openai"
+        api_key = s.get("llm_api_key") or ""
+        model = s.get("llm_model") or ""
+        base_url = s.get("llm_base_url") or ""
+        group_id = (s.get("llm_group_id") or "").strip()
+
+    meta = PROVIDER_REGISTRY.get(provider, PROVIDER_REGISTRY["openai"])
+    extra: dict[str, str] = {}
+    if group_id:
+        extra["group_id"] = group_id
+    return {
+        "provider": provider,
+        "api_key": api_key,
+        "model": model or meta.get("default_model", "gpt-4o-mini"),
+        "base_url": base_url or meta.get("default_base_url"),
+        "extra": extra or None,
+    }
 
 
 async def get_review_llm_config() -> dict[str, Any]:
-
     """review_main 能力绑定的主模型（综述撰写、矩阵、语料问答）。"""
-
     return _llm_cfg_from_flat(await get_merged_settings())
 
 

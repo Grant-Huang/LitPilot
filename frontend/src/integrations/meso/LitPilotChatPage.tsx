@@ -52,9 +52,6 @@ export function LitPilotChatPage() {
 
   const [input, setInput] = useState("");
   const [fetchUrls, setFetchUrls] = useState<string[]>([]);
-  const [literatureSourceMode, setLiteratureSourceMode] = useState<
-    "merge" | "user_only"
-  >("merge");
   const [maxFetchUrls, setMaxFetchUrls] = useState(50);
   const [pinnedArtifact, setPinnedArtifact] = useState(
     () => null as ReturnType<typeof cloneStreamState> | null,
@@ -71,11 +68,6 @@ export function LitPilotChatPage() {
       .getSystemCapabilities()
       .then((res) => {
         const caps = res.items || [];
-        const source = caps.find((c) => c.capability_id === "literature_source");
-        const mode = String(source?.params?.literature_source_mode || "");
-        if (mode === "merge" || mode === "user_only") {
-          setLiteratureSourceMode(mode);
-        }
         const fetch = caps.find((c) => c.capability_id === "web_fetch");
         const maxUrlsRaw = fetch?.params?.max_fetch_urls;
         const maxUrls = Number(maxUrlsRaw);
@@ -258,13 +250,12 @@ export function LitPilotChatPage() {
     if ((!text && !urlsToSend.length) || isStreamBusy) return;
     setInput("");
     setFetchUrls([]);
-    await sendStream(text || "追加文献链接", urlsToSend, literatureSourceMode);
+    await sendStream(text || "追加文献链接", urlsToSend);
   }, [
     input,
     fetchUrls,
     isStreamBusy,
     sendStream,
-    literatureSourceMode,
     allowUrlUpload,
   ]);
 
@@ -303,8 +294,6 @@ export function LitPilotChatPage() {
           fetchUrls={fetchUrls}
           onFetchUrlsChange={setFetchUrls}
           maxFetchUrls={maxFetchUrls}
-          literatureSourceMode={literatureSourceMode}
-          onLiteratureSourceModeChange={setLiteratureSourceMode}
           streamPhase={streamPhase}
           isStreamBusy={isStreamBusy}
           streamActivityHint={streamActivityHint}

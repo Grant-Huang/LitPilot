@@ -44,7 +44,6 @@ type LiteratureStreamContextValue = {
   send: (
     text: string,
     fetchUrls: string[],
-    sourceMode?: "merge" | "user_only",
   ) => Promise<void>;
   stop: () => Promise<void>;
 };
@@ -76,8 +75,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     cancelTask,
   } = useLiteratureTask();
 
+  const streamErrorMsgRef = useRef<string | null>(null);
+
   const { state: streamState, start, abort, reset } = useBatchedSSEStream(
     "/api/tasks/idle/stream",
+    { onError: (msg: string) => { streamErrorMsgRef.current = msg; } },
   );
 
   const [liveMessages, setLiveMessages] = useState<LitPilotMessage[]>([]);
@@ -115,6 +117,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       pendingUserTextRef.current = null;
       extensionHandledRef.current = 0;
       connectedTaskIdRef.current = null;
+      streamErrorMsgRef.current = null;
       setStreamSettling(false);
       setStreamPending(false);
       setLiveMessages([]);
@@ -294,7 +297,11 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
             : [];
       const placeholderContent =
         chatText.trim() ||
-        (streamError ? "请求失败，请查看提示或重试。" : "（正在保存回答…）");
+        (streamError
+          ? streamErrorMsgRef.current
+            ? `请求失败：${streamErrorMsgRef.current}`
+            : "请求失败，请重试。"
+          : "（正在保存回答…）");
       return [
         ...baseUsers,
         {
@@ -395,7 +402,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     async (
       text: string,
       fetchUrls: string[],
-      sourceMode: "merge" | "user_only" = "merge",
     ) => {
       const trimmed = text.trim();
       if (!trimmed || isStreamBusy) return;
@@ -432,9 +438,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           message: trimmed,
           session_id: sessionId ?? undefined,
           ...(fetchUrls.length ? { fetch_urls: fetchUrls } : {}),
-          ...(sourceMode !== "merge"
-            ? { literature_source_mode: sourceMode }
-            : {}),
         });
         const task = {
           ...mapStatusRow(row),
