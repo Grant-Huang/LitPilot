@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
+from app.agents.content_pipeline import process_url_for_context
 from app.agents.literature_progress import PROGRESS_INTERVAL_SEC
 from app.agents.retry_utils import retry_async
 
