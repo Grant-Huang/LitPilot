@@ -5,6 +5,8 @@ import httpx
 
 from app.agents.tools.providers.academic._hit import hit, merge_snippet
 from app.agents.tools.providers.academic.api_pacing import (
+    BackoffBudget,
+    BackoffBudgetExhausted,
     pace_before_request,
     wait_after_429,
 )
@@ -21,6 +23,8 @@ async def _esearch(
     query: str,
     limit: int,
     min_year: int,
+    *,
+    budget: BackoffBudget | None = None,
 ) -> list[str]:
     params = {
         "db": "pmc",
@@ -38,7 +42,10 @@ async def _esearch(
         if resp.status_code == 429:
             if attempt + 1 >= MAX_ATTEMPTS:
                 return []
-            await wait_after_429("ncbi", attempt=attempt)
+            try:
+                await wait_after_429("ncbi", attempt=attempt, budget=budget)
+            except BackoffBudgetExhausted:
+                return []
             continue
         resp.raise_for_status()
         data = resp.json()
@@ -46,7 +53,12 @@ async def _esearch(
     return []
 
 
-async def _esummary(client: httpx.AsyncClient, pmc_ids: list[str]) -> list[dict]:
+async def _esummary(
+    client: httpx.AsyncClient,
+    pmc_ids: list[str],
+    *,
+    budget: BackoffBudget | None = None,
+) -> list[dict]:
     if not pmc_ids:
         return []
     params = {
@@ -60,7 +72,10 @@ async def _esummary(client: httpx.AsyncClient, pmc_ids: list[str]) -> list[dict]
         if resp.status_code == 429:
             if attempt + 1 >= MAX_ATTEMPTS:
                 return []
-            await wait_after_429("ncbi", attempt=attempt)
+            try:
+                await wait_after_429("ncbi", attempt=attempt, budget=budget)
+            except BackoffBudgetExhausted:
+                return []
             continue
         resp.raise_for_status()
         result = resp.json().get("result") or {}
@@ -119,10 +134,11 @@ async def search(
         follow_redirects=True,
         headers={"User-Agent": _USER_AGENT},
     ) as client:
-        pmc_ids = await _esearch(client, q, limit, min_year)
+        budget = BackoffBudget()
+        pmc_ids = await _esearch(client, q, limit, min_year, budget=budget)
         if not pmc_ids:
             return []
-        articles = await _esummary(client, pmc_ids)
+        articles = await _esummary(client, pmc_ids, budget=budget)
 
     rows: list[dict[str, str]] = []
     for art in articles:

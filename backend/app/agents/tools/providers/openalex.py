@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from app.agents.tools.providers.academic.query_sanitize import sanitize_academic_search_query
 from app.agents.tools.search_hits import restrict_hits_to_domains
 
 _MAILTO = "support@litpilot.local"
@@ -61,7 +62,7 @@ async def search(
     max_results: int = 8,
     include_domains: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    q = (query or "").strip()
+    q = sanitize_academic_search_query((query or "").strip())
     if not q:
         return {"results": [], "answer": ""}
 

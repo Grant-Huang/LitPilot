@@ -32,6 +32,7 @@ from app.core.stream_events import chat_text
 from app.agents.literature_turn_graph import sync_graph_node, sync_graph_nodes
 from app.agents.literature_turn_helpers import resolve_search_queries
 from app.agents.fetch_coordinator import FetchCoordinator
+from app.agents.search_aspects import collect_search_exclusions, sub_topic_pass_spec
 from app.agents.search_expansion import expand_search_queries
 from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
@@ -172,6 +173,17 @@ async def run_retrieval_pipeline(
             skip_web_search = True
         search_out: dict[str, Any] = {}
         try:
+            aspect_extra: list[str] = []
+            for st in ctx.sub_topics_for_search:
+                aspect_extra.extend(getattr(st, "exclude_terms", None) or [])
+            ctx.search_hit_exclusions = collect_search_exclusions(
+                ctx.router_result.search_aspects,
+                extra=aspect_extra,
+            )
+            planned_aspects = bool(ctx.router_result.search_aspects) and all(
+                a.primary_query() for a in ctx.router_result.search_aspects
+            )
+
             expanded_queries = [query]
             if (
                 ctx.use_outline_path
@@ -186,6 +198,7 @@ async def run_retrieval_pipeline(
                 ctx.enable_query_expansion
                 and ctx.search_expansion_count > 1
                 and not skip_web_search
+                and not planned_aspects
             ):
                 search_llm = await get_search_llm()
                 expanded_queries = await expand_search_queries(
@@ -196,7 +209,7 @@ async def run_retrieval_pipeline(
                     use_llm=True,
                 )
 
-            if not skip_web_search and expanded_queries:
+            if not skip_web_search and expanded_queries and not planned_aspects:
                 search_llm = await get_search_llm()
                 refinement = await refine_literature_search_queries(
                     expanded_queries,
@@ -205,7 +218,10 @@ async def run_retrieval_pipeline(
                     use_llm=True,
                 )
                 expanded_queries = refinement.queries or expanded_queries
-                ctx.search_hit_exclusions = list(refinement.exclude_title_substrings)
+                ctx.search_hit_exclusions = collect_search_exclusions(
+                    ctx.router_result.search_aspects,
+                    extra=aspect_extra + list(refinement.exclude_title_substrings),
+                )
                 if len(expanded_queries) == 1:
                     query = expanded_queries[0]
 
@@ -215,6 +231,17 @@ async def run_retrieval_pipeline(
                     str(st.title or "").strip()
                     for st in ctx.sub_topics_for_search
                 ]
+
+            single_source_queries: dict[str, str] = {}
+            single_skip_sources: frozenset[str] = frozenset()
+            if ctx.sub_topics_for_search:
+                _, single_source_queries, single_skip_sources = sub_topic_pass_spec(
+                    ctx.sub_topics_for_search[0]
+                )
+            elif ctx.router_result.search_aspects:
+                first_aspect = ctx.router_result.search_aspects[0]
+                single_source_queries = first_aspect.source_queries()
+                single_skip_sources = first_aspect.skip_sources()
 
             fetch_cap_early = effective_fetch_cap(ctx.max_fetch_urls, ctx.upload_urls)
             pipe_coord: FetchCoordinator | None = None
@@ -269,6 +296,11 @@ async def run_retrieval_pipeline(
                     search_provider=ctx.search_provider,
                     search_parallel=ctx.search_parallel,
                     topic_titles=topic_titles,
+                    search_sub_topics=(
+                        ctx.sub_topics_for_search
+                        if planned_aspects and len(ctx.sub_topics_for_search) >= 2
+                        else None
+                    ),
                 )
             else:
                 search_stream = stream_search_phase(
@@ -295,6 +327,8 @@ async def run_retrieval_pipeline(
                     exclude_title_substrings=ctx.search_hit_exclusions,
                     search_provider=ctx.search_provider,
                     emit_pass_hits=pipe_coord is not None,
+                    source_queries=single_source_queries or None,
+                    skip_sources=single_skip_sources or None,
                 )
 
             async for ev in search_stream:

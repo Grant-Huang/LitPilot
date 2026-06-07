@@ -2,18 +2,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.agents.llm_json import parse_json_object
 from app.agents.prompt_registry import DEFAULT_ROUTER_SYSTEM as ROUTER_SYSTEM
 from app.agents.prompt_settings import get_router_system_prompt
+from app.agents.search_query_utils import (
+    SEARCH_QUERY_MAX,
+    TOPIC_LABEL_MAX,
+    clamp_search_query,
+)
 from app.llm.base import LLMMessage
 from app.services.llm_service import get_router_llm
 from app.storage.file_store import is_default_session_title
 
-SEARCH_QUERY_MAX = 200
+if TYPE_CHECKING:
+    from app.agents.search_aspects import SearchAspect
+
 FOCUS_MAX = 300
-TOPIC_LABEL_MAX = 120
 
 
 @dataclass
@@ -24,19 +30,27 @@ class LiteratureRouterResult:
     clarification_questions: list[str] = field(default_factory=list)
     narration_focus: str = ""
     writing_emphasis: str = ""
+    search_aspects: list[SearchAspect] = field(default_factory=list)
 
 
-def clamp_search_query(
-    text: str,
-    *,
-    max_len: int = SEARCH_QUERY_MAX,
-    fallback: str = "",
-) -> str:
-    q = str(text or "").strip()[:max_len]
-    if q:
-        return q
-    fb = str(fallback or "").strip()[:max_len]
-    return fb
+# Re-export for backward-compatible imports from literature_router.
+__all__ = [
+    "FOCUS_MAX",
+    "LiteratureRouterResult",
+    "SEARCH_QUERY_MAX",
+    "TOPIC_LABEL_MAX",
+    "build_router_result",
+    "clamp_search_query",
+    "fallback_router_result",
+    "fallback_session_title",
+    "parse_router_json",
+    "refine_router_session_title",
+    "resolve_auto_session_title",
+    "route_literature",
+    "sanitize_session_title",
+    "should_auto_rename_session",
+    "title_is_message_truncation",
+]
 
 
 def parse_router_json(raw: str) -> dict[str, Any]:
@@ -89,6 +103,8 @@ def fallback_router_result(user_message: str) -> LiteratureRouterResult:
 
 
 def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRouterResult:
+    from app.agents.search_aspects import parse_search_aspects
+
     msg = user_message.strip()
     fallback_q = clamp_search_query(msg, fallback=msg)
     title = sanitize_session_title(str(data.get("session_title") or ""), msg)
@@ -103,13 +119,18 @@ def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRo
         for q in (data.get("clarification_questions") or [])
         if str(q).strip()
     ]
+    aspects = parse_search_aspects(data.get("search_aspects"))
+    primary_q = search_query
+    if aspects and not primary_q:
+        primary_q = aspects[0].primary_query()
     return LiteratureRouterResult(
         session_title=title,
-        search_query=search_query,
+        search_query=primary_q or search_query,
         needs_clarification=needs_clarification,
         clarification_questions=questions[:6],
         narration_focus=str(data.get("narration_focus") or "").strip()[:FOCUS_MAX],
         writing_emphasis=str(data.get("writing_emphasis") or "").strip()[:FOCUS_MAX],
+        search_aspects=aspects,
     )
 
 
@@ -152,6 +173,7 @@ async def refine_router_session_title(
         clarification_questions=list(result.clarification_questions),
         narration_focus=result.narration_focus or routed.narration_focus,
         writing_emphasis=result.writing_emphasis or routed.writing_emphasis,
+        search_aspects=result.search_aspects or routed.search_aspects,
     )
 
 

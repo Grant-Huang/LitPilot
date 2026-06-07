@@ -1,4 +1,9 @@
-from app.agents.research_decompose import decompose_research_brief, is_polluted_search_query
+from app.agents.research_decompose import (
+    build_subtopic_search_query,
+    decompose_research_brief,
+    is_polluted_search_query,
+    latin_tokens_for_search,
+)
 
 
 MOM_BRIEF = """我要写一个与AI原生MOM有关的文献综述，包括4个方面：
@@ -17,8 +22,23 @@ def test_decompose_mom_four_aspects() -> None:
     assert "迁移" in topics[3].description
     assert all(t.search_query for t in topics)
     assert not is_polluted_search_query(topics[0].search_query)
-    assert topics[0].search_query != topics[1].search_query
+    assert all(not any("\u4e00" <= ch <= "\u9fff" for ch in t.search_query) for t in topics)
     assert "我要写" not in topics[0].search_query
+
+
+def test_build_subtopic_search_query_english_only() -> None:
+    q = build_subtopic_search_query(
+        "多智能体协作与微服务架构",
+        "其三，多智能体协作、动态知识推理",
+        base_query="AI-native MOM systematic review",
+    )
+    assert q == "AI-native MOM systematic review"
+    assert "多智能体" not in q
+
+
+def test_latin_tokens_for_search() -> None:
+    assert latin_tokens_for_search("AI原生MOM系统性的定义框架") == "AI MOM"
+    assert latin_tokens_for_search("异构机器间信任建立") == ""
 
 
 def test_decompose_ignores_polluted_base_query() -> None:

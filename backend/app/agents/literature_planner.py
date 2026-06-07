@@ -10,20 +10,8 @@ from typing import Any
 
 from app.agents.agent_settings import (
     get_orchestrator_max_tokens,
-    get_orchestrator_mode,
     get_orchestrator_use_reasoning,
     get_use_llm_planner,
-)
-from app.agents.prompt_registry import (
-    DEFAULT_NARRATE_ATTRIBUTES_AFTER as NARRATE_ATTRIBUTES_AFTER,
-    DEFAULT_NARRATE_CITE_AFTER as NARRATE_CITE_AFTER,
-    DEFAULT_NARRATE_FETCH_AFTER as NARRATE_FETCH_AFTER,
-    DEFAULT_NARRATE_FETCH_PROGRESS as NARRATE_FETCH_PROGRESS,
-    DEFAULT_NARRATE_GENERATE_BEFORE as NARRATE_GENERATE_BEFORE,
-    DEFAULT_NARRATE_SEARCH_AFTER as NARRATE_SEARCH_AFTER,
-    DEFAULT_NARRATE_SEARCH_BEFORE as NARRATE_SEARCH_BEFORE,
-    DEFAULT_UNDERSTANDING_SYSTEM as UNDERSTANDING_SYSTEM,
-
 )
 from app.agents.prompt_settings import (
     get_narrate_checkpoint_system_prompt,
@@ -51,12 +39,16 @@ _log = logging.getLogger(__name__)
 
 FETCH_NARRATE_EVERY_N = 5
 FETCH_NARRATE_INTERVAL_SEC = 8.0
-# Checkpoint A merges narration + router JSON; needs more budget than later checkpoints.
-UNDERSTANDING_MIN_TOKENS = 420
+# Checkpoint A merges narration + search_aspects JSON; needs more budget than later checkpoints.
+UNDERSTANDING_MIN_TOKENS = 1200
+
+# Lite narration: retrieval after, fetch after, attributes after.
+LITE_NARRATE_CHECKPOINTS = frozenset({"C", "E", "F2"})
+
 
 @dataclass
 class FetchNarrationThrottle:
-    """full 模式检查点 D：每 N 篇完成或间隔 T 秒触发一次解说。"""
+    """Legacy throttle helper (unused after removing full orchestrator mode)."""
 
     every_n: int = FETCH_NARRATE_EVERY_N
     interval_sec: float = FETCH_NARRATE_INTERVAL_SEC
@@ -80,7 +72,6 @@ class FetchNarrationThrottle:
 @dataclass
 class PlannerContext:
     use_llm_planner: bool
-    orchestrator_mode: str
     use_reasoning: bool
     max_tokens: int
     narration_focus: str = ""
@@ -90,18 +81,15 @@ class PlannerContext:
 async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
-        orchestrator_mode=await get_orchestrator_mode(),
         use_reasoning=await get_orchestrator_use_reasoning(),
         max_tokens=await get_orchestrator_max_tokens(),
     )
 
 
 def should_narrate(checkpoint: str, ctx: PlannerContext) -> bool:
-    if not ctx.use_llm_planner or ctx.orchestrator_mode == "off":
+    if not ctx.use_llm_planner:
         return False
-    if ctx.orchestrator_mode == "lite":
-        return checkpoint in ("A", "C", "E", "F2")
-    return checkpoint in ("A", "B", "C", "D", "E", "F", "F2", "G")
+    return checkpoint in LITE_NARRATE_CHECKPOINTS
 
 
 def _extract_router_from_text(text: str, user_message: str) -> LiteratureRouterResult:
@@ -144,11 +132,6 @@ async def stream_understanding_and_route(
         yield ("__router_result__", {"result": result})
         return
 
-    if ctx.orchestrator_mode == "off":
-        result = await route_literature(user_message)
-        yield ("__router_result__", {"result": result})
-        return
-
     content_buf: list[str] = []
     understand_tokens = max(ctx.max_tokens, UNDERSTANDING_MIN_TOKENS)
     try:
@@ -156,7 +139,7 @@ async def stream_understanding_and_route(
         understanding_system = await get_understanding_system_prompt()
         async for ev in stream_llm_to_think(
             llm,
-            [LLMMessage(role="user", content=msg[:800])],
+            [LLMMessage(role="user", content=msg[:4000])],
             system=understanding_system,
             accumulator=think_acc,
             max_tokens=understand_tokens,

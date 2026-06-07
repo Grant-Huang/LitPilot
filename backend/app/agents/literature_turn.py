@@ -495,6 +495,7 @@ async def stream_literature_turn(
             search_query=search_query_for_plan,
             session_title=session_title,
             stored_outline=stored_outline,
+            search_aspects=router_result.search_aspects,
         )
         if use_outline_path and outline_draft:
             g = build_literature_graph(_section_specs_for_graph(outline_draft))

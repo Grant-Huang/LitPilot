@@ -12,13 +12,32 @@ from app.agents.review_prompt import (
 # --- JSON / output contracts (appended when custom template omits them) ---
 
 UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown 代码块）：
-{"session_title":"8-24字会话标题","search_query":"≤120字首条检索线索","narration_focus":"1-2句可选，说明后续各阶段解说应侧重的角度","writing_emphasis":"可选，综述撰写时的结构或论证侧重"}
+{
+  "session_title": "8-24字，禁止「综述」「新综述」等泛称",
+  "search_query": "≤120字首条检索线索（单主题 brief 时使用）",
+  "narration_focus": "1-2句，后续解说侧重",
+  "writing_emphasis": "可选，综述结构或论证侧重",
+  "search_aspects": [
+    {
+      "aspect_id": 1,
+      "aspect_label": "与用户 brief 子方向一致的名称",
+      "core_concepts": ["概念1", "概念2"],
+      "arxiv_query": "≤80字，含消歧共现词，适合 arXiv",
+      "semantic_scholar_query": "≤80字，适合 Semantic Scholar",
+      "openalex_crossref_query": "≤80字，精确短语，适合 OpenAlex/CrossRef",
+      "pubmed_query": "≤80字；非生物医学方向留空",
+      "exclude_terms": ["municipal", "peer review process", "how to write"]
+    }
+  ]
+}
 规则：
-- session_title：概括研究主题，禁止泛称「新综述」「文献综述」
-- search_query：结合用户全文提炼 **一条** 首检线索（非多条扩展式）；突出对象+领域+方法，避免教程类检索（如 how to write literature review、文献综述怎么写）
-- 缩写、多义术语须按用户上下文消歧并写清所属领域，避免跨领域同名术语混淆
-- 用户已给出多 aspect 或可检索主题时直接输出可检索 search_query；是否需要向用户澄清由下游「首轮评估」单独处理
-- narration_focus / writing_emphasis 可留空"""
+- 用户 brief 含「其一…其二…」等多 aspect 时：search_aspects 须与用户子方向 **一一对应**（≥2 项），各方向填写 **分源检索式**；search_query 可为首方向摘要
+- 单主题 brief：search_aspects 可为 []，仅填 search_query
+- 各 aspect 的检索式须通过 **共现词** 消歧（对象+领域+方法），避免泛词「知识图谱」「survey」单独成式
+- 禁止教程类检索（how to write literature review 等）
+- exclude_terms：列出该方向常见噪声（跨域 KG、同行评审方法论、市政/医疗等非目标领域词等）
+- pubmed_query 仅在 brief 明确生物医学/健康方向时填写；工业/CS/工程方向留空
+- 澄清需求由下游「首轮评估」处理，此处不向用户提问"""
 
 ROUTER_JSON_CONTRACT = """{
   "session_title": "简短会话标题，8-24 字，概括研究主题，不用引号，禁止「新综述」「文献综述」等泛称",
@@ -107,11 +126,16 @@ EXPANSION_JSON_CONTRACT = """输出 JSON 数组（不要 markdown），条数由
 
 # --- Default role templates (static configurable) ---
 
-DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与检索路由器（Checkpoint A）。
-任务：
-1. 用 2–4 句中文（或与用户同语言）说明：研究主题、拟采用的检索思路、应关注的子方向。
-   不要编造具体论文标题、作者或 DOI；不要写综述正文；不要向用户提问（澄清由首轮评估负责）。
-2. 末行输出 JSON：会话标题、一条首检线索、可选的解说/写作侧重。
+DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与检索规划器（Checkpoint A）。
+
+【背景约束】
+- 本综述聚焦用户提问领域；检索式须通过共现词明确消歧
+- 目标数据源：arXiv、Semantic Scholar、OpenAlex、CrossRef；PubMed 仅用于生物医学向 brief
+
+【任务】
+1. 用 3–5 句中文说明：研究主题全景、子方向逻辑关系、检索核心挑战（术语歧义、跨学科边界）。
+   不要编造论文标题/作者/DOI；不要写综述正文；不要向用户提问。
+2. 末行输出 JSON（无 markdown 代码块）：
 {UNDERSTANDING_JSON_CONTRACT}"""
 
 DEFAULT_NARRATE_SEARCH_BEFORE = """你是文献综述的过程解说员。根据【即将执行的检索】用 2–3 句话说明：
@@ -274,7 +298,7 @@ PROMPT_SPECS: dict[str, dict[str, Any]] = {
         "max_len": 8_000,
         "default": DEFAULT_UNDERSTANDING_SYSTEM,
         "contract": UNDERSTANDING_JSON_CONTRACT,
-        "contract_marker": "narration_focus",
+        "contract_marker": "search_aspects",
     },
     "narrate_search_before_template": {
         "label": "编排 · 检索前解说（B）",

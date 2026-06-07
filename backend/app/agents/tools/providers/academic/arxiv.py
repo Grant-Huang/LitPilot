@@ -7,6 +7,8 @@ import httpx
 
 from app.agents.tools.providers.academic._hit import hit
 from app.agents.tools.providers.academic.api_pacing import (
+    BackoffBudget,
+    BackoffBudgetExhausted,
     pace_before_request,
     wait_after_429,
 )
@@ -94,6 +96,7 @@ async def search(
         follow_redirects=True,
         headers=headers,
     ) as client:
+        budget = BackoffBudget()
         for attempt in range(MAX_ATTEMPTS):
             await pace_before_request("arxiv")
             try:
@@ -101,7 +104,10 @@ async def search(
             except httpx.TimeoutException:
                 if attempt + 1 >= MAX_ATTEMPTS:
                     raise
-                await wait_after_429("arxiv", attempt=attempt)
+                try:
+                    await wait_after_429("arxiv", attempt=attempt, budget=budget)
+                except BackoffBudgetExhausted:
+                    return []
                 continue
 
             if resp.status_code == 429:
@@ -111,7 +117,15 @@ async def search(
                 raw = resp.headers.get("Retry-After")
                 if raw and raw.isdigit():
                     retry_after = int(raw)
-                await wait_after_429("arxiv", attempt=attempt, retry_after=retry_after)
+                try:
+                    await wait_after_429(
+                        "arxiv",
+                        attempt=attempt,
+                        retry_after=retry_after,
+                        budget=budget,
+                    )
+                except BackoffBudgetExhausted:
+                    return []
                 continue
 
             resp.raise_for_status()

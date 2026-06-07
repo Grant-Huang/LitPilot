@@ -1,3 +1,4 @@
+import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,22 +15,17 @@ from app.core.think_stream import SYS_END, SYS_START, wrap_system_line
 
 
 def test_should_narrate_lite_checkpoints() -> None:
-    ctx = PlannerContext(True, "lite", False, 280)
-    assert should_narrate("A", ctx)
+    ctx = PlannerContext(True, False, 280)
     assert should_narrate("C", ctx)
     assert should_narrate("E", ctx)
+    assert should_narrate("F2", ctx)
+    assert not should_narrate("A", ctx)
     assert not should_narrate("B", ctx)
 
 
-def test_should_narrate_off() -> None:
-    ctx = PlannerContext(True, "off", False, 280)
-    assert not should_narrate("A", ctx)
-
-
-def test_should_narrate_full_checkpoints() -> None:
-    ctx = PlannerContext(True, "full", False, 280)
-    for cp in ("A", "B", "C", "D", "E", "F", "G"):
-        assert should_narrate(cp, ctx)
+def test_should_narrate_disabled_without_planner() -> None:
+    ctx = PlannerContext(False, False, 280)
+    assert not should_narrate("C", ctx)
 
 
 def test_fetch_narration_throttle_every_n() -> None:
@@ -65,14 +61,27 @@ def test_format_fetch_progress_context() -> None:
     assert "paper a" in text
 
 
-def test_extract_router_from_text() -> None:
+def test_extract_router_from_text_with_search_aspects() -> None:
     raw = (
         "将围绕 AI-Native MES 检索。\n"
-        '{"session_title":"AI原生制造执行","search_query":"AI-native MES survey"}'
+        + json.dumps(
+            {
+                "session_title": "AI原生制造执行",
+                "search_query": "AI-native MES survey",
+                "search_aspects": [
+                    {
+                        "aspect_id": 1,
+                        "aspect_label": "定义",
+                        "arxiv_query": "AI-native MES manufacturing survey",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
     )
     r = _extract_router_from_text(raw, "AI-Native MES")
     assert r.session_title == "AI原生制造执行"
-    assert "MES" in r.search_query
+    assert len(r.search_aspects) == 1
 
 
 def test_wrap_system_line() -> None:
@@ -110,6 +119,11 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
             return_value=mock_llm,
         ),
         patch(
+            "app.agents.literature_planner.get_understanding_system_prompt",
+            new_callable=AsyncMock,
+            return_value="understanding system",
+        ),
+        patch(
             "app.agents.literature_router.get_router_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,
@@ -119,7 +133,7 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
             ev
             async for ev in stream_understanding_and_route(
                 long_q,
-                ctx=PlannerContext(True, "lite", False, 280),
+                ctx=PlannerContext(True, False, 280),
             )
         ]
 

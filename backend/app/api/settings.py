@@ -173,10 +173,7 @@ async def save_agent_settings(body: AgentSettingsBody):
             return err(hint)
 
     if "orchestrator_mode" in partial:
-        mode = str(partial["orchestrator_mode"]).strip().lower()
-        if mode not in ("off", "lite", "full"):
-            return err("orchestrator_mode 须为 off、lite 或 full")
-        partial["orchestrator_mode"] = mode
+        partial.pop("orchestrator_mode", None)
 
     if "orchestrator_max_tokens_per_phase" in partial:
         partial["orchestrator_max_tokens_per_phase"] = max(

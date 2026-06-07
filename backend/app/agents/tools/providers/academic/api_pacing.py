@@ -5,6 +5,7 @@ import asyncio
 import logging
 import random
 import time
+from dataclasses import dataclass, field
 
 _log = logging.getLogger(__name__)
 
@@ -20,6 +21,26 @@ INTERVALS: dict[str, float] = {
 BACKOFF_INITIAL_SEC = 5.0
 BACKOFF_MAX_SEC = 60.0
 BACKOFF_JITTER_RATIO = 0.2
+BACKOFF_BUDGET_SEC = 30.0
+
+
+class BackoffBudgetExhausted(Exception):
+    """Raised when cumulative 429 backoff exceeds the per-request budget."""
+
+
+@dataclass
+class BackoffBudget:
+    """Cap total sleep time spent on 429 retries for one search call."""
+
+    max_total_sec: float = BACKOFF_BUDGET_SEC
+    spent_sec: float = field(default=0.0)
+
+    @property
+    def remaining(self) -> float:
+        return max(0.0, self.max_total_sec - self.spent_sec)
+
+    def spend(self, seconds: float) -> None:
+        self.spent_sec += max(0.0, seconds)
 
 
 def _lock_for(provider: str) -> asyncio.Lock:
@@ -47,12 +68,21 @@ async def wait_after_429(
     *,
     attempt: int,
     retry_after: int | None = None,
+    budget: BackoffBudget | None = None,
 ) -> float:
     """Exponential backoff with jitter after HTTP 429."""
+    if budget is not None and budget.remaining <= 0:
+        raise BackoffBudgetExhausted(provider)
+
     base = max(BACKOFF_INITIAL_SEC, float(retry_after or 0))
     backoff = min(BACKOFF_MAX_SEC, base * (2**attempt))
     jitter = random.uniform(0, backoff * BACKOFF_JITTER_RATIO)
     total = backoff + jitter
+    if budget is not None:
+        total = min(total, budget.remaining)
+        if total <= 0:
+            raise BackoffBudgetExhausted(provider)
+
     _log.info(
         "%s 429 backoff attempt=%s wait=%.1fs",
         provider,
@@ -60,6 +90,8 @@ async def wait_after_429(
         total,
     )
     await asyncio.sleep(total)
+    if budget is not None:
+        budget.spend(total)
     return total
 
 

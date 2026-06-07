@@ -11,22 +11,41 @@ class ResearchSubTopic:
     title: str
     description: str
     search_query: str
+    source_queries: dict[str, str] = field(default_factory=dict)
+    exclude_terms: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "id": self.id,
             "title": self.title,
             "description": self.description,
             "search_query": self.search_query,
         }
+        if self.source_queries:
+            out["source_queries"] = dict(self.source_queries)
+        if self.exclude_terms:
+            out["exclude_terms"] = list(self.exclude_terms)
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ResearchSubTopic:
+        raw_sq = data.get("source_queries") or {}
+        source_queries = (
+            {str(k): str(v) for k, v in raw_sq.items() if str(v).strip()}
+            if isinstance(raw_sq, dict)
+            else {}
+        )
         return cls(
             id=str(data.get("id") or ""),
             title=str(data.get("title") or ""),
             description=str(data.get("description") or ""),
             search_query=str(data.get("search_query") or ""),
+            source_queries=source_queries,
+            exclude_terms=[
+                str(t).strip()
+                for t in (data.get("exclude_terms") or [])
+                if str(t).strip()
+            ],
         )
 
 

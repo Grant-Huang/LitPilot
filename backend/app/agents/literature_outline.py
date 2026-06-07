@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from app.agents.research_decompose import default_single_sub_topic, decompose_research_brief
+from app.agents.search_aspects import SearchAspect, aspects_to_sub_topics
 from app.agents.literature_router import TOPIC_LABEL_MAX, clamp_search_query
 from app.schemas.literature_outline import LiteratureOutline, OutlineSection, ResearchSubTopic
 from app.schemas.paper_record import PaperRecord
@@ -123,10 +124,14 @@ def resolve_outline_plan(
     search_query: str,
     session_title: str,
     stored_outline: LiteratureOutline | None,
+    search_aspects: list[SearchAspect] | None = None,
 ) -> tuple[bool, LiteratureOutline | None, list[ResearchSubTopic]]:
     """Single decompose pass; build draft outline when outline path is active."""
     brief = (initial_query or user_message).strip()
-    sub_topics = decompose_research_brief(brief, base_query=search_query)
+    if search_aspects and len(search_aspects) >= 2:
+        sub_topics = aspects_to_sub_topics(search_aspects)
+    else:
+        sub_topics = decompose_research_brief(brief, base_query=search_query)
     use = should_use_outline_path(
         outline_mode,
         len(sub_topics) if sub_topics else 1,

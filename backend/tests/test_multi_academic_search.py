@@ -121,6 +121,60 @@ async def test_multi_academic_emits_failed_done_for_stalled_source(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_multi_pass_emits_failed_done_on_stall(monkeypatch) -> None:
+    async def slow_arxiv(*_args, **_kwargs):
+        await asyncio.sleep(3600)
+        return []
+
+    monkeypatch.setattr(ma.openalex_provider, "search", AsyncMock(return_value={"results": []}))
+    monkeypatch.setattr(ma.arxiv, "search", slow_arxiv)
+    monkeypatch.setattr(ma.crossref, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.pubmed, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.semantic_scholar, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma, "SOURCE_TIMEOUT_SEC", 0.3)
+    monkeypatch.setattr(ma, "MULTI_PASS_EVENT_POLL_SEC", 0.05)
+    monkeypatch.setattr(ma, "MULTI_PASS_EXTRA_SEC", 0.1)
+
+    specs = [
+        ma.PassSpec(
+            pass_index=1,
+            pass_total=1,
+            query="stall probe query text",
+            topic_title="topic",
+            max_results=5,
+        ),
+    ]
+    events: list[tuple[str, dict]] = []
+    async for kind, payload in ma.iter_multi_pass_by_source_events(specs):
+        events.append((kind, payload))
+
+    arxiv_done = [
+        p for k, p in events if k == "source_done" and p.get("source") == "arxiv"
+    ]
+    assert len(arxiv_done) == 1
+    assert arxiv_done[0]["failed"] is True
+
+
+@pytest.mark.asyncio
+async def test_source_coro_strips_cjk(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    async def fake_oa(q, *, max_results, include_domains=None):
+        captured["q"] = q
+        return {"results": []}
+
+    monkeypatch.setattr(ma.openalex_provider, "search", fake_oa)
+    monkeypatch.setattr(ma.arxiv, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.crossref, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.pubmed, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ma.semantic_scholar, "search", AsyncMock(return_value=[]))
+
+    await ma.search("AI-native MOM 多智能体协作", max_results=5)
+    assert "多智能体" not in captured.get("q", "")
+    assert "AI-native" in captured.get("q", "")
+
+
+@pytest.mark.asyncio
 async def test_web_search_query_multi_academic_routing(monkeypatch) -> None:
     captured: dict = {}
 

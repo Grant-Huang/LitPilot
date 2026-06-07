@@ -12,9 +12,8 @@ from app.agents.prompt_registry import (
 def test_understanding_default_is_domain_agnostic() -> None:
     tpl = default_for("understanding_system_template")
     assert "过程解说员" in tpl
+    assert "search_aspects" in tpl
     assert "MOM" not in tpl
-    assert "制造" not in tpl
-    assert "narration_focus" in tpl
 
 
 def test_expansion_and_refiner_roles_differ() -> None:

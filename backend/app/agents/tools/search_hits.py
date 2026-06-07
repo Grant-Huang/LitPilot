@@ -91,6 +91,14 @@ _JUNK_HOST_SUFFIXES = (
     "stackoverflow.com",
 )
 
+_PEER_REVIEW_SURVEY_RE = re.compile(
+    r"(?i)"
+    r"(?:"
+    r"peer\s+review(?:er|ing)?\s+(?:process|at\s+scale|assessment)|"
+    r"systematic\s+review\s+of\s+approaches\s+to\s+improve\s+peer"
+    r")"
+)
+
 _MOM_ML_FALSE_POSITIVE_RE = re.compile(
     r"(?i)mixture[-\s]?of[-\s]?memor",
 )
@@ -115,7 +123,15 @@ def filter_search_hits(
     exclude_title_substrings: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """Drop obvious non-paper URLs/titles after web_search returns."""
-    exclusions = [s.lower() for s in (exclude_title_substrings or []) if str(s).strip()]
+    from app.agents.search_aspects import (
+        DEFAULT_SEARCH_EXCLUDE_TERMS,
+        merge_exclude_terms,
+    )
+
+    exclusions = merge_exclude_terms(
+        DEFAULT_SEARCH_EXCLUDE_TERMS,
+        exclude_title_substrings or [],
+    )
     kept: list[dict[str, str]] = []
     for hit in hits:
         url = str(hit.get("url") or "").strip()
@@ -128,6 +144,8 @@ def filter_search_hits(
         if _ZH_WRITING_JUNK_RE.search(title) or _ZH_WRITING_JUNK_RE.search(url):
             continue
         if _EN_WRITING_JUNK_RE.search(title) or _EN_WRITING_JUNK_RE.search(url):
+            continue
+        if _PEER_REVIEW_SURVEY_RE.search(title):
             continue
         if _JUNK_TITLE_RE.search(title) or _JUNK_TITLE_RE.search(url):
             continue

@@ -113,6 +113,8 @@ async def stream_search_phase(
     emit_stage_lifecycle: bool = True,
     search_provider: str | None = None,
     emit_pass_hits: bool = False,
+    source_queries: dict[str, str] | None = None,
+    skip_sources: frozenset[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.tools.web_providers import normalize_search_provider
 
@@ -204,6 +206,8 @@ async def stream_search_phase(
                     include_domains=include_domains,
                     exclude_domains=exclude_domains,
                     s2_api_key=s2_key or "",
+                    source_queries=source_queries,
+                    skip_sources=skip_sources,
                 ):
                     if kind == "source_start":
                         await ma_queue.put(
@@ -433,10 +437,13 @@ async def _stream_expanded_multi_academic_by_source(
     search_enforce_domain_filter: bool,
     search_enable_junk_filter: bool,
     exclude_title_substrings: list[str] | None,
+    search_sub_topics: list[Any] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Multi-topic multi_academic: parallel across sources, one in-flight request per source."""
     from app.agents.tools.providers import multi_academic as ma
     from app.agents.tools.web_providers import _resolve_s2_api_key
+    from app.agents.search_aspects import sub_topic_pass_spec
+    from app.schemas.literature_outline import ResearchSubTopic
 
     include_domains = search_include_domains or ACADEMIC_SEARCH_DOMAINS
     exclude_domains = search_exclude_domains or DEFAULT_EXCLUDE_DOMAINS
@@ -461,16 +468,37 @@ async def _stream_expanded_multi_academic_by_source(
         ):
             yield ev
 
-    specs = [
-        ma.PassSpec(
-            pass_index=idx,
-            pass_total=total,
-            query=query,
-            topic_title=titles[idx - 1] if idx - 1 < len(titles) else "",
-            max_results=search_max_results,
-        )
-        for idx, query in enumerate(clean_queries, start=1)
-    ]
+    specs: list[ma.PassSpec] = []
+    spec_count = len(search_sub_topics) if search_sub_topics else len(clean_queries)
+    if search_sub_topics:
+        for idx, st in enumerate(search_sub_topics, start=1):
+            if not isinstance(st, ResearchSubTopic):
+                continue
+            fallback, sq, skip = sub_topic_pass_spec(st)
+            specs.append(
+                ma.PassSpec(
+                    pass_index=idx,
+                    pass_total=spec_count,
+                    query=fallback,
+                    topic_title=str(
+                        st.title or (titles[idx - 1] if idx - 1 < len(titles) else "")
+                    ),
+                    max_results=search_max_results,
+                    source_queries=sq,
+                    skip_sources=skip,
+                )
+            )
+    if not specs:
+        specs = [
+            ma.PassSpec(
+                pass_index=idx,
+                pass_total=spec_count,
+                query=query,
+                topic_title=titles[idx - 1] if idx - 1 < len(titles) else "",
+                max_results=search_max_results,
+            )
+            for idx, query in enumerate(clean_queries, start=1)
+        ]
 
     for spec in specs:
         yield (
@@ -642,6 +670,7 @@ async def stream_expanded_search_phase(
     search_provider: str | None = None,
     search_parallel: int = 1,
     topic_titles: list[str] | None = None,
+    search_sub_topics: list[Any] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.search_merge import merge_search_hits
 
@@ -714,6 +743,7 @@ async def stream_expanded_search_phase(
             search_enforce_domain_filter=search_enforce_domain_filter,
             search_enable_junk_filter=search_enable_junk_filter,
             exclude_title_substrings=exclude_title_substrings,
+            search_sub_topics=search_sub_topics,
         ):
             yield ev
         pass_results = dict(execution_trace.pop("_ma_pass_outcomes", {}))

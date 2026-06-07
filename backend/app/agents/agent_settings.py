@@ -289,27 +289,6 @@ async def get_use_llm_planner() -> bool:
     return bool((await get_merged_settings()).get("use_llm_planner", True))
 
 
-
-
-
-async def get_orchestrator_mode() -> str:
-
-    raw = str(
-
-        (await get_merged_settings()).get("orchestrator_mode") or "lite"
-
-    ).strip().lower()
-
-    if raw in ("off", "lite", "full"):
-
-        return raw
-
-    return "lite"
-
-
-
-
-
 async def get_orchestrator_use_reasoning() -> bool:
 
     return bool((await get_merged_settings()).get("orchestrator_use_reasoning", False))

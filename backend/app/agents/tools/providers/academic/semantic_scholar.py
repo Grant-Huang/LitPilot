@@ -9,6 +9,8 @@ import httpx
 
 from app.agents.tools.providers.academic._hit import hit
 from app.agents.tools.providers.academic.ss_rate_limit import (
+    BackoffBudget,
+    BackoffBudgetExhausted,
     pace_before_request,
     wait_after_429,
 )
@@ -165,6 +167,7 @@ async def _search_with_retries(
     limit: int,
 ) -> list[dict[str, str]]:
     deadline = time.monotonic() + SEARCH_TOTAL_TIMEOUT_SEC
+    budget = BackoffBudget()
     for attempt in range(MAX_429_ATTEMPTS):
         try:
             rows, retry_after = await _search_once(
@@ -184,7 +187,14 @@ async def _search_with_retries(
             return []
         if time.monotonic() >= deadline:
             return []
-        await wait_after_429(attempt=attempt, retry_after=retry_after)
+        try:
+            await wait_after_429(
+                attempt=attempt,
+                retry_after=retry_after,
+                budget=budget,
+            )
+        except BackoffBudgetExhausted:
+            return []
         if time.monotonic() >= deadline:
             return []
     return []

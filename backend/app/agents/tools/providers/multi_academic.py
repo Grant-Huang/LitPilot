@@ -5,8 +5,8 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
 from app.agents.tools.providers import openalex as openalex_provider
 from app.agents.tools.providers.academic import arxiv, crossref, pubmed, semantic_scholar
@@ -15,7 +15,9 @@ from app.agents.tools.providers.academic.source_gate import (
     source_count,
     source_slot,
 )
+from app.agents.tools.providers.academic.query_sanitize import sanitize_academic_search_query
 from app.agents.tools.search_hits import restrict_hits_to_domains
+from app.agents.search_aspects import query_for_source
 
 _log = logging.getLogger(__name__)
 
@@ -24,6 +26,8 @@ SOURCE_TIMEOUT_SEC = 90.0
 SOURCE_TIMEOUTS: dict[str, float] = {
     "semantic_scholar": 60.0,
 }
+MULTI_PASS_EVENT_POLL_SEC = 5.0
+MULTI_PASS_EXTRA_SEC = 15.0
 
 SOURCE_LABELS = {
     "openalex": "OpenAlex",
@@ -41,6 +45,8 @@ class PassSpec:
     query: str
     topic_title: str
     max_results: int
+    source_queries: Mapping[str, str] = field(default_factory=dict)
+    skip_sources: frozenset[str] = frozenset()
 
 
 async def _run_source(name: str, coro) -> list[dict[str, str]]:
@@ -83,21 +89,22 @@ def _source_coro(
     min_year: int,
     s2_api_key: str,
 ):
+    q = sanitize_academic_search_query(query)
     if name == "openalex":
         return openalex_provider.search(
-            query,
+            q,
             max_results=per_source,
             include_domains=None,
         )
     if name == "arxiv":
-        return arxiv.search(query, limit=per_source, min_year=min_year)
+        return arxiv.search(q, limit=per_source, min_year=min_year)
     if name == "crossref":
-        return crossref.search(query, limit=per_source, min_year=min_year)
+        return crossref.search(q, limit=per_source, min_year=min_year)
     if name == "pubmed":
-        return pubmed.search(query, limit=per_source, min_year=min_year)
+        return pubmed.search(q, limit=per_source, min_year=min_year)
     if name == "semantic_scholar":
         return semantic_scholar.search(
-            query,
+            q,
             limit=per_source,
             min_year=min_year,
             api_key=s2_api_key,
@@ -198,6 +205,8 @@ async def iter_search_events(
     include_domains: list[str] | tuple[str, ...] | None = None,
     exclude_domains: list[str] | tuple[str, ...] | None = None,
     s2_api_key: str = "",
+    source_queries: Mapping[str, str] | None = None,
+    skip_sources: frozenset[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Single pass: parallel across sources (each source at most one slot)."""
     _ = exclude_domains
@@ -207,11 +216,18 @@ async def iter_search_events(
         return
 
     per_source = max(1, int(max_results))
+    sq = dict(source_queries or {})
+    skip = skip_sources or frozenset()
 
     async def _run_one(name: str) -> tuple[str, list[dict[str, str]], bool]:
+        if name in skip:
+            return name, [], False
+        source_q = query_for_source(name, source_queries=sq, fallback=q)
+        if len(source_q) < 2:
+            return name, [], False
         _name, rows, failed = await _search_one_source(
             name,
-            q,
+            source_q,
             max_results=max_results,
             min_year=min_year,
             s2_api_key=s2_api_key,
@@ -220,13 +236,16 @@ async def iter_search_events(
 
     tasks: dict[str, asyncio.Task[tuple[str, list[dict[str, str]], bool]]] = {}
     for name in SOURCE_NAMES:
+        if name in skip:
+            continue
+        source_q = query_for_source(name, source_queries=sq, fallback=q)
         tasks[name] = asyncio.create_task(_run_one(name))
         yield (
             "source_start",
             {
                 "source": name,
                 "label": SOURCE_LABELS.get(name, name),
-                "query": q,
+                "query": source_q,
                 "max_results": max_results,
             },
         )
@@ -356,7 +375,13 @@ async def iter_multi_pass_by_source_events(
 
     async def _source_worker(source_name: str) -> None:
         for spec in passes:
-            q = (spec.query or "").strip()
+            if source_name in spec.skip_sources:
+                continue
+            q = query_for_source(
+                source_name,
+                source_queries=dict(spec.source_queries or {}),
+                fallback=(spec.query or "").strip(),
+            )
             if len(q) < 2:
                 continue
             pass_meta = {
@@ -404,18 +429,60 @@ async def iter_multi_pass_by_source_events(
 
     workers = [asyncio.create_task(_source_worker(name)) for name in SOURCE_NAMES]
     finished_workers = 0
+    in_flight: dict[tuple[int, str], dict[str, Any]] = {}
+    loop_deadline = time.monotonic() + len(passes) * (
+        SOURCE_TIMEOUT_SEC + MULTI_PASS_EXTRA_SEC
+    ) + MULTI_PASS_EXTRA_SEC
+    stalled = False
     try:
         while finished_workers < len(workers):
-            item = await event_q.get()
+            if time.monotonic() >= loop_deadline:
+                _log.warning(
+                    "multi_academic multi_pass deadline exceeded; in_flight=%s",
+                    sorted(in_flight.keys()),
+                )
+                stalled = True
+                break
+            try:
+                item = await asyncio.wait_for(
+                    event_q.get(),
+                    timeout=MULTI_PASS_EVENT_POLL_SEC,
+                )
+            except TimeoutError:
+                continue
             if item is None:
                 finished_workers += 1
                 continue
-            yield item
+            kind, payload = item
+            key = (int(payload.get("pass_index") or 0), str(payload.get("source") or ""))
+            if kind == "source_start" and key[0] > 0 and key[1]:
+                in_flight[key] = payload
+            elif kind == "source_done":
+                in_flight.pop(key, None)
+            yield kind, payload
     finally:
         for w in workers:
             if not w.done():
                 w.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+
+    if stalled:
+        for (pass_index, source_name), meta in list(in_flight.items()):
+            q = str(meta.get("query") or "")
+            pass_rows.setdefault(pass_index, {})[source_name] = []
+            yield (
+                "source_done",
+                {
+                    **meta,
+                    **_source_done_payload(
+                        source_name,
+                        [],
+                        max_results=int(meta.get("max_results") or 8),
+                        failed=True,
+                        query=q,
+                    ),
+                },
+            )
 
     from app.agents.search_merge import merge_search_hits
 
