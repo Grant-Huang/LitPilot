@@ -13,11 +13,7 @@ from app.agents.prompt_registry import (
 from app.agents.review_prompt import MULTI_SOURCE_MATERIALS_HEADER
 from app.agents.prompt_settings import get_intent_router_system_prompt, get_prompt_max_tokens
 from app.agents.literature_router import (
-    LiteratureRouterResult,
-    clamp_search_query,
-    fallback_session_title,
     parse_router_json,
-    sanitize_session_title,
 )
 from app.agents.session_corpus import (
     SessionCorpus,
@@ -93,8 +89,6 @@ class SessionTurnContext:
 @dataclass
 class LiteratureIntentResult:
     intent: IntentKind
-    session_title: str = ""
-    search_query: str = ""
     gen_directives: str = ""
     defer_generate: bool = False
     skip_web_search: bool = False
@@ -104,12 +98,6 @@ class LiteratureIntentResult:
     subtopic_op: str = ""
     full_regen: bool = False
     append_guidance_hint: str = ""
-
-    def to_router_result(self) -> LiteratureRouterResult:
-        return LiteratureRouterResult(
-            session_title=self.session_title,
-            search_query=self.search_query,
-        )
 
 
 def normalize_intent(raw: str) -> IntentKind:
@@ -209,8 +197,6 @@ def detect_intent_rules(
     if is_first_turn:
         return LiteratureIntentResult(
             intent="new_topic",
-            search_query=msg[:200],
-            session_title=fallback_session_title(msg),
             new_urls=[],
             use_existing_corpus=False,
             skip_web_search=False,
@@ -221,7 +207,6 @@ def detect_intent_rules(
         new_only = filter_new_urls(corpus, urls)
         return LiteratureIntentResult(
             intent="append_urls",
-            search_query=msg[:200],
             new_urls=new_only or urls,
             defer_generate=True,
             skip_web_search=True,
@@ -232,7 +217,6 @@ def detect_intent_rules(
         return LiteratureIntentResult(
             intent="subtopic_change",
             subtopic_op="add",
-            search_query=msg[:200],
             gen_directives=msg[:500],
             full_regen=bool(_FULL_REGEN_RE.search(msg)),
             use_existing_corpus=True,
@@ -242,7 +226,6 @@ def detect_intent_rules(
         return LiteratureIntentResult(
             intent="subtopic_change",
             subtopic_op="modify",
-            search_query=msg[:200],
             gen_directives=msg[:500],
             full_regen=bool(_FULL_REGEN_RE.search(msg)),
             use_existing_corpus=True,
@@ -270,8 +253,6 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
     if not msg:
         fallback = LiteratureIntentResult(
             intent="new_topic",
-            search_query="",
-            session_title=fallback_session_title(msg),
             use_existing_corpus=False,
         )
     text = (raw or "").strip()
@@ -289,11 +270,6 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
 
     return LiteratureIntentResult(
         intent=intent,
-        session_title=sanitize_session_title(str(data.get("session_title") or ""), msg),
-        search_query=clamp_search_query(
-            str(data.get("search_query") or msg),
-            fallback=clamp_search_query(msg, fallback=msg),
-        ),
         gen_directives=str(data.get("gen_directives") or msg).strip()[:500],
         defer_generate=bool(data.get("defer_generate")),
         skip_web_search=bool(data.get("skip_web_search")),
@@ -325,11 +301,8 @@ async def route_literature_intent(
         return ruled
 
     if not turn_ctx.has_corpus:
-        msg = user_message.strip()
         return LiteratureIntentResult(
             intent="new_topic",
-            session_title=fallback_session_title(msg),
-            search_query=clamp_search_query(msg, fallback=msg),
             new_urls=[],
             use_existing_corpus=False,
         )

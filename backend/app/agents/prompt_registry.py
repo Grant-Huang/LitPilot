@@ -8,6 +8,14 @@ from app.agents.review_prompt import (
     material_sections_guide,
 )
 
+# --- Shared search query rules (used by both Router fallback and Checkpoint A) ---
+
+_SHARED_SEARCH_QUERY_RULES = (
+    "- 聚焦研究对象、领域与方法/系统；不要写成教程或「如何写综述」类检索。\n"
+    "- 多义缩写须写清所属领域与全称，避免与常见同名术语混淆。\n"
+    "- 优先 survey、systematic review、peer-reviewed 等学术表述；不要复述用户整段提纲。"
+)
+
 # --- JSON / output contracts (appended when custom template omits them) ---
 
 UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown 代码块）：
@@ -33,25 +41,21 @@ UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown
 - 用户 brief 含「其一…其二…」等多 aspect 时：search_aspects 须与用户子方向 **一一对应**（≥2 项），各方向填写 **分源检索式**；search_query 可为首方向摘要
 - 单主题 brief：search_aspects 可为 []，仅填 search_query
 - 各 aspect 的检索式须通过 **共现词** 消歧（对象+领域+方法），避免泛词「知识图谱」「survey」单独成式
-- 禁止教程类检索（how to write literature review 等）
+{_SHARED_SEARCH_QUERY_RULES}
 - exclude_terms：列出该方向常见噪声（跨域 KG、同行评审方法论、市政/医疗等非目标领域词等）
 - pubmed_query 仅在 brief 明确生物医学/健康方向时填写；工业/CS/工程方向留空
 - 澄清需求由下游「首轮评估」处理，此处不向用户提问"""
 
-ROUTER_JSON_CONTRACT = """{
+ROUTER_JSON_CONTRACT = f"""{{
   "session_title": "简短会话标题，8-24 字，概括研究主题，不用引号，禁止「新综述」「文献综述」等泛称",
   "search_query": "用于学术检索的精炼查询（≤120 字，可中英）"
-}
+}}
 search_query 规则：
-- 聚焦研究对象、领域与方法/系统，不要写成教程或「如何写综述」类检索。
-- 多义缩写须写清所属领域与全称，避免与常见同名术语混淆。
-- 优先 survey、systematic review、peer-reviewed 等学术表述；不要复述用户整段提纲。
+{_SHARED_SEARCH_QUERY_RULES}
 仅输出 JSON。"""
 
 INTENT_ROUTER_JSON_CONTRACT = """{
   "intent": "new_topic|subtopic_change|append_urls|review_refine|query_corpus",
-  "session_title": "可选，8-24字",
-  "search_query": "new_topic/subtopic_change 时的检索词，≤120字",
   "gen_directives": "review_refine/subtopic_change 时的要求摘要，≤200字",
   "subtopic_op": "add|modify|",
   "full_regen": false,
@@ -260,14 +264,6 @@ PROMPT_SPECS: dict[str, dict[str, Any]] = {
         "max_len": 4_000,
         "default": DEFAULT_NARRATE_FETCH_AFTER,
     },
-    "router_system_template": {
-        "label": "首条路由（session_title / search_query）",
-        "group": "router",
-        "max_len": 4_000,
-        "default": DEFAULT_ROUTER_SYSTEM,
-        "contract": ROUTER_JSON_CONTRACT,
-        "contract_marker": "search_query",
-    },
     "intent_router_system_template": {
         "label": "续聊意图路由",
         "group": "router",
@@ -339,7 +335,6 @@ PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "understanding_system_template": 1200,
     "narrate_search_after_template": 280,
     "narrate_fetch_after_template": 280,
-    "router_system_template": 200,
     "intent_router_system_template": 300,
     "search_refiner_system_template": 640,
     "assessor_system_template": 720,

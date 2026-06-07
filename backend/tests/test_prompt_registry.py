@@ -35,16 +35,16 @@ def test_matrix_and_query_defaults_share_material_labels() -> None:
 
 
 def test_resolve_uses_builtin_when_override_empty() -> None:
-    out = resolve_prompt_template("router_system_template", "")
-    assert "session_title" in out
-    assert default_for("router_system_template") == out
+    out = resolve_prompt_template("intent_router_system_template", "")
+    assert "intent" in out
+    assert default_for("intent_router_system_template") == out
 
 
 def test_resolve_appends_contract_when_custom_omits_marker() -> None:
-    custom = "你是路由器，请根据用户问题输出 JSON。"
-    out = resolve_prompt_template("router_system_template", custom)
+    custom = "你是意图路由器，请根据用户问题输出 JSON。"
+    out = resolve_prompt_template("intent_router_system_template", custom)
     assert custom in out
-    assert "search_query" in out
+    assert "intent" in out
 
 
 def test_resolve_keeps_custom_when_contract_present() -> None:

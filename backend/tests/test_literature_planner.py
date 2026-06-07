@@ -82,7 +82,11 @@ def test_wrap_system_line() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_understanding_refines_truncated_orchestrator_output() -> None:
+async def test_stream_understanding_falls_back_to_truncation_when_no_json() -> None:
+    """When Checkpoint A produces no JSON, _extract_router_from_text returns a
+    truncated fallback title.  Previously refine_router_session_title would call
+    router LLM again; now the truncation is accepted and resolve_auto_session_title
+    at the turn level handles any needed refinement."""
     long_q = (
         "I want a literature review on AI-native MOM covering four aspects: "
         "definitions, trust, multi-agent systems, and migration paths."
@@ -94,14 +98,6 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
 
     mock_llm = MagicMock()
     mock_llm.chat_stream_parts = fake_stream
-    mock_llm.chat = AsyncMock(
-        return_value=MagicMock(
-            content=(
-                '{"session_title":"AI-native MOM review",'
-                '"search_query":"AI-native MOM survey"}'
-            ),
-        ),
-    )
 
     with (
         patch(
@@ -119,11 +115,6 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
             new_callable=AsyncMock,
             return_value=1200,
         ),
-        patch(
-            "app.agents.literature_router.get_router_llm",
-            new_callable=AsyncMock,
-            return_value=mock_llm,
-        ),
     ):
         events = [
             ev
@@ -134,5 +125,7 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
         ]
 
     router = next(ev[1]["result"] for ev in events if ev[0] == "__router_result__")
-    assert router.session_title == "AI-native MOM review"
-    mock_llm.chat.assert_awaited_once()
+    # No JSON means title is the 40-char message truncation fallback
+    assert router.session_title == long_q[:40] + "…"
+    # Router LLM is not called — refinement is now handled at turn level
+    mock_llm.chat.assert_not_called()

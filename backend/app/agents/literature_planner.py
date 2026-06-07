@@ -22,7 +22,6 @@ from app.agents.literature_router import (
     fallback_router_result,
     fallback_session_title,
     parse_router_json,
-    refine_router_session_title,
     route_literature,
     sanitize_session_title,
 )
@@ -140,7 +139,6 @@ async def stream_understanding_and_route(
             return
         merged = "".join(content_buf)
         result = _extract_router_from_text(merged, user_message)
-        result = await refine_router_session_title(result, user_message)
         yield ("__router_result__", {"result": result})
 
     try:

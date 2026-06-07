@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from app.agents.llm_json import parse_json_object
 from app.agents.prompt_registry import DEFAULT_ROUTER_SYSTEM as ROUTER_SYSTEM
-from app.agents.prompt_settings import get_prompt_max_tokens, get_router_system_prompt
 from app.agents.search_query_utils import (
     SEARCH_QUERY_MAX,
     TOPIC_LABEL_MAX,
@@ -135,19 +134,20 @@ def build_router_result(data: dict[str, Any], user_message: str) -> LiteratureRo
 
 
 async def route_literature(user_message: str) -> LiteratureRouterResult:
-    """LLM router for session title and search query; rule-based fallback."""
+    """LLM router for session title and search query; rule-based fallback.
+
+    Uses hardcoded ROUTER_SYSTEM prompt (no longer configurable via settings).
+    """
     msg = user_message.strip()
     fallback = fallback_router_result(msg)
     if not msg:
         return fallback
     try:
         llm = await get_router_llm()
-        router_system = await get_router_system_prompt()
-        max_tokens = await get_prompt_max_tokens("router_system_template")
         resp = await llm.chat(
             [LLMMessage(role="user", content=msg[:800])],
-            system=router_system,
-            max_tokens=max_tokens,
+            system=ROUTER_SYSTEM,
+            max_tokens=200,
             temperature=0.0,
         )
         data = parse_router_json(resp.content or "")

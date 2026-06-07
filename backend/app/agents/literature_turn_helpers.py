@@ -21,8 +21,7 @@ def resolve_search_queries(
     route_message: str,
 ) -> tuple[str, str]:
     raw_base = (
-        intent.search_query
-        or router_result.search_query.strip()
+        router_result.search_query.strip()
         or route_message.strip()
     )
     base_query = extract_compact_base_query(raw_base) or raw_base.strip()[:120]

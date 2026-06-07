@@ -25,7 +25,7 @@ export const PROMPT_GROUP_ORDER = [
 export const PROMPT_GROUP_INSTANCE_TIPS: Partial<Record<string, string>> = {
   orchestrator:
     "阶段解说与 Checkpoint A 理解；未绑定时编排流程不可用。组内各提示词共享此实例，Token 可逐条覆盖。",
-  router: "首条路由与续聊意图 JSON；默认与编排实例相同，可单独指定更快模型。",
+  router: "续聊意图路由；默认与编排实例相同，可单独指定更快模型。",
   search: "检索式消歧、扩展与规范化；默认与编排实例相同。",
   assessor: "首轮 brief 评估与澄清；默认与编排实例相同。",
   generation:

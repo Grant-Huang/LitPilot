@@ -41,7 +41,6 @@ def test_first_turn_rule_path_ignores_urls() -> None:
     )
     assert result is not None
     assert result.intent == "new_topic"
-    assert result.search_query
     assert result.new_urls == []
 
 
@@ -58,5 +57,4 @@ async def test_first_turn_skips_router_llm() -> None:
         )
     mock_llm.assert_not_called()
     assert result.intent == "new_topic"
-    assert result.search_query
     assert result.new_urls == []

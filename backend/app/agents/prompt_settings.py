@@ -35,9 +35,6 @@ async def get_narrate_checkpoint_system_prompt(checkpoint: str) -> str | None:
     return await get_resolved_prompt(param_key)
 
 
-async def get_router_system_prompt() -> str:
-    return await get_resolved_prompt("router_system_template")
-
 
 async def get_intent_router_system_prompt() -> str:
     return await get_resolved_prompt("intent_router_system_template")

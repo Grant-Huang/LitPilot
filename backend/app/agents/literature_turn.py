@@ -39,7 +39,11 @@ from app.agents.literature_intent import (
 )
 from app.agents.literature_outline import build_subtopic_plan, mount_papers_by_subtopic_tags
 from app.agents.literature_planner import load_planner_context, stream_understanding_and_route
-from app.agents.literature_router import resolve_auto_session_title, should_auto_rename_session
+from app.agents.literature_router import (
+    LiteratureRouterResult,
+    resolve_auto_session_title,
+    should_auto_rename_session,
+)
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn
 from app.agents.literature_turn_generate import GenerateTurnContext, stream_generate_turn
@@ -146,7 +150,7 @@ async def stream_literature_turn(
 
     review_llm = await get_review_llm()
     pipeline_llm = await get_pipeline_llm()
-    router_result = intent.to_router_result()
+    router_result = LiteratureRouterResult(session_title="", search_query="")
     outline_obj: LiteratureOutline | None = LiteratureOutline.from_dict(
         store.load_outline(session_id)
     )
@@ -208,7 +212,7 @@ async def stream_literature_turn(
 
         if should_auto_rename_session(session_meta, route_message, user_turns):
             new_title = await resolve_auto_session_title(
-                primary_title=router_result.session_title or intent.session_title,
+                primary_title=router_result.session_title or "",
                 user_message=route_message,
             )
             if new_title:
@@ -222,7 +226,6 @@ async def stream_literature_turn(
 
         search_query_for_plan = (
             router_result.search_query.strip()
-            or intent.search_query
             or route_message.strip()
         )
         if search_aspects_plan_ready(router_result.search_aspects):
