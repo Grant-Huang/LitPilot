@@ -27,9 +27,6 @@ import {
   type SystemInstance,
 } from "@/lib/settingsApiV2";
 
-const PROMPTS_HINT =
-  "留空表示使用内置默认。自定义 JSON 类提示词若缺少输出契约字段，保存后运行时会自动追加契约段。";
-
 const STAGE_MAP: Record<string, string> = {
   orchestrator: "orchestrate",
   router: "orchestrate",
@@ -355,13 +352,6 @@ export default function AdminPromptsPage() {
         actions={saveButton}
       />
 
-      <details className="settings-advanced settings-prompts__advanced">
-        <summary className="settings-advanced__summary">编辑说明</summary>
-        <div className="settings-advanced__body">
-          <p className="settings-field-note">{PROMPTS_HINT}</p>
-        </div>
-      </details>
-
       {stages.map((stage) => (
         <section key={stage.id} className="settings-prompts__group">
           <div className="settings-prompts__group-head">
@@ -396,7 +386,7 @@ export default function AdminPromptsPage() {
                   <div key={item.key} className="settings-prompts__field">
                     <div className="settings-prompts__field-head">
                       <label htmlFor={`prompt-${item.key}`}>
-                        {item.label}
+                        {item.label}（{item.key}）
                         {item.hint ? <FieldTip title={item.hint} /> : null}
                       </label>
                       <span className="settings-prompts__field-head-actions">
