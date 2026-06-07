@@ -40,6 +40,7 @@ from app.agents.literature_clarification import (
     merge_first_turn_message,
     resolve_pending_gate,
 )
+from app.agents.literature_progress import PROGRESS_INTERVAL_SEC, run_with_progress_ticks
 from app.agents.first_turn_assessor import (
     brief_assessment_from_router,
     format_brief_assessment_message,
@@ -458,14 +459,27 @@ async def stream_literature_turn(
                 accumulator=think_acc,
             ):
                 yield ev
-            first_gate, brief_assessment = await assess_first_turn_gate(
-                route_message,
-                search_query=search_query_for_plan,
-                user_turns=user_turns,
-                intent=intent.intent,
-                gate_resolved=clar_state.resolved,
-                llm=assessor_llm,
-            )
+
+            async def _assess():
+                return await assess_first_turn_gate(
+                    route_message,
+                    search_query=search_query_for_plan,
+                    user_turns=user_turns,
+                    intent=intent.intent,
+                    gate_resolved=clar_state.resolved,
+                    llm=assessor_llm,
+                )
+
+            async for item in run_with_progress_ticks(
+                "brief",
+                "评估研究 brief 并提取关键词…",
+                _assess,
+                interval_sec=PROGRESS_INTERVAL_SEC,
+            ):
+                if isinstance(item, tuple) and item[0] == "__result__":
+                    first_gate, brief_assessment = item[1]
+                else:
+                    yield item
         if brief_assessment and not first_gate:
             assess_patch: dict[str, Any] = {
                 "brief_assessment": brief_assessment.to_dict(),

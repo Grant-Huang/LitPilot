@@ -54,6 +54,44 @@ async def iter_progress_while_pending(
             )
 
 
+async def merge_async_iter_with_progress(
+    source: AsyncIterator[tuple[str, dict[str, Any]]],
+    stage: str,
+    detail: str,
+    *,
+    interval_sec: float = PROGRESS_INTERVAL_SEC,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """Yield *source* items; emit ``literature_progress`` when idle longer than *interval_sec*."""
+    started = time.monotonic()
+    it = source.__aiter__()
+    pending: asyncio.Task[tuple[str, dict[str, Any]]] | None = None
+
+    async def pull_next() -> tuple[str, dict[str, Any]]:
+        return await it.__anext__()
+
+    while True:
+        if pending is None:
+            pending = asyncio.create_task(pull_next())
+        done, _ = await asyncio.wait({pending}, timeout=interval_sec)
+        if not done:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            yield (
+                "literature_progress",
+                literature_progress_payload(stage, detail, elapsed_ms=elapsed_ms),
+            )
+            continue
+        try:
+            item = pending.result()
+            pending = None
+            yield item
+        except StopAsyncIteration:
+            pending = None
+            break
+    if pending is not None and not pending.done():
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
 async def run_with_progress_ticks(
     stage: str,
     detail: str,

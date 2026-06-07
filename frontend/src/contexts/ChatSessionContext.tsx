@@ -68,10 +68,12 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       id: string,
       opts?: { pendingUserText?: string | null; maxAttempts?: number },
     ) => {
+      const gen = ++loadGenRef.current;
       const maxAttempts = opts?.maxAttempts ?? 5;
       const pending = opts?.pendingUserText?.trim() || null;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const msgs = await sessionsApi.messages(id);
+        if (loadGenRef.current !== gen) return;
         const hasAssistant = msgs.some((m) => m.role === "assistant");
         const userOk =
           !pending ||
@@ -87,6 +89,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         }
       }
       const msgs = await sessionsApi.messages(id);
+      if (loadGenRef.current !== gen) return;
       setMessages(msgs);
     },
     [],

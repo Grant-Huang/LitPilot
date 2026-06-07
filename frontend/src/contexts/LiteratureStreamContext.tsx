@@ -194,26 +194,13 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     }
   }, [isChat, streamState.status, abort]);
 
-  // Entering /chat: refresh task snapshot, sync session, reload persisted messages.
+  // Entering /chat: refresh task snapshot and reload the selected session only.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       await refreshFromServer();
-      if (cancelled) return;
-
-      const sid = activeTask?.sessionId ?? activeSessionId;
-      if (
-        activeTask &&
-        isRunningTaskStatus(activeTask.status) &&
-        activeTask.sessionId &&
-        activeTask.sessionId !== activeSessionId
-      ) {
-        await handleSelectSession(activeTask.sessionId);
-        return;
-      }
-      if (sid) {
-        await reloadSessionMessages(sid);
-      }
+      if (cancelled || !activeSessionId) return;
+      await reloadSessionMessages(activeSessionId);
     })();
     return () => {
       cancelled = true;
@@ -231,13 +218,6 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!isChat || !activeTask) return;
-    if (
-      activeTask.sessionId !== activeSessionId &&
-      isRunningTaskStatus(activeTask.status)
-    ) {
-      void handleSelectSession(activeTask.sessionId);
-      return;
-    }
     if (activeTask.sessionId !== activeSessionId) return;
 
     if (
@@ -423,6 +403,15 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           updateLiveText((prev) => ({
             ...prev,
             liveProcessText: prev.liveProcessText || parts.join("\n"),
+          }));
+        }
+      }
+      if (name === "literature_progress" && typeof data.detail === "string") {
+        const detail = data.detail.trim();
+        if (detail) {
+          updateLiveText((prev) => ({
+            ...prev,
+            liveProcessText: detail,
           }));
         }
       }

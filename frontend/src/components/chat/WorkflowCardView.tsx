@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { SearchProgressView } from "./SearchProgressView";
 import { SubtopicListView } from "./SubtopicListView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
+import { LitPilotThinkFold } from "./LitPilotThinkFold";
 import { toolStepToState } from "@/lib/executionTrace";
 import { summarizeWorkflowCard } from "@/lib/turnCompletion";
 import {
@@ -120,6 +121,13 @@ export function WorkflowCardView({
       </div>
       {open ? (
         <div className="litpilot-wf-card__body">
+          {trace?.thinkContent &&
+          (card.type === "understand" || card.type === "brief") ? (
+            <LitPilotThinkFold
+              content={trace.thinkContent}
+              streaming={streaming && isRunning}
+            />
+          ) : null}
           {card.body ? (
             <div className="litpilot-wf-card__body-text">{card.body}</div>
           ) : null}

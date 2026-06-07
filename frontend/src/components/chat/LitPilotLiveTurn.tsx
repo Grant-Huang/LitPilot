@@ -49,6 +49,7 @@ export function LitPilotLiveTurn({
         extensions={extensions}
         hasArtifact={hasArtifact || bridge?.hasArtifact}
         chatText={liveChatText}
+        liveProcessText={liveProcessText}
       />
       {showChat && (liveChatText || streaming.status === "streaming") ? (
         <ChatBubble

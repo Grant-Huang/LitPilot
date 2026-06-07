@@ -16,6 +16,7 @@ type Props = {
   extensions?: Array<{ name: string; data: Record<string, unknown> }>;
   hasArtifact?: boolean;
   chatText?: string;
+  liveProcessText?: string;
 };
 
 export function TurnWorkflowBlock({
@@ -25,6 +26,7 @@ export function TurnWorkflowBlock({
   extensions = [],
   hasArtifact = false,
   chatText = "",
+  liveProcessText = "",
 }: Props) {
   const bridge = useChatLayoutBridgeOptional();
   const runningId = useMemo(() => {
@@ -67,7 +69,7 @@ export function TurnWorkflowBlock({
                 </span>
                 <p className="litpilot-log-line__text">
                   <span className="litpilot-log-line__primary">
-                    正在连接并分析研究问题…
+                    {liveProcessText.trim() || "正在连接并分析研究问题…"}
                   </span>
                 </p>
               </div>

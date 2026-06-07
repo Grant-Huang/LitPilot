@@ -28,6 +28,10 @@ from app.agents.literature_router import (
     route_literature,
     sanitize_session_title,
 )
+from app.agents.literature_progress import (
+    PROGRESS_INTERVAL_SEC,
+    merge_async_iter_with_progress,
+)
 from app.core.think_stream import (
     ThinkAccumulator,
     emit_system_think_line,
@@ -133,25 +137,51 @@ async def stream_understanding_and_route(
 
     content_buf: list[str] = []
     understand_tokens = await get_prompt_max_tokens("understanding_system_template")
-    try:
-        llm = await get_planner_llm()
-        understanding_system = await get_understanding_system_prompt()
-        async for ev in stream_llm_to_think(
-            llm,
-            [LLMMessage(role="user", content=msg[:4000])],
-            system=understanding_system,
-            accumulator=think_acc,
-            max_tokens=understand_tokens,
-            temperature=0.2,
-            use_reasoning=ctx.use_reasoning,
-            hide_json_in_stream=True,
-            json_hide_hint="正在整理结构化检索规划…",
-            content_buffer=content_buf,
-        ):
-            yield ev
+
+    async def _stream_understanding() -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        nonlocal content_buf
+        try:
+            llm = await get_planner_llm()
+            understanding_system = await get_understanding_system_prompt()
+            async for ev in stream_llm_to_think(
+                llm,
+                [LLMMessage(role="user", content=msg[:4000])],
+                system=understanding_system,
+                accumulator=think_acc,
+                max_tokens=understand_tokens,
+                temperature=0.2,
+                use_reasoning=ctx.use_reasoning,
+                hide_json_in_stream=True,
+                json_hide_hint="正在整理结构化检索规划…",
+                content_buffer=content_buf,
+            ):
+                yield ev
+        except Exception:
+            _log.exception("orchestrator understanding/route failed; fallback to rules")
+            result = await route_literature(user_message)
+            async for ev in emit_system_think_line(
+                "规划模型暂不可用，已使用规则回退生成检索查询。",
+                accumulator=think_acc,
+            ):
+                yield ev
+            yield ("__router_result__", {"result": result})
+            return
         merged = "".join(content_buf)
         result = _extract_router_from_text(merged, user_message)
         result = await refine_router_session_title(result, user_message)
+        yield ("__router_result__", {"result": result})
+
+    try:
+        async for ev in merge_async_iter_with_progress(
+            _stream_understanding(),
+            "understand",
+            "分析研究问题并生成检索规划…",
+            interval_sec=PROGRESS_INTERVAL_SEC,
+        ):
+            if ev[0] == "__router_result__":
+                yield ev
+                return
+            yield ev
     except Exception:
         _log.exception("orchestrator understanding/route failed; fallback to rules")
         result = await route_literature(user_message)
@@ -160,8 +190,7 @@ async def stream_understanding_and_route(
             accumulator=think_acc,
         ):
             yield ev
-
-    yield ("__router_result__", {"result": result})
+        yield ("__router_result__", {"result": result})
 
 
 async def narrate_phase_stream(

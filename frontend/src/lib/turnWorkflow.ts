@@ -306,6 +306,23 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  for (const ext of opts.extensions ?? []) {
+    if (ext.name !== "literature_progress") continue;
+    const detail = String(ext.data.detail ?? "").trim();
+    if (!detail) continue;
+    const stageKey = String(ext.data.stage ?? "");
+    const targetType =
+      stageKey === "brief"
+        ? "brief"
+        : stageKey === "understand" || stageKey === "understanding"
+          ? "understand"
+          : activeType;
+    const target = cards.find((c) => c.type === targetType && c.state === "running");
+    if (target && !target.body) {
+      target.body = detail;
+    }
+  }
+
   const toolLines = buildProcessLines(trace).filter((l) => l.kind === "tool");
   const fetchCard = cards.find((c) => c.type === "fetch") ?? cards[cards.length - 1];
   if (fetchCard && toolLines.length) {
