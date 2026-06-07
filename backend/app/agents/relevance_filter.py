@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.llm_json import parse_json_object
 from app.agents.url_list import title_from_search_hit
+from app.core.think_stream import ThinkAccumulator, stream_llm_to_think
 from app.llm.base import LLMMessage
 
 _log = logging.getLogger(__name__)
@@ -207,6 +209,80 @@ def keep_all_hits(hits: list[dict[str, str]], *, summary: str = "") -> Relevance
     )
 
 
+async def _run_filter_batches(
+    hits: list[dict[str, str]],
+    *,
+    user_message: str,
+    search_query: str,
+    llm: Any,
+    think_acc: ThinkAccumulator | None,
+    yield_think: bool,
+) -> AsyncIterator[tuple[str, Any]]:
+    """Shared batch loop; yields think events when ``yield_think`` is True.
+
+    ``yield_think=False`` matches the legacy single-shot ``filter_hits_by_relevance``
+    path (consumed by tests that mock ``llm.chat``). ``yield_think=True`` re-yields
+    think SSE events so the per-subtopic pipeline can pipe them to the front-end.
+    """
+    for batch_start in range(0, len(hits), BATCH_SIZE):
+        batch = hits[batch_start : batch_start + BATCH_SIZE]
+        lines = [_hit_label(h, index=i) for i, h in enumerate(batch)]
+        prompt = (
+            f"【用户研究说明】\n{(user_message or '').strip()[:2000]}\n\n"
+            f"【检索式】\n{(search_query or '').strip()[:500]}\n\n"
+            f"【待评估文献】共 {len(batch)} 条\n"
+            + "\n".join(lines)
+        )
+        content_buf: list[str] = []
+        async for ev in stream_llm_to_think(
+            llm,
+            [LLMMessage(role="user", content=prompt)],
+            system=RELEVANCE_SYSTEM,
+            accumulator=think_acc,
+            max_tokens=1200,
+            temperature=0.1,
+            hide_json_in_stream=True,
+            json_hide_hint="正在评估相关性…",
+            content_buffer=content_buf,
+        ):
+            if yield_think:
+                yield ev
+        raw_text = "".join(content_buf)
+        decisions, summary = parse_relevance_json(
+            raw_text,
+            batch_offset=batch_start,
+            hits=batch,
+        )
+        if len(decisions) < len(batch):
+            # 未全覆盖时：缺失条目默认保留
+            covered = {d.index - batch_start for d in decisions}
+            for i in range(len(batch)):
+                if i not in covered:
+                    hit = batch[i]
+                    url = str(hit.get("url") or "").strip()
+                    decisions.append(
+                        RelevanceDecision(
+                            index=batch_start + i,
+                            score=KEEP_SCORE_THRESHOLD,
+                            keep=True,
+                            reason="模型未返回，默认保留",
+                            title=title_from_search_hit(hit, url=url),
+                            url=url,
+                        )
+                    )
+        yield ("_batch_done", (decisions, summary))
+
+
+def _aggregate_filter_results(
+    hits: list[dict[str, str]],
+    decisions: list[RelevanceDecision],
+    summaries: list[str],
+) -> RelevanceFilterResult:
+    result = apply_relevance_decisions(hits, decisions)
+    result.summary = "；".join(summaries)[:500]
+    return result
+
+
 async def filter_hits_by_relevance(
     hits: list[dict[str, str]],
     *,
@@ -214,7 +290,12 @@ async def filter_hits_by_relevance(
     search_query: str,
     llm=None,
 ) -> RelevanceFilterResult:
-    """Score merged search hits; drop low-relevance items."""
+    """Score merged search hits; drop low-relevance items.
+
+    Synchronous path: keeps ``llm.chat`` so existing tests (which mock that
+    method) continue to work. Streaming callers should use
+    ``_filter_subtopic_hits_stream`` instead.
+    """
     if not hits:
         return keep_all_hits([])
 
@@ -275,6 +356,59 @@ async def filter_hits_by_relevance(
     result = apply_relevance_decisions(hits, all_decisions)
     result.summary = "；".join(summaries)[:500]
     return result
+
+
+async def _filter_subtopic_hits_stream(
+    *,
+    hits: list[dict[str, str]],
+    user_message: str,
+    search_query: str,
+    llm: Any,
+    think_acc: ThinkAccumulator | None,
+) -> AsyncIterator[tuple[str, Any]]:
+    """Per-subtopic LLM relevance filter that surfaces think SSE.
+
+    Yields ``("think", {...})`` chunks emitted by ``stream_llm_to_think`` so the
+    UI's think fold updates as the relevance filter streams reasoning content.
+    The final ``("_filter_done", result)`` event carries the kept hits so the
+    caller can drop them into the per-subtopic pipeline.
+    """
+    if not hits:
+        yield ("_filter_done", RelevanceFilterResult(kept_hits=[]))
+        return
+    if llm is None:
+        yield ("_filter_done", keep_all_hits(hits, summary="未配置 LLM，跳过相关性筛选"))
+        return
+    all_decisions: list[RelevanceDecision] = []
+    summaries: list[str] = []
+    failed = False
+    try:
+        async for ev in _run_filter_batches(
+            hits,
+            user_message=user_message,
+            search_query=search_query,
+            llm=llm,
+            think_acc=think_acc,
+            yield_think=True,
+        ):
+            if ev[0] == "think":
+                yield ev
+            elif ev[0] == "_batch_done":
+                decisions, summary = ev[1]
+                all_decisions.extend(decisions)
+                if summary:
+                    summaries.append(summary)
+    except Exception:
+        _log.exception("streaming relevance filter failed")
+        failed = True
+
+    if failed:
+        result: RelevanceFilterResult = keep_all_hits(
+            hits, summary="相关性筛选失败，保留全部命中"
+        )
+    else:
+        result = _aggregate_filter_results(hits, all_decisions, summaries)
+    yield ("_filter_done", result)
 
 
 def format_reject_report_lines(result: RelevanceFilterResult) -> list[str]:

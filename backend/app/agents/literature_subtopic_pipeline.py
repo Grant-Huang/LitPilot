@@ -22,7 +22,10 @@ from app.agents.literature_router import LiteratureRouterResult
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn
 from app.agents.literature_turn_graph import sync_graph_node, sync_graph_nodes
-from app.agents.relevance_filter import filter_hits_by_relevance
+from app.agents.relevance_filter import (
+    RelevanceFilterResult,
+    _filter_subtopic_hits_stream,
+)
 from app.agents.search_aspects import collect_search_exclusions, sub_topic_pass_spec
 from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
@@ -126,16 +129,31 @@ async def _filter_subtopic_hits(
     user_message: str,
     search_query: str,
     llm: Any,
-) -> list[dict[str, str]]:
+    think_acc: Any = None,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """Per-subtopic relevance filter; forwards ``think`` SSE to the caller.
+
+    Yields ``("think", {...})`` chunks so the UI think fold updates while the
+    relevance LLM streams reasoning/content. The terminal event is
+    ``("filter_result", {"kept": [...]})`` carrying the kept hits.
+    """
     if not hits:
-        return []
-    result = await filter_hits_by_relevance(
-        hits,
+        yield ("filter_result", {"kept": []})
+        return
+    result: RelevanceFilterResult | None = None
+    async for ev in _filter_subtopic_hits_stream(
+        hits=hits,
         user_message=user_message,
         search_query=search_query,
         llm=llm,
-    )
-    return list(result.kept_hits)
+        think_acc=think_acc,
+    ):
+        if ev[0] == "_filter_done":
+            result = ev[1]
+            continue
+        yield ev
+    kept = list(result.kept_hits) if result is not None else []
+    yield ("filter_result", {"kept": kept})
 
 
 async def _run_subtopic(
@@ -205,12 +223,18 @@ async def _run_subtopic(
         },
     )
 
-    kept = await _filter_subtopic_hits(
+    kept: list[dict[str, str]] = []
+    async for ev in _filter_subtopic_hits(
         hits=raw_hits,
         user_message=ctx.route_message,
         search_query=query,
         llm=ctx.pipeline_llm,
-    )
+        think_acc=ctx.think_acc,
+    ):
+        if ev[0] == "filter_result":
+            kept = list(ev[1].get("kept") or [])
+            continue
+        yield ev
 
     deduped_kept: list[dict[str, str]] = []
     for hit in kept:
