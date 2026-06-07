@@ -196,7 +196,6 @@ export function LitPilotAppShell({ children }: Props) {
         navItems={navItems}
         sidebarFooter={
           <>
-            <SidebarTaskBadge />
             <LitPilotSidebarUser />
           </>
         }

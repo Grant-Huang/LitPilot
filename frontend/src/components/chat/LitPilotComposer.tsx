@@ -200,23 +200,7 @@ export function LitPilotComposer({
               className="litpilot-composer__file-input"
               onChange={onFileChange}
             />
-            <span
-              className={`litpilot-composer__hint${
-                streamActivityLevel === "waiting" || streamActivityLevel === "slow"
-                  ? " litpilot-composer__hint--pulse"
-                  : ""
-              }`}
-            >
-              {isStreamBusy
-                ? streamActivityHint ||
-                  (streamPhase === "pending"
-                    ? "准备中…"
-                    : streamActivityLevel === "slow"
-                      ? `仍在执行（已等待较久，可停止后重试）`
-                      : "执行中…")
-                : "Enter 发送 · Shift+Enter 换行"}
-            </span>
-            {isStreamBusy ? (
+{isStreamBusy ? (
               <button
                 type="button"
                 className="litpilot-composer__stop"
