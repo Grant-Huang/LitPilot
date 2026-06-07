@@ -15,6 +15,7 @@ class CreateTaskBody(BaseModel):
     session_id: Optional[str] = None
     message: str
     fetch_urls: Optional[list[str]] = None
+    literature_source_mode: Optional[str] = None
 
 
 @router.post("")
@@ -37,6 +38,7 @@ async def create_task(body: CreateTaskBody):
         session_id=session_id,
         message=text,
         fetch_urls=body.fetch_urls,
+        literature_source_mode=body.literature_source_mode,
     )
     return ok(task.to_status_dict())
 

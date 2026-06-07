@@ -44,7 +44,7 @@ type LiteratureStreamContextValue = {
   liveIntent: string;
   liveProcessText: string;
   liveChatText: string;
-  send: (text: string, fetchUrls: string[]) => Promise<void>;
+  send: (text: string, fetchUrls: string[], sourceMode?: "merge" | "user_only") => Promise<void>;
   stop: () => Promise<void>;
   resetStreamUi: () => void;
 };
@@ -484,7 +484,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
   }, [activeSessionId, streaming, streamSettling]);
 
   const send = useCallback(
-    async (text: string, fetchUrls: string[]) => {
+    async (text: string, fetchUrls: string[], sourceMode: "merge" | "user_only" = "merge") => {
       const trimmed = text.trim();
       if (!trimmed || streaming || streamSettling) return;
 
@@ -525,6 +525,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
           message: trimmed,
           session_id: sessionId ?? undefined,
           ...(fetchUrls.length ? { fetch_urls: fetchUrls } : {}),
+          ...(sourceMode !== "merge" ? { literature_source_mode: sourceMode } : {}),
         });
         const task = {
           ...mapStatusRow(row),

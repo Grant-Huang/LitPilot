@@ -104,6 +104,7 @@ async def stream_literature_turn(
     user_message: str,
     *,
     extra_fetch_urls: list[str] | None = None,
+    literature_source_mode: str | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     store = get_store()
     store.append_message(session_id, "user", user_message)
@@ -233,7 +234,12 @@ async def stream_literature_turn(
     merge_search_budget = await get_merge_search_budget()
     search_parallel = await get_search_parallel()
     max_fetch_urls = await get_max_fetch_urls()
-    source_mode = await get_literature_source_mode()
+    if literature_source_mode is not None:
+        from app.agents.literature_source import normalize_literature_source_mode
+
+        source_mode = normalize_literature_source_mode(literature_source_mode)
+    else:
+        source_mode = await get_literature_source_mode()
     search_retry_count = await get_search_retry_count()
     fetch_retry_count = await get_fetch_retry_count()
     fetch_retry_delay_ms = await get_fetch_retry_delay_ms()

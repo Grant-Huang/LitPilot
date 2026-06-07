@@ -71,6 +71,7 @@ class LiteratureTaskRegistry:
     def __init__(self) -> None:
         self._store = get_task_store()
         self._local_runners: dict[str, asyncio.Task[None]] = {}
+        self._source_mode_by_task: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     def get(self, task_id: str) -> TaskRecord | None:
@@ -85,12 +86,19 @@ class LiteratureTaskRegistry:
         session_id: str,
         message: str,
         fetch_urls: list[str] | None = None,
+        literature_source_mode: str | None = None,
     ) -> TaskRecord:
         record = self._store.create_task(
             session_id=session_id,
             message=message,
             fetch_urls=fetch_urls,
         )
+        if literature_source_mode:
+            from app.agents.literature_source import normalize_literature_source_mode
+
+            self._source_mode_by_task[record.id] = normalize_literature_source_mode(
+                literature_source_mode
+            )
         await self._maybe_start_runner(record.id)
         refreshed = self._store.get_task(record.id)
         return refreshed or record
@@ -202,6 +210,7 @@ class LiteratureTaskRegistry:
                 record.session_id,
                 record.message,
                 extra_fetch_urls=record.fetch_urls or None,
+                literature_source_mode=self._source_mode_by_task.get(task_id),
             ):
                 if self._store.is_cancel_requested(task_id):
                     finished = time.time()
@@ -263,6 +272,7 @@ class LiteratureTaskRegistry:
             )
         finally:
             self._local_runners.pop(task_id, None)
+            self._source_mode_by_task.pop(task_id, None)
 
     async def iter_stream(self, task_id: str, since: int = 0):
         cursor = max(0, since)

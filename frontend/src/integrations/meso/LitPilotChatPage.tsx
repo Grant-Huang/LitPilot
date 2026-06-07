@@ -257,8 +257,8 @@ export function LitPilotChatPage() {
     setInput("");
     const urlsToSend = fetchUrls;
     setFetchUrls([]);
-    await sendStream(text, urlsToSend);
-  }, [input, fetchUrls, streaming, sendStream]);
+    await sendStream(text, urlsToSend, literatureSourceMode);
+  }, [input, fetchUrls, streaming, sendStream, literatureSourceMode]);
 
   return (
     <div className="litpilot-chat-pane">
@@ -299,6 +299,7 @@ export function LitPilotChatPage() {
           onFetchUrlsChange={setFetchUrls}
           maxFetchUrls={maxFetchUrls}
           literatureSourceMode={literatureSourceMode}
+          onLiteratureSourceModeChange={setLiteratureSourceMode}
           streaming={streaming || streamPending}
           streamPending={streamPending}
           streamActivityHint={streamActivityHint}

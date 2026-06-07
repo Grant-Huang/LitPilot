@@ -21,6 +21,7 @@ type LitPilotComposerProps = {
   /** 与设置页 max_fetch_urls 一致，默认 50 上限 */
   maxFetchUrls?: number;
   literatureSourceMode?: LiteratureSourceMode;
+  onLiteratureSourceModeChange?: (mode: LiteratureSourceMode) => void;
   streaming: boolean;
   streamPending?: boolean;
   streamActivityHint?: string | null;
@@ -36,6 +37,7 @@ export function LitPilotComposer({
   onFetchUrlsChange,
   maxFetchUrls = 50,
   literatureSourceMode = "merge",
+  onLiteratureSourceModeChange,
   streaming,
   streamPending = false,
   streamActivityHint = null,
@@ -88,24 +90,42 @@ export function LitPilotComposer({
         <div className="litpilot-composer__box">
           <div className="litpilot-composer__meta">
             <div className="litpilot-composer__chips" role="group" aria-label="文献来源模式">
-              <span
-                className={`litpilot-composer__chip${
-                  literatureSourceMode === "merge"
-                    ? " litpilot-composer__chip--active"
-                    : ""
-                }`}
+              <Tooltip title="合并用户链接与学术检索结果">
+                <button
+                  type="button"
+                  className={`litpilot-composer__chip${
+                    literatureSourceMode === "merge"
+                      ? " litpilot-composer__chip--active"
+                      : ""
+                  }`}
+                  disabled={isBusy}
+                  aria-pressed={literatureSourceMode === "merge"}
+                  onClick={() => onLiteratureSourceModeChange?.("merge")}
+                >
+                  合并检索
+                </button>
+              </Tooltip>
+              <Tooltip
+                title={
+                  fetchUrls.length > 0
+                    ? "仅抓取你上传的链接，跳过学术检索"
+                    : "需先上传链接；无链接时发送仍会合并检索"
+                }
               >
-                合并检索
-              </span>
-              <span
-                className={`litpilot-composer__chip${
-                  literatureSourceMode === "user_only"
-                    ? " litpilot-composer__chip--active"
-                    : ""
-                }`}
-              >
-                仅用户链接
-              </span>
+                <button
+                  type="button"
+                  className={`litpilot-composer__chip${
+                    literatureSourceMode === "user_only"
+                      ? " litpilot-composer__chip--active"
+                      : ""
+                  }`}
+                  disabled={isBusy}
+                  aria-pressed={literatureSourceMode === "user_only"}
+                  onClick={() => onLiteratureSourceModeChange?.("user_only")}
+                >
+                  仅用户链接
+                </button>
+              </Tooltip>
             </div>
             {fetchUrls.length > 0 ? (
               <Tag
