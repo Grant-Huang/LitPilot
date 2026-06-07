@@ -1183,9 +1183,42 @@
   font-size: 11px;
 }
 
+.litpilot-app-nav__prefetch {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.litpilot-route-outlet {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.litpilot-sidebar-user__menu-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.litpilot-sidebar-user__menu-link:hover {
+  color: inherit;
+}
+
 /* 功能页（设置、文献库、帮助）：占满主区并内部滚动 */
-.meso-main__content:has(> .functional-shell),
-.meso-main__content:has(> .functional-doc-shell) {
+.meso-main__chat:has(> .litpilot-route-outlet > .functional-shell),
+.meso-main__chat:has(> .litpilot-route-outlet > .functional-doc-shell),
+.meso-main__chat:has(> .functional-shell),
+.meso-main__chat:has(> .functional-doc-shell) {
   display: flex;
   flex-direction: column;
   min-height: 0;

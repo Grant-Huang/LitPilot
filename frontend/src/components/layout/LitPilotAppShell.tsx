@@ -98,6 +98,11 @@ export function LitPilotAppShell({ children }: Props) {
     return () => chatBridge.registerArtifactPanelControl(null);
   }, [isChat, chatBridge, artifactVisible]);
 
+  useEffect(() => {
+    if (isChat) return;
+    chatBridge?.resetChatLayout();
+  }, [isChat, chatBridge]);
+
   const navItems = useMemo(
     () => [
       {
@@ -198,7 +203,9 @@ export function LitPilotAppShell({ children }: Props) {
         showSessionColumn={layoutFlags.showSessionColumn}
         onArtifactToggle={setArtifactVisible}
       >
-        {children}
+        <div key={pathname} className="litpilot-route-outlet">
+          {children}
+        </div>
       </ThreeColumnLayout>
     </div>
   );
