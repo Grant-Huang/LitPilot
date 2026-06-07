@@ -32,14 +32,9 @@ export const CAP_TIPS = {
     "pypdf：轻量纯 Python。pymupdf4llm：表格/Markdown 更好，商业使用需 Artifex 许可。",
 
   orchestrator_instance:
-    "编排模型（planner）：负责理解问题、检索式、阶段解说、网页摘要、文献结构化等；与下方「解说密度」无关。",
+    "编排模型（planner）：负责理解问题、检索式、阶段解说、网页摘要、文献结构化等。",
   review_instance:
     "综述主模型（review）：负责语料问答、矩阵与分章/全文综述撰写；通常选更强、上下文更大的模型。",
-  orchestrator_mode:
-    "控制流程中「思考区」阶段解说的多少，不是换模型。off=无解说；lite=关键节点；full=各阶段均有解说。",
-  orchestrator_mode_off: "关闭阶段解说，仍执行检索/抓取/撰写（router JSON 仍走 planner 模型）。",
-  orchestrator_mode_lite: "在理解、检索后、抓取后、结构化等关键节点输出简短解说。",
-  orchestrator_mode_full: "检索前/后、抓取进度、引用、生成前等更多节点均解说。",
   orchestrator_reasoning:
     "仅对 MiniMax 等原生 reasoning 通道有意义；编排任务以 JSON 与短解说为主，默认关闭即可。OpenAI 等模型通常无效果。",
   orchestrator_tokens: "每个解说/checkpoint 单次 LLM 调用的 max_tokens 上限；过小可能导致 JSON 截断。",

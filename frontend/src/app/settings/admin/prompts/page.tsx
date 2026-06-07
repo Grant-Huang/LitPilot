@@ -376,12 +376,6 @@ export default function AdminPromptsPage() {
 
       {groups.map((group) => {
         const groupInstanceId = resolveGroupInstanceId(group.id, promptParams, capRefSnapshot);
-        const orchModeTip = [
-          CAP_TIPS.orchestrator_mode,
-          CAP_TIPS.orchestrator_mode_off,
-          CAP_TIPS.orchestrator_mode_lite,
-          CAP_TIPS.orchestrator_mode_full,
-        ].join("\n");
 
         return (
           <section key={group.id} className="settings-prompts__group">
@@ -436,24 +430,6 @@ export default function AdminPromptsPage() {
                       tip={CAP_TIPS.orchestrator_reasoning}
                     />
                     <div className="settings-cap-params-grid">
-                      <InlineField
-                        label="解说密度"
-                        htmlFor="orch-mode"
-                        tip={orchModeTip}
-                      >
-                        <select
-                          id="orch-mode"
-                          className="input settings-select"
-                          value={String(orchParams.orchestrator_mode ?? "lite")}
-                          onChange={(e) =>
-                            setOrchParams((p) => ({ ...p, orchestrator_mode: e.target.value }))
-                          }
-                        >
-                          <option value="off">off — 关闭阶段解说</option>
-                          <option value="lite">lite — 关键节点简短解说</option>
-                          <option value="full">full — 各阶段均有解说</option>
-                        </select>
-                      </InlineField>
                       <InlineField
                         label="Token/阶段"
                         htmlFor="orch-tok"

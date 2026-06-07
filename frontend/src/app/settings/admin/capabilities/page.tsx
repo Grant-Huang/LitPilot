@@ -435,12 +435,6 @@ function CapabilityCard({
       );
     }
     if (cap.capability_id === "orchestrator") {
-      const modeTip = [
-        CAP_TIPS.orchestrator_mode,
-        CAP_TIPS.orchestrator_mode_off,
-        CAP_TIPS.orchestrator_mode_lite,
-        CAP_TIPS.orchestrator_mode_full,
-      ].join("\n");
       return (
         <>
           <InlineCheck
@@ -452,24 +446,6 @@ function CapabilityCard({
             tip={CAP_TIPS.orchestrator_reasoning}
           />
           <div className="settings-cap-params-grid">
-            <InlineField
-              label="解说密度"
-              htmlFor={`${cap.capability_id}-mode`}
-              tip={modeTip}
-            >
-              <select
-                id={`${cap.capability_id}-mode`}
-                className="input settings-select"
-                value={String(params.orchestrator_mode ?? "lite")}
-                onChange={(e) =>
-                  setParams((p) => ({ ...p, orchestrator_mode: e.target.value }))
-                }
-              >
-                <option value="off">off — 关闭阶段解说</option>
-                <option value="lite">lite — 关键节点简短解说</option>
-                <option value="full">full — 各阶段均有解说</option>
-              </select>
-            </InlineField>
             <InlineField
               label="Token/阶段"
               htmlFor={`${cap.capability_id}-tok`}
