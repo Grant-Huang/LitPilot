@@ -129,10 +129,10 @@ export function WorkflowCardView({
       </div>
       {open ? (
         <div className="litpilot-wf-card__body">
-          {trace?.thinkContent &&
-          (card.type === "understand" || card.type === "brief") ? (
+          {(card.type === "understand" || card.type === "brief") &&
+          (trace?.thinkContent || (streaming && isRunning)) ? (
             <LitPilotThinkFold
-              content={trace.thinkContent}
+              content={trace?.thinkContent ?? ""}
               collapsed={!(streaming && isRunning)}
               streaming={streaming && isRunning}
             />

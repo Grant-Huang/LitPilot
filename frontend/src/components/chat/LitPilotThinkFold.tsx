@@ -23,7 +23,10 @@ export function LitPilotThinkFold({
 
   const segments = useMemo(() => parseThinkSegments(content), [content]);
 
-  if (!content.trim()) return null;
+  const hasContent = content.trim().length > 0;
+
+  // While streaming, always show the fold header (loading indicator) even before content arrives.
+  if (!hasContent && !streaming) return null;
 
   return (
     <div className={`meso-think litpilot-think${open ? " meso-think--open" : ""}`}>
@@ -52,16 +55,20 @@ export function LitPilotThinkFold({
       </button>
       <div className="meso-think__body">
         <div className="meso-think__content litpilot-think__content">
-          {segments.map((seg, idx) =>
-            seg.kind === "system" ? (
-              <p key={idx} className="litpilot-think__system">
-                {seg.text}
-              </p>
-            ) : (
-              <span key={idx} className="litpilot-think__model">
-                {seg.text}
-              </span>
-            ),
+          {hasContent ? (
+            segments.map((seg, idx) =>
+              seg.kind === "system" ? (
+                <p key={idx} className="litpilot-think__system">
+                  {seg.text}
+                </p>
+              ) : (
+                <span key={idx} className="litpilot-think__model">
+                  {seg.text}
+                </span>
+              ),
+            )
+          ) : (
+            <p className="litpilot-think__system">正在调用模型…</p>
           )}
           {streaming && (
             <span className="meso-think__cursor" aria-hidden="true">
