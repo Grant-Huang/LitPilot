@@ -148,6 +148,21 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
       status: "done",
     };
   }
+  if (name === "literature_relevance_filter") {
+    const kept = data.kept_count;
+    const rejected = data.rejected_count;
+    const warn = data.query_warning === true;
+    const base =
+      typeof kept === "number" && typeof rejected === "number"
+        ? `相关性筛选 保留 ${kept} · 剔除 ${rejected}`
+        : "相关性筛选";
+    return {
+      key: `ext-${name}`,
+      kind: "inline",
+      title: warn ? `${base}（建议优化检索式）` : base,
+      status: "done",
+    };
+  }
   if (name === "literature_source") {
     const total = data.total_fetch;
     return {

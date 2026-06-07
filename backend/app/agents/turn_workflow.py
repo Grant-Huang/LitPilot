@@ -27,7 +27,7 @@ def stage_to_phase(name: str) -> str | None:
         return "understand"
     if "澄清" in n or "等待" in n:
         return "clarify"
-    if "检索" in n:
+    if "检索" in n or "相关性" in n:
         return "search"
     if "抓取" in n:
         return "fetch"
