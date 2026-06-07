@@ -9,10 +9,20 @@ from app.agents.prompt_registry import (
 )
 
 
-def test_default_for_known_keys() -> None:
+def test_understanding_default_is_domain_agnostic() -> None:
     tpl = default_for("understanding_system_template")
     assert "过程解说员" in tpl
+    assert "MOM" not in tpl
+    assert "制造" not in tpl
     assert "narration_focus" in tpl
+
+
+def test_expansion_and_refiner_roles_differ() -> None:
+    expansion = default_for("search_expansion_system_template")
+    refiner = default_for("search_refiner_system_template")
+    assert "不同角度" in expansion or "扩展" in expansion
+    assert "1:1" in refiner or "1:1 精炼" in refiner
+    assert "exclude_title_substrings" in refiner
 
 
 def test_matrix_and_query_defaults_share_material_labels() -> None:

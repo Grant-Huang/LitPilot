@@ -75,7 +75,12 @@ async def expand_search_queries(
         return [base] if base else []
 
     if use_llm and llm is not None:
-        prompt = f"研究主题：{user_message or base}\n基准检索式：{base}\n请输出 {cap} 个检索式 JSON 数组。"
+        prompt = (
+            f"【研究主题】\n{(user_message or base).strip()[:2000]}\n\n"
+            f"【基准检索式】\n{base}\n\n"
+            f"请从同义表述、子问题、方法/应用维度扩展出 {cap} 条 **不同角度** 的英文学术检索式，"
+            f"输出 JSON 数组（可保留或改写基准式）。"
+        )
         try:
             expansion_system = await get_search_expansion_system_prompt()
             resp = await llm.chat(

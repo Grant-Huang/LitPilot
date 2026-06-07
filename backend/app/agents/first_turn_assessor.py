@@ -191,7 +191,8 @@ async def assess_first_turn_brief(
         )
         prompt = (
             f"【用户首轮说明】\n{msg[:2500]}\n\n"
-            f"【路由/检索草案（可能含噪声，勿复述）】\n{router_hint or '（无）'}\n\n"
+            f"【路由检索草案（可能含噪声，勿复述）】\n{router_hint or '（无）'}\n\n"
+            "请提炼 RQ/关键词；仅在 brief 不足或草案偏泛时输出 search_query_hint 或 clarification。"
             "请输出 JSON。"
         )
         try:

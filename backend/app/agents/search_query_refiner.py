@@ -149,7 +149,8 @@ async def refine_literature_search_queries(
         prompt = (
             f"【用户研究说明】\n{(user_message or '').strip()[:2000]}\n\n"
             f"【待精炼检索式草案】\n{numbered}\n\n"
-            f"请输出 JSON，queries 数组长度必须为 {len(draft)}。"
+            f"请对每条草案 1:1 消歧并规范化，输出 JSON；"
+            f"queries 数组长度必须为 {len(draft)}，并填写 exclude_title_substrings。"
         )
         try:
             refiner_system = await get_search_refiner_system_prompt()
