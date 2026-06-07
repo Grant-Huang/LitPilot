@@ -11,7 +11,7 @@ from app.agents.prompt_registry import (
     DEFAULT_QUERY_CORPUS_SYSTEM as QUERY_CORPUS_SYSTEM,
 )
 from app.agents.review_prompt import MULTI_SOURCE_MATERIALS_HEADER
-from app.agents.prompt_settings import get_intent_router_system_prompt
+from app.agents.prompt_settings import get_intent_router_system_prompt, get_prompt_max_tokens
 from app.agents.literature_router import (
     LiteratureRouterResult,
     clamp_search_query,
@@ -343,12 +343,13 @@ async def route_literature_intent(
             return ruled
 
     if not turn_ctx.has_corpus:
-        router = await route_literature(user_message)
+        # 首轮由 Checkpoint A 统一产出 title / search_aspects；此处不再重复调用 route_literature。
+        msg = user_message.strip()
         urls = _extract_urls(user_message, extra_urls)
         return LiteratureIntentResult(
             intent="new_topic",
-            session_title=router.session_title,
-            search_query=router.search_query,
+            session_title=fallback_session_title(msg),
+            search_query=clamp_search_query(msg, fallback=msg),
             new_urls=urls,
             use_existing_corpus=False,
         )
@@ -362,10 +363,11 @@ async def route_literature_intent(
         if extra_urls:
             body += f"\n\n【上传链接数】{len(extra_urls)}"
         intent_system = await get_intent_router_system_prompt()
+        max_tokens = await get_prompt_max_tokens("intent_router_system_template")
         resp = await llm.chat(
             [LLMMessage(role="user", content=body)],
             system=intent_system,
-            max_tokens=300,
+            max_tokens=max_tokens,
             temperature=0.0,
         )
         result = _parse_intent_json(resp.content or "", user_message)

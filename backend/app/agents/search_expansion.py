@@ -6,7 +6,7 @@ import logging
 import re
 
 from app.agents.prompt_registry import DEFAULT_EXPANSION_SYSTEM as _EXPANSION_SYSTEM
-from app.agents.prompt_settings import get_search_expansion_system_prompt
+from app.agents.prompt_settings import get_prompt_max_tokens, get_search_expansion_system_prompt
 from app.llm.base import LLMMessage
 
 _log = logging.getLogger(__name__)
@@ -83,10 +83,11 @@ async def expand_search_queries(
         )
         try:
             expansion_system = await get_search_expansion_system_prompt()
+            max_tokens = await get_prompt_max_tokens("search_expansion_system_template")
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 system=expansion_system,
-                max_tokens=280,
+                max_tokens=max_tokens,
                 temperature=0.3,
             )
             expanded = _parse_query_list(resp.content or "")

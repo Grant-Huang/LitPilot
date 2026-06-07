@@ -8,7 +8,11 @@ from typing import Any, AsyncIterator
 from app.agents.agent_settings import get_review_system_prompt_template
 from app.agents.execution_trace import upsert_stage
 from app.agents.literature_intent import LiteratureIntentResult, build_query_prompt
-from app.agents.prompt_settings import get_matrix_system_prompt, get_query_corpus_system_prompt
+from app.agents.prompt_settings import (
+    get_matrix_system_prompt,
+    get_prompt_max_tokens,
+    get_query_corpus_system_prompt,
+)
 from app.agents.literature_planner import (
     PlannerContext,
     format_generate_context,
@@ -116,11 +120,12 @@ async def _stream_query_corpus(
     )
     main_parts: list[str] = []
     query_system = await get_query_corpus_system_prompt()
+    query_tokens = await get_prompt_max_tokens("query_corpus_system_template")
     try:
         async for chunk in ctx.llm.chat_stream(
             [LLMMessage(role="user", content=q_prompt)],
             system=query_system,
-            max_tokens=2048,
+            max_tokens=query_tokens,
             temperature=0.3,
         ):
             main_parts.append(chunk)
@@ -172,11 +177,12 @@ async def _stream_synthesis_matrix(
     )
     matrix_art_id = new_id("matrix")
     matrix_parts: list[str] = []
+    matrix_tokens = await get_prompt_max_tokens("matrix_system_template")
     try:
         async for chunk in ctx.llm.chat_stream(
             [LLMMessage(role="user", content=matrix_prompt)],
             system=matrix_system,
-            max_tokens=4096,
+            max_tokens=matrix_tokens,
             temperature=0.25,
         ):
             matrix_parts.append(chunk)
@@ -194,7 +200,7 @@ async def _stream_synthesis_matrix(
             resp = await ctx.llm.chat(
                 [LLMMessage(role="user", content=matrix_prompt)],
                 system=matrix_system,
-                max_tokens=4096,
+                max_tokens=matrix_tokens,
                 temperature=0.25,
             )
             matrix_text = (resp.content or "").strip()
@@ -332,6 +338,9 @@ async def _stream_review(
                     {"mode": "full", "target_section_ids": [], "reused_count": 0},
                 )
 
+        section_tokens = await get_prompt_max_tokens("section_system_template")
+        section_refine_tokens = await get_prompt_max_tokens("section_refine_system_template")
+
         for section in outline_obj.sections:
             reuse_body = ""
             if refine_plan and not refine_plan.should_regenerate(section.id):
@@ -375,6 +384,7 @@ async def _stream_review(
             sec_directives = (
                 refine_plan.revision_directives if refine_plan else gen_directives
             )
+            sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
             try:
                 async for chunk in stream_section_generate(
                     ctx.llm,
@@ -388,6 +398,7 @@ async def _stream_review(
                     gen_directives=sec_directives,
                     writing_emphasis=ctx.planner_ctx.writing_emphasis,
                     is_refine=sec_is_refine,
+                    max_tokens=sec_tokens,
                 ):
                     sec_parts.append(chunk)
                     yield artifact_stream_delta(review_art_id, chunk)
@@ -457,11 +468,12 @@ async def _stream_review(
             intent=ctx.intent.intent,
         )
         main_parts: list[str] = []
+        review_tokens = await get_prompt_max_tokens("review_system_prompt_template")
         try:
             async for chunk in ctx.llm.chat_stream(
                 [LLMMessage(role="user", content=gen_prompt)],
                 system=review_system,
-                max_tokens=4096,
+                max_tokens=review_tokens,
                 temperature=0.35,
             ):
                 main_parts.append(chunk)
@@ -475,7 +487,7 @@ async def _stream_review(
                 resp = await ctx.llm.chat(
                     [LLMMessage(role="user", content=gen_prompt)],
                     system=review_system,
-                    max_tokens=4096,
+                    max_tokens=review_tokens,
                     temperature=0.35,
                 )
                 raw_main = (resp.content or "").strip()

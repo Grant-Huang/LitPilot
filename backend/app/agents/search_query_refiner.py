@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from app.agents.llm_json import parse_json_object
 from app.agents.prompt_registry import DEFAULT_REFINER_SYSTEM as REFINER_SYSTEM
-from app.agents.prompt_settings import get_search_refiner_system_prompt
+from app.agents.prompt_settings import get_prompt_max_tokens, get_search_refiner_system_prompt
 from app.agents.literature_router import SEARCH_QUERY_MAX, clamp_search_query
 from app.llm.base import LLMMessage
 
@@ -154,10 +154,11 @@ async def refine_literature_search_queries(
         )
         try:
             refiner_system = await get_search_refiner_system_prompt()
+            max_tokens = await get_prompt_max_tokens("search_refiner_system_template")
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 system=refiner_system,
-                max_tokens=640,
+                max_tokens=max_tokens,
                 temperature=0.1,
             )
             return parse_refiner_json(resp.content or "", draft_queries=draft)

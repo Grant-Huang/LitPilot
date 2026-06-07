@@ -437,14 +437,6 @@ function CapabilityCard({
     if (cap.capability_id === "orchestrator") {
       return (
         <>
-          <InlineCheck
-            label="启用 reasoning 模式"
-            checked={Boolean(params.orchestrator_use_reasoning ?? false)}
-            onChange={(checked) =>
-              setParams((p) => ({ ...p, orchestrator_use_reasoning: checked }))
-            }
-            tip={CAP_TIPS.orchestrator_reasoning}
-          />
           <div className="settings-cap-params-grid">
             <InlineField
               label="Token/阶段"

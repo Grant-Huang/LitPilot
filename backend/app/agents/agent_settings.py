@@ -290,8 +290,8 @@ async def get_use_llm_planner() -> bool:
 
 
 async def get_orchestrator_use_reasoning() -> bool:
-
-    return bool((await get_merged_settings()).get("orchestrator_use_reasoning", False))
+    """Reasoning mode is disabled (hard-coded off)."""
+    return False
 
 
 

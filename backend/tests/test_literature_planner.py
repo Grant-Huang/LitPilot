@@ -124,6 +124,11 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
             return_value="understanding system",
         ),
         patch(
+            "app.agents.literature_planner.get_prompt_max_tokens",
+            new_callable=AsyncMock,
+            return_value=1200,
+        ),
+        patch(
             "app.agents.literature_router.get_router_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,

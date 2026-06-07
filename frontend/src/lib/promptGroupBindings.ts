@@ -24,7 +24,7 @@ export const PROMPT_GROUP_ORDER = [
 
 export const PROMPT_GROUP_INSTANCE_TIPS: Partial<Record<string, string>> = {
   orchestrator:
-    "阶段解说与 Checkpoint A 理解；未绑定时编排流程不可用。",
+    "阶段解说与 Checkpoint A 理解；未绑定时编排流程不可用。组内各提示词共享此实例，Token 可逐条覆盖。",
   router: "首条路由与续聊意图 JSON；默认与编排实例相同，可单独指定更快模型。",
   search: "检索式消歧、扩展与规范化；默认与编排实例相同。",
   assessor: "首轮 brief 评估与澄清；默认与编排实例相同。",
@@ -32,6 +32,24 @@ export const PROMPT_GROUP_INSTANCE_TIPS: Partial<Record<string, string>> = {
     "综述撰写、分章、矩阵与语料问答；通常选更强、上下文更大的模型。",
   pipeline: "网页分块摘要与文献结构化；默认与编排实例相同。",
 };
+
+export function promptMaxTokensParam(key: string): string {
+  return `${key}_max_tokens`;
+}
+
+const INSTANCE_BINDING_LABELS: Record<string, string> = {
+  orchestrator: "编排解说",
+  router: "路由",
+  search: "检索",
+  assessor: "评估澄清",
+  review_main: "生成（review_main）",
+  pipeline: "流水线",
+};
+
+export function instanceBindingLabel(binding: string | null | undefined): string {
+  if (!binding) return "未绑定";
+  return INSTANCE_BINDING_LABELS[binding] || binding;
+}
 
 export function instanceOptions(instances: SystemInstance[]) {
   return instances.map((i) => ({

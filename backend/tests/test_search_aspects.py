@@ -11,6 +11,7 @@ from app.agents.search_aspects import (
     collect_search_exclusions,
     parse_search_aspects,
     query_for_source,
+    search_aspects_plan_ready,
     sub_topic_pass_spec,
 )
 from app.agents.tools.search_hits import filter_search_hits
@@ -36,6 +37,23 @@ def test_parse_search_aspects_from_router_json() -> None:
     sq = aspects[0].source_queries()
     assert "arxiv" in sq
     assert "pubmed" not in sq
+
+
+def test_search_aspects_plan_ready() -> None:
+    aspects = parse_search_aspects(
+        [
+            {
+                "aspect_label": "A",
+                "arxiv_query": "topic A survey",
+            },
+            {
+                "aspect_label": "B",
+                "semantic_scholar_query": "topic B review",
+            },
+        ]
+    )
+    assert search_aspects_plan_ready(aspects) is True
+    assert search_aspects_plan_ready([]) is False
 
 
 def test_build_router_result_parses_search_aspects() -> None:

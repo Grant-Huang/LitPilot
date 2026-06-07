@@ -40,7 +40,11 @@ from app.agents.literature_clarification import (
     merge_first_turn_message,
     resolve_pending_gate,
 )
-from app.agents.first_turn_assessor import format_brief_assessment_message
+from app.agents.first_turn_assessor import (
+    brief_assessment_from_router,
+    format_brief_assessment_message,
+)
+from app.agents.search_aspects import search_aspects_plan_ready
 from app.agents.literature_intent import (
     LiteratureIntentResult,
     build_session_turn_context,
@@ -185,7 +189,6 @@ async def stream_literature_turn(
 
     if not skip_to_generate:
         yield turn_start(turn_index=user_turns, intent="new_topic")
-        yield ("stage", {"name": "理解研究问题", "state": "active"})
         async for ev in emit_system_think_line(
             "正在理解你的研究问题…",
             accumulator=think_acc,
@@ -218,6 +221,12 @@ async def stream_literature_turn(
             if key_hint:
                 yield ("error", {"message": key_hint})
                 return
+
+    async for ev in emit_system_think_line(
+        "正在加载检索与抓取配置…",
+        accumulator=think_acc,
+    ):
+        yield ev
 
     search_max_results = await get_search_max_results()
     merge_search_budget = await get_merge_search_budget()
@@ -390,6 +399,12 @@ async def stream_literature_turn(
             },
         )
         router_result = intent.to_router_result()
+        yield ("stage", {"name": "理解研究问题", "state": "active"})
+        async for ev in emit_system_think_line(
+            "正在生成检索规划与检索方向…",
+            accumulator=think_acc,
+        ):
+            yield ev
         async for ev in stream_understanding_and_route(
             route_message,
             think_acc=think_acc,
@@ -432,15 +447,25 @@ async def stream_literature_turn(
             or intent.search_query
             or route_message.strip()
         )
-        assessor_llm = await get_assessor_llm()
-        first_gate, brief_assessment = await assess_first_turn_gate(
-            route_message,
-            search_query=search_query_for_plan,
-            user_turns=user_turns,
-            intent=intent.intent,
-            gate_resolved=clar_state.resolved,
-            llm=assessor_llm,
-        )
+        first_gate = None
+        brief_assessment = None
+        if search_aspects_plan_ready(router_result.search_aspects):
+            brief_assessment = brief_assessment_from_router(router_result)
+        else:
+            assessor_llm = await get_assessor_llm()
+            async for ev in emit_system_think_line(
+                "正在评估研究 brief…",
+                accumulator=think_acc,
+            ):
+                yield ev
+            first_gate, brief_assessment = await assess_first_turn_gate(
+                route_message,
+                search_query=search_query_for_plan,
+                user_turns=user_turns,
+                intent=intent.intent,
+                gate_resolved=clar_state.resolved,
+                llm=assessor_llm,
+            )
         if brief_assessment and not first_gate:
             assess_patch: dict[str, Any] = {
                 "brief_assessment": brief_assessment.to_dict(),

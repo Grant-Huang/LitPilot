@@ -10,11 +10,12 @@ from typing import Any
 
 from app.agents.agent_settings import (
     get_orchestrator_max_tokens,
-    get_orchestrator_use_reasoning,
     get_use_llm_planner,
 )
+from app.agents.prompt_registry import NARRATE_CHECKPOINT_KEYS
 from app.agents.prompt_settings import (
     get_narrate_checkpoint_system_prompt,
+    get_prompt_max_tokens,
     get_understanding_system_prompt,
 )
 from app.agents.literature_router import (
@@ -39,8 +40,6 @@ _log = logging.getLogger(__name__)
 
 FETCH_NARRATE_EVERY_N = 5
 FETCH_NARRATE_INTERVAL_SEC = 8.0
-# Checkpoint A merges narration + search_aspects JSON; needs more budget than later checkpoints.
-UNDERSTANDING_MIN_TOKENS = 1200
 
 # Lite narration: retrieval after, fetch after, attributes after.
 LITE_NARRATE_CHECKPOINTS = frozenset({"C", "E", "F2"})
@@ -81,7 +80,7 @@ class PlannerContext:
 async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
-        use_reasoning=await get_orchestrator_use_reasoning(),
+        use_reasoning=False,
         max_tokens=await get_orchestrator_max_tokens(),
     )
 
@@ -133,7 +132,7 @@ async def stream_understanding_and_route(
         return
 
     content_buf: list[str] = []
-    understand_tokens = max(ctx.max_tokens, UNDERSTANDING_MIN_TOKENS)
+    understand_tokens = await get_prompt_max_tokens("understanding_system_template")
     try:
         llm = await get_planner_llm()
         understanding_system = await get_understanding_system_prompt()
@@ -146,6 +145,7 @@ async def stream_understanding_and_route(
             temperature=0.2,
             use_reasoning=ctx.use_reasoning,
             hide_json_in_stream=True,
+            json_hide_hint="正在整理结构化检索规划…",
             content_buffer=content_buf,
         ):
             yield ev
@@ -181,6 +181,10 @@ async def narrate_phase_stream(
     if not system:
         return
 
+    narrate_key = NARRATE_CHECKPOINT_KEYS.get(checkpoint, "")
+    narrate_tokens = (
+        await get_prompt_max_tokens(narrate_key) if narrate_key else ctx.max_tokens
+    )
     focus_parts: list[str] = []
     if ctx.narration_focus.strip():
         focus_parts.append(
@@ -200,7 +204,7 @@ async def narrate_phase_stream(
             [LLMMessage(role="user", content=body)],
             system=system,
             accumulator=think_acc,
-            max_tokens=ctx.max_tokens,
+            max_tokens=narrate_tokens,
             temperature=0.25,
             use_reasoning=ctx.use_reasoning,
         ):

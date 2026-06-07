@@ -54,6 +54,15 @@ def test_resolve_keeps_custom_when_contract_present() -> None:
     assert out == custom
 
 
+def test_prompt_metadata_includes_max_tokens() -> None:
+    from app.agents.prompt_registry import prompt_registry_metadata
+
+    meta = prompt_registry_metadata()
+    understanding = next(m for m in meta if m["key"] == "understanding_system_template")
+    assert understanding["default_max_tokens"] == 1200
+    assert understanding["max_tokens_limit"] == 4000
+
+
 def test_clamp_prompt_params_truncates_long_templates() -> None:
     key = "summary_system_template"
     max_len = int(PROMPT_SPECS[key]["max_len"])

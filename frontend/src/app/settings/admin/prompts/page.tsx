@@ -17,7 +17,9 @@ import {
 import { CAP_TIPS } from "@/lib/capabilityTips";
 import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import {
+  instanceBindingLabel,
   instanceOptions,
+  promptMaxTokensParam,
   PROMPT_GROUP_CAPABILITY,
   PROMPT_GROUP_INSTANCE_PARAM,
   PROMPT_GROUP_INSTANCE_TIPS,
@@ -308,7 +310,7 @@ export default function AdminPromptsPage() {
       />
 
       <p className="settings-field-note settings-cap-section-note">
-        按分组绑定模型实例并编辑提示词；检索与抓取见「检索与抓取」页。
+        按分组绑定模型实例；各提示词可单独设置 Token/阶段（未设时编排组 B–G 继承组内默认）。
       </p>
 
       <div className="settings-prompts__toggles">
@@ -421,19 +423,11 @@ export default function AdminPromptsPage() {
 
                 {group.id === "orchestrator" ? (
                   <div className="settings-prompts__orch-params">
-                    <InlineCheck
-                      label="启用 reasoning 模式"
-                      checked={Boolean(orchParams.orchestrator_use_reasoning ?? false)}
-                      onChange={(checked) =>
-                        setOrchParams((p) => ({ ...p, orchestrator_use_reasoning: checked }))
-                      }
-                      tip={CAP_TIPS.orchestrator_reasoning}
-                    />
                     <div className="settings-cap-params-grid">
                       <InlineField
                         label="Token/阶段"
                         htmlFor="orch-tok"
-                        tip={CAP_TIPS.orchestrator_tokens}
+                        tip="编排组 B–G 解说在未单独设置 Token 时的默认值；Checkpoint A 默认 1200。"
                       >
                         <input
                           id="orch-tok"
@@ -454,7 +448,17 @@ export default function AdminPromptsPage() {
                   </div>
                 ) : null}
 
-                {group.items.map((item) => (
+                {group.items.map((item) => {
+                  const tokenParam = promptMaxTokensParam(item.key);
+                  const tokenDefault = item.default_max_tokens ?? 280;
+                  const tokenLimit = item.max_tokens_limit ?? 8000;
+                  const storedToken = promptParams[tokenParam];
+                  const tokenDisplay =
+                    storedToken === undefined || storedToken === null || storedToken === ""
+                      ? tokenDefault
+                      : Number(storedToken);
+
+                  return (
                   <div key={item.key} className="settings-prompts__field">
                     <div className="settings-prompts__field-head">
                       <label htmlFor={`prompt-${item.key}`}>
@@ -464,11 +468,44 @@ export default function AdminPromptsPage() {
                       <button
                         type="button"
                         className="btn-ghost btn-sm"
-                        onClick={() => resetTemplate(item.key)}
+                        onClick={() => {
+                          resetTemplate(item.key);
+                          setPromptParams((p) => {
+                            const next = { ...p };
+                            delete next[tokenParam];
+                            return next;
+                          });
+                        }}
                       >
                         恢复默认
                       </button>
                     </div>
+                    <p className="settings-prompts__hint settings-prompts__binding-note">
+                      模型实例：继承「{group.label}」分组
+                      {item.instance_binding
+                        ? `（${instanceBindingLabel(item.instance_binding)}）`
+                        : ""}
+                    </p>
+                    <InlineField
+                      label="Token/阶段"
+                      htmlFor={`tok-${item.key}`}
+                      tip={`单次 LLM 调用的 max_tokens；默认 ${tokenDefault}，上限 ${tokenLimit}。`}
+                    >
+                      <input
+                        id={`tok-${item.key}`}
+                        className="input settings-prompts__token-input"
+                        type="number"
+                        min={80}
+                        max={tokenLimit}
+                        value={tokenDisplay}
+                        onChange={(e) =>
+                          setPromptParams((p) => ({
+                            ...p,
+                            [tokenParam]: Number(e.target.value),
+                          }))
+                        }
+                      />
+                    </InlineField>
                     <textarea
                       id={`prompt-${item.key}`}
                       className="input settings-textarea font-mono settings-prompts__editor"
@@ -484,7 +521,8 @@ export default function AdminPromptsPage() {
                         : " · 使用内置默认"}
                     </p>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </section>

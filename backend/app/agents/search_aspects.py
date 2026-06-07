@@ -140,6 +140,11 @@ def _slug_id(prefix: str = "thread") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def search_aspects_plan_ready(aspects: list[SearchAspect]) -> bool:
+    """True when Checkpoint A produced usable per-aspect queries (skip assessor LLM)."""
+    return bool(aspects) and all(a.primary_query() for a in aspects)
+
+
 def parse_search_aspects(raw: Any) -> list[SearchAspect]:
     if not isinstance(raw, list):
         return []

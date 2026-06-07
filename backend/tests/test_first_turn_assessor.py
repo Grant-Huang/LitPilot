@@ -6,6 +6,7 @@ import pytest
 from app.agents.first_turn_assessor import (
     FirstTurnAssessment,
     assess_first_turn_brief,
+    brief_assessment_from_router,
     parse_assessor_json,
     rule_fallback_assessment,
 )
@@ -16,6 +17,8 @@ from app.agents.literature_clarification import (
     merge_first_turn_message,
     resolve_pending_gate,
 )
+from app.agents.literature_router import LiteratureRouterResult
+from app.agents.search_aspects import SearchAspect
 
 MOM_BRIEF = """我要写一个与AI原生MOM有关的文献综述，包括4个方面：
 其一，AI原生MOM系统性的定义框架与参考模型。
@@ -67,6 +70,33 @@ def test_assessment_to_gate_choice_format() -> None:
 def test_rule_fallback_only_for_vague() -> None:
     assert rule_fallback_assessment("帮我写个综述") is not None
     assert rule_fallback_assessment(MOM_BRIEF) is None
+
+
+def test_brief_assessment_from_router() -> None:
+    router = LiteratureRouterResult(
+        session_title="AI MOM",
+        search_query="AI-native MOM survey",
+        search_aspects=[
+            SearchAspect(
+                aspect_id=1,
+                aspect_label="定义与架构",
+                core_concepts=["MOM", "AI-native"],
+                arxiv_query="AI-native MOM architecture survey",
+            ),
+            SearchAspect(
+                aspect_id=2,
+                aspect_label="可信与治理",
+                core_concepts=["trust"],
+                semantic_scholar_query="AI MOM trust governance",
+            ),
+        ],
+    )
+    assessment = brief_assessment_from_router(router)
+    assert assessment.sufficient is True
+    assert assessment.confidence == "high"
+    assert len(assessment.core_research_questions) == 2
+    assert "MOM" in assessment.keywords
+    assert assessment.clarification == []
 
 
 @pytest.mark.asyncio

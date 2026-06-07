@@ -1,10 +1,13 @@
 """Async accessors for configurable prompt templates from merged settings."""
 from __future__ import annotations
 
-from app.agents.agent_settings import get_merged_settings
+from app.agents.agent_settings import get_merged_settings, get_orchestrator_max_tokens
 from app.agents.prompt_registry import (
     NARRATE_CHECKPOINT_KEYS,
     PROMPT_SPECS,
+    clamp_prompt_max_tokens_value,
+    default_max_tokens_for,
+    prompt_max_tokens_param,
     resolve_prompt_template,
 )
 
@@ -71,6 +74,18 @@ async def get_attribute_system_prompt() -> str:
 
 async def get_summary_system_prompt() -> str:
     return await get_resolved_prompt("summary_system_template")
+
+
+async def get_prompt_max_tokens(key: str) -> int:
+    """Resolved max_tokens for a prompt template key (per-prompt override or group default)."""
+    param = prompt_max_tokens_param(key)
+    raw = (await get_merged_settings()).get(param)
+    if raw is not None and str(raw).strip() != "":
+        return clamp_prompt_max_tokens_value(key, raw)
+    group = str((PROMPT_SPECS.get(key) or {}).get("group") or "")
+    if group == "orchestrator" and key != "understanding_system_template":
+        return await get_orchestrator_max_tokens()
+    return default_max_tokens_for(key)
 
 
 def list_prompt_template_keys() -> tuple[str, ...]:

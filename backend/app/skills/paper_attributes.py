@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.prompt_registry import DEFAULT_ATTRIBUTE_SYSTEM as ATTRIBUTE_SYSTEM
-from app.agents.prompt_settings import get_attribute_system_prompt
+from app.agents.prompt_settings import get_attribute_system_prompt, get_prompt_max_tokens
 from app.llm.base import LLMMessage
 from app.schemas.paper_record import (
     PaperRecord,
@@ -162,10 +162,11 @@ async def extract_paper_attributes(
 
     try:
         attribute_system = await get_attribute_system_prompt()
+        max_tokens = await get_prompt_max_tokens("attribute_system_template")
         resp = await llm.chat(
             [LLMMessage(role="user", content="\n".join(user_parts))],
             system=attribute_system,
-            max_tokens=600,
+            max_tokens=max_tokens,
             temperature=0.2,
         )
         parsed = parse_attri_json(resp.content or "")

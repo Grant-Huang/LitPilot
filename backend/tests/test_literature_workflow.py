@@ -168,7 +168,7 @@ async def test_user_only_skips_web_search(tmp_path, monkeypatch) -> None:
 async def test_understanding_stage_emitted_before_intent_routing(
     tmp_path, monkeypatch
 ) -> None:
-    """首屏反馈：理解阶段应在意图路由/workflow 图之前立刻出现。"""
+    """首屏反馈：应先出现思考进度，再在 Checkpoint A 前进入理解阶段。"""
     from app.agents.literature_turn import stream_literature_turn
     from app.storage.file_store import FileStore
 
@@ -228,8 +228,16 @@ async def test_understanding_stage_emitted_before_intent_routing(
         events = []
         async for ev in stream_literature_turn(meta["id"], "survey topic"):
             events.append(ev)
-            if ev[0] == "artifact" and ev[1].get("lang") == "workflow-graph":
+            if ev[0] == "stage" and ev[1].get("name") == "理解研究问题":
                 break
+
+    think_text = "".join(
+        e[1].get("delta", "")
+        for e in events
+        if e[0] == "think"
+    )
+    assert "正在理解你的研究问题" in think_text
+    assert "正在加载检索与抓取配置" in think_text
 
     understand_idx = next(
         (
@@ -239,21 +247,16 @@ async def test_understanding_stage_emitted_before_intent_routing(
         ),
         None,
     )
-    wf_idx = next(
-        (
-            i
-            for i, e in enumerate(events)
-            if e[0] == "artifact" and e[1].get("lang") == "workflow-graph"
-        ),
-        None,
-    )
     turn_start_idx = next(
         (i for i, e in enumerate(events) if e[0] == "extension" and e[1].get("name") == "turn_start"),
         None,
     )
+    intent_idx = next(
+        (i for i, e in enumerate(events) if e[0] == "literature_intent"),
+        None,
+    )
     assert understand_idx is not None
     assert turn_start_idx is not None
-    assert understand_idx < 8
+    assert intent_idx is not None
     assert turn_start_idx < understand_idx
-    assert wf_idx is not None
-    assert understand_idx < wf_idx
+    assert intent_idx < understand_idx

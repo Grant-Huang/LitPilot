@@ -116,11 +116,13 @@ async def stream_llm_to_think(
     temperature: float = 0.25,
     use_reasoning: bool = False,
     hide_json_in_stream: bool = False,
+    json_hide_hint: str | None = None,
     content_buffer: list[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """将 LLM 流式输出映射为 think SSE；reasoning 与可见叙述均进入思考区。"""
     section: list[str] = []
     content_acc = ""
+    json_hide_notified = False
 
     async for kind, piece in llm.chat_stream_parts(
         messages,
@@ -133,7 +135,19 @@ async def stream_llm_to_think(
             if content_buffer is not None:
                 content_buffer.append(piece)
             content_acc += piece
-            if _should_hide_json_delta(piece, content_acc[:-len(piece)], hide_json=hide_json_in_stream):
+            if _should_hide_json_delta(
+                piece,
+                content_acc[:-len(piece)],
+                hide_json=hide_json_in_stream,
+            ):
+                if hide_json_in_stream and not json_hide_notified:
+                    json_hide_notified = True
+                    hint = (json_hide_hint or "正在整理结构化检索规划…").strip()
+                    wrapped = wrap_system_line(hint)
+                    if wrapped:
+                        if accumulator is not None:
+                            accumulator.append_raw(wrapped)
+                        yield ("think", {"delta": wrapped, "source": "system"})
                 continue
         section.append(piece)
         yield ("think", {"delta": piece, "source": "model"})

@@ -51,6 +51,8 @@ export type PromptTemplateMeta = {
   group_label: string;
   instance_binding?: string | null;
   max_len: number;
+  default_max_tokens?: number;
+  max_tokens_limit?: number;
   hint: string;
 };
 

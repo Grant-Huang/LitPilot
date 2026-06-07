@@ -8,8 +8,12 @@ from typing import Any
 
 from app.agents.llm_json import parse_json_object
 from app.agents.prompt_registry import DEFAULT_ASSESSOR_SYSTEM as ASSESSOR_SYSTEM
-from app.agents.prompt_settings import get_assessor_system_prompt
-from app.agents.literature_router import SEARCH_QUERY_MAX, clamp_search_query
+from app.agents.prompt_settings import get_assessor_system_prompt, get_prompt_max_tokens
+from app.agents.literature_router import (
+    LiteratureRouterResult,
+    SEARCH_QUERY_MAX,
+    clamp_search_query,
+)
 from app.agents.search_query_refiner import apply_academic_search_suffix
 from app.llm.base import LLMMessage
 
@@ -172,6 +176,27 @@ def rule_fallback_assessment(user_message: str) -> FirstTurnAssessment | None:
     )
 
 
+def brief_assessment_from_router(router: LiteratureRouterResult) -> FirstTurnAssessment:
+    """Rule-based brief summary when Checkpoint A already planned search_aspects."""
+    labels = [a.aspect_label.strip() for a in router.search_aspects if a.aspect_label.strip()]
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for aspect in router.search_aspects:
+        for concept in aspect.core_concepts:
+            key = concept.strip()
+            low = key.lower()
+            if key and low not in seen:
+                seen.add(low)
+                keywords.append(key[:80])
+    return FirstTurnAssessment(
+        sufficient=True,
+        confidence="high",
+        core_research_questions=labels,
+        keywords=keywords[:12],
+        search_query_hint="",
+    )
+
+
 async def assess_first_turn_brief(
     user_message: str,
     *,
@@ -197,10 +222,11 @@ async def assess_first_turn_brief(
         )
         try:
             assessor_system = await get_assessor_system_prompt()
+            max_tokens = await get_prompt_max_tokens("assessor_system_template")
             resp = await llm.chat(
                 [LLMMessage(role="user", content=prompt)],
                 system=assessor_system,
-                max_tokens=720,
+                max_tokens=max_tokens,
                 temperature=0.15,
             )
             return parse_assessor_json(resp.content or "")

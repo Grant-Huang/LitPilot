@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from app.agents.tools.cached_tools import cached_web_fetch
 from app.agents.tools.metadata_fetch import is_junk_fetch_content
 from app.agents.prompt_registry import DEFAULT_SUMMARY_SYSTEM as SUMMARY_SYSTEM
-from app.agents.prompt_settings import get_summary_system_prompt
+from app.agents.prompt_settings import get_prompt_max_tokens, get_summary_system_prompt
 from app.llm.base import LLMMessage
 
 if TYPE_CHECKING:
@@ -82,6 +82,8 @@ def _collapse_ws(s: str) -> str:
 
 async def summarize_chunks(llm: BaseLLM, chunks: list[str], *, url: str) -> str:
     summary_system = await get_summary_system_prompt()
+    chunk_tokens = await get_prompt_max_tokens("summary_system_template")
+    merge_tokens = max(80, min(chunk_tokens, 500))
     parts: list[str] = []
     for i, ch in enumerate(chunks, 1):
         resp = await llm.chat(
@@ -92,7 +94,7 @@ async def summarize_chunks(llm: BaseLLM, chunks: list[str], *, url: str) -> str:
                 ),
             ],
             system=summary_system,
-            max_tokens=600,
+            max_tokens=chunk_tokens,
             temperature=0.1,
         )
         part = (resp.content or "").strip()
@@ -111,7 +113,7 @@ async def summarize_chunks(llm: BaseLLM, chunks: list[str], *, url: str) -> str:
             ),
         ],
         system=summary_system,
-        max_tokens=500,
+        max_tokens=merge_tokens,
         temperature=0.1,
     )
     return (merge.content or "\n".join(parts)).strip()

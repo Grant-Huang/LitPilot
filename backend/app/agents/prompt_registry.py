@@ -422,6 +422,48 @@ PROMPT_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
+PROMPT_MAX_TOKENS_SUFFIX = "_max_tokens"
+
+# 各提示词 LLM 调用的默认 max_tokens（可被 prompts.params 中 {key}_max_tokens 覆盖）
+PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
+    "understanding_system_template": 1200,
+    "narrate_search_before_template": 280,
+    "narrate_search_after_template": 280,
+    "narrate_fetch_progress_template": 280,
+    "narrate_fetch_after_template": 280,
+    "narrate_cite_after_template": 280,
+    "narrate_attributes_after_template": 280,
+    "narrate_generate_before_template": 280,
+    "router_system_template": 200,
+    "intent_router_system_template": 300,
+    "search_refiner_system_template": 640,
+    "assessor_system_template": 720,
+    "search_expansion_system_template": 280,
+    "query_corpus_system_template": 2048,
+    "section_system_template": 1200,
+    "section_refine_system_template": 1200,
+    "matrix_system_template": 4096,
+    "review_system_prompt_template": 4096,
+    "attribute_system_template": 600,
+    "summary_system_template": 600,
+}
+
+PROMPT_MAX_TOKENS_LIMIT: dict[str, int] = {
+    "understanding_system_template": 4000,
+    "review_system_prompt_template": 8192,
+    "matrix_system_template": 8192,
+    "section_system_template": 4096,
+    "section_refine_system_template": 4096,
+    "query_corpus_system_template": 4096,
+}
+
+for _pt_key, _pt_default in PROMPT_DEFAULT_MAX_TOKENS.items():
+    if _pt_key in PROMPT_SPECS:
+        PROMPT_SPECS[_pt_key]["default_max_tokens"] = _pt_default
+        PROMPT_SPECS[_pt_key]["max_tokens_limit"] = PROMPT_MAX_TOKENS_LIMIT.get(
+            _pt_key, 8000
+        )
+
 PROMPT_TEMPLATE_PARAM_DEFAULTS: dict[str, str] = {key: "" for key in PROMPT_SPECS}
 
 
@@ -430,6 +472,28 @@ def default_for(key: str) -> str:
     if not spec:
         return ""
     return str(spec.get("default") or "")
+
+
+def prompt_max_tokens_param(key: str) -> str:
+    return f"{key}{PROMPT_MAX_TOKENS_SUFFIX}"
+
+
+def default_max_tokens_for(key: str) -> int:
+    spec = PROMPT_SPECS.get(key) or {}
+    if "default_max_tokens" in spec:
+        return int(spec["default_max_tokens"])
+    return int(PROMPT_DEFAULT_MAX_TOKENS.get(key, 280))
+
+
+def clamp_prompt_max_tokens_value(key: str, raw: Any) -> int:
+    spec = PROMPT_SPECS.get(key) or {}
+    floor = 80
+    limit = int(spec.get("max_tokens_limit") or PROMPT_MAX_TOKENS_LIMIT.get(key, 8000))
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return default_max_tokens_for(key)
+    return max(floor, min(n, limit))
 
 
 def resolve_prompt_template(key: str, override: str | None) -> str:
@@ -456,6 +520,15 @@ def clamp_prompt_params(params: dict[str, Any]) -> dict[str, Any]:
         max_len = int(spec.get("max_len") or 8_000)
         if len(val) > max_len:
             out[key] = val[:max_len]
+    for key in PROMPT_SPECS:
+        param = prompt_max_tokens_param(key)
+        if param not in out:
+            continue
+        raw = out.get(param)
+        if raw is None or str(raw).strip() == "":
+            out.pop(param, None)
+            continue
+        out[param] = clamp_prompt_max_tokens_value(key, raw)
     return out
 
 
@@ -492,6 +565,11 @@ def prompt_registry_metadata() -> list[dict[str, Any]]:
                 "group_label": group_labels.get(group, "其他"),
                 "instance_binding": group_instance_binding.get(group),
                 "max_len": int(spec.get("max_len") or 8_000),
+                "default_max_tokens": default_max_tokens_for(key),
+                "max_tokens_limit": int(
+                    spec.get("max_tokens_limit")
+                    or PROMPT_MAX_TOKENS_LIMIT.get(key, 8000)
+                ),
                 "hint": spec.get("hint") or "",
             }
         )

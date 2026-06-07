@@ -8,7 +8,12 @@ from typing import Any
 
 
 
-from app.agents.prompt_registry import PROMPT_TEMPLATE_PARAM_DEFAULTS
+from app.agents.prompt_registry import (
+    PROMPT_TEMPLATE_PARAM_DEFAULTS,
+    PROMPT_SPECS,
+    clamp_prompt_max_tokens_value,
+    prompt_max_tokens_param,
+)
 from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 
 
@@ -527,6 +532,13 @@ def build_runtime_settings(
             key: str(prompts.get(key) or "")
             for key in PROMPT_TEMPLATE_PARAM_DEFAULTS
             if key != "review_system_prompt_template"
+        },
+        **{
+            prompt_max_tokens_param(key): clamp_prompt_max_tokens_value(
+                key, prompts.get(prompt_max_tokens_param(key))
+            )
+            for key in PROMPT_SPECS
+            if str(prompts.get(prompt_max_tokens_param(key)) or "").strip()
         },
 
         "search_include_domains": list(include_domains),
