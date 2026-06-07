@@ -39,7 +39,7 @@ from app.agents.url_list import effective_fetch_cap
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.schemas.literature_outline import LiteratureOutline
-from app.services.llm_service import get_planner_llm
+from app.services.llm_service import get_search_llm
 
 
 @dataclass
@@ -56,6 +56,7 @@ class RetrievalPipelineContext:
     finalize_ctx: TurnFinalizeContext
     store: Any
     planner_llm: Any
+    pipeline_llm: Any
     emitter: WorkflowNodeEmitter
     graph: Any
     graph_artifact_id: str
@@ -186,21 +187,21 @@ async def run_retrieval_pipeline(
                 and ctx.search_expansion_count > 1
                 and not skip_web_search
             ):
-                planner_llm = await get_planner_llm()
+                search_llm = await get_search_llm()
                 expanded_queries = await expand_search_queries(
                     query,
                     count=ctx.search_expansion_count,
                     user_message=ctx.route_message,
-                    llm=planner_llm,
+                    llm=search_llm,
                     use_llm=True,
                 )
 
             if not skip_web_search and expanded_queries:
-                planner_llm = await get_planner_llm()
+                search_llm = await get_search_llm()
                 refinement = await refine_literature_search_queries(
                     expanded_queries,
                     user_message=ctx.route_message,
-                    llm=planner_llm,
+                    llm=search_llm,
                     use_llm=True,
                 )
                 expanded_queries = refinement.queries or expanded_queries
@@ -220,7 +221,7 @@ async def run_retrieval_pipeline(
             if run_fetch and not skip_web_search:
                 pipe_coord = FetchCoordinator(
                     fetch_api_key=ctx.fetch_api_key,
-                    llm=ctx.planner_llm,
+                    llm=ctx.pipeline_llm,
                     parallel=ctx.parallel,
                     timeout_sec=float(ctx.timeout_sec),
                     fetch_retry_count=ctx.fetch_retry_count,
@@ -361,7 +362,7 @@ async def run_retrieval_pipeline(
                 user_message=ctx.route_message,
                 search_query=ctx.search_query_for_plan or query,
                 hits=ctx.hits,
-                llm=ctx.planner_llm,
+                llm=ctx.pipeline_llm,
                 think_acc=ctx.think_acc,
                 execution_trace=ctx.execution_trace,
                 result=rel_out,
@@ -465,7 +466,7 @@ async def run_retrieval_pipeline(
                 fetch_cap=fetch_cap,
                 fetch_api_key=ctx.fetch_api_key,
                 fetch_provider=ctx.fetch_provider,
-                llm=ctx.planner_llm,
+                llm=ctx.pipeline_llm,
                 parallel=ctx.parallel,
                 timeout_sec=ctx.timeout_sec,
                 fetch_retry_count=ctx.fetch_retry_count,
@@ -595,7 +596,7 @@ async def run_retrieval_pipeline(
                 corpus=working,
                 fetch_results=attr_fetch_results,
                 cite_records=ctx.cite_records,
-                llm=ctx.planner_llm,
+                llm=ctx.pipeline_llm,
                 parallel=ctx.parallel,
                 think_acc=ctx.think_acc,
                 planner_ctx=ctx.planner_ctx,

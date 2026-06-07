@@ -8,7 +8,7 @@ from app.agents.llm_json import parse_json_object
 from app.agents.prompt_registry import DEFAULT_ROUTER_SYSTEM as ROUTER_SYSTEM
 from app.agents.prompt_settings import get_router_system_prompt
 from app.llm.base import LLMMessage
-from app.services.llm_service import get_planner_llm
+from app.services.llm_service import get_router_llm
 from app.storage.file_store import is_default_session_title
 
 SEARCH_QUERY_MAX = 200
@@ -120,7 +120,7 @@ async def route_literature(user_message: str) -> LiteratureRouterResult:
     if not msg:
         return fallback
     try:
-        llm = await get_planner_llm()
+        llm = await get_router_llm()
         router_system = await get_router_system_prompt()
         resp = await llm.chat(
             [LLMMessage(role="user", content=msg[:800])],

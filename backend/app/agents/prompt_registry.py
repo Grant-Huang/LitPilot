@@ -449,14 +449,24 @@ def prompt_registry_metadata() -> list[dict[str, Any]]:
         "generation": "生成",
         "pipeline": "流水线",
     }
+    group_instance_binding = {
+        "orchestrator": "orchestrator",
+        "router": "router",
+        "search": "search",
+        "assessor": "assessor",
+        "generation": "review_main",
+        "pipeline": "pipeline",
+    }
     items: list[dict[str, Any]] = []
     for key, spec in PROMPT_SPECS.items():
+        group = str(spec.get("group") or "other")
         items.append(
             {
                 "key": key,
                 "label": spec.get("label") or key,
-                "group": spec.get("group") or "other",
-                "group_label": group_labels.get(str(spec.get("group")), "其他"),
+                "group": group,
+                "group_label": group_labels.get(group, "其他"),
+                "instance_binding": group_instance_binding.get(group),
                 "max_len": int(spec.get("max_len") or 8_000),
                 "hint": spec.get("hint") or "",
             }

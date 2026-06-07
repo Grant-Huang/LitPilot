@@ -30,7 +30,7 @@ from app.agents.url_list import parse_urls_from_text, sanitize_fetch_urls
 from app.library.dedupe import dedupe_library
 from app.library.store import LibraryStore
 from app.llm.base import LLMMessage
-from app.services.llm_service import get_planner_llm
+from app.services.llm_service import get_router_llm
 
 IntentKind = Literal[
     "new_topic",
@@ -354,7 +354,7 @@ async def route_literature_intent(
         )
 
     try:
-        llm = await get_planner_llm()
+        llm = await get_router_llm()
         body = (
             f"【会话状态】\n{format_session_context_summary(turn_ctx)}\n\n"
             f"【用户消息】\n{user_message.strip()[:800]}"

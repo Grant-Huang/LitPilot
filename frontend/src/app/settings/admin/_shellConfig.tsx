@@ -36,18 +36,18 @@ export const ADMIN_SECTIONS = [
   {
     href: "/settings/admin/capabilities",
     id: "capabilities",
-    label: "能力绑定",
+    label: "检索与抓取",
     group: "capability",
-    title: "能力绑定",
-    summary: "检索、抓取、编排与综述等能力与凭据/实例的挂载关系。",
+    title: "检索与抓取能力",
+    summary: "文献来源、网络检索与网页抓取参数及凭据绑定。",
   },
   {
     href: "/settings/admin/prompts",
     id: "prompts",
-    label: "提示词",
+    label: "编排与综述",
     group: "capability",
-    title: "提示词与生成策略",
-    summary: "综述模板、分章策略与后处理等行为配置。",
+    title: "编排与综述能力",
+    summary: "编排/综述模型实例、提示词模板与生成策略。",
   },
 ] as const;
 

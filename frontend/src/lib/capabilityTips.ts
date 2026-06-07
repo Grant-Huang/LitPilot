@@ -41,7 +41,7 @@ export const CAP_TIPS = {
   orchestrator_mode_lite: "在理解、检索后、抓取后、结构化等关键节点输出简短解说。",
   orchestrator_mode_full: "检索前/后、抓取进度、引用、生成前等更多节点均解说。",
   orchestrator_reasoning:
-    "若模型支持 reasoning 通道，将思考过程流入「思考区」；关闭则只显示可见叙述与 JSON。",
+    "仅对 MiniMax 等原生 reasoning 通道有意义；编排任务以 JSON 与短解说为主，默认关闭即可。OpenAI 等模型通常无效果。",
   orchestrator_tokens: "每个解说/checkpoint 单次 LLM 调用的 max_tokens 上限；过小可能导致 JSON 截断。",
 } as const;
 
@@ -49,9 +49,9 @@ export const CAPABILITY_ORDER = [
   "literature_source",
   "web_search",
   "web_fetch",
-  "orchestrator",
-  "review_main",
 ] as const;
+
+export const SEARCH_FETCH_CAPABILITY_IDS = new Set<string>(CAPABILITY_ORDER);
 
 export const CAPABILITY_SUBTITLE: Partial<Record<string, string>> = {
   orchestrator: "编排模型：规划、检索式、阶段解说、网页摘要等",

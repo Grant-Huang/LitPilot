@@ -92,6 +92,10 @@ PROMPTS_PARAM_DEFAULTS: dict[str, Any] = {
     "enable_paper_attributes": True,
     "outline_mode": "lite",
     "post_refine_mode": "lite",
+    "router_instance_id": "",
+    "search_instance_id": "",
+    "assessor_instance_id": "",
+    "pipeline_instance_id": "",
 }
 
 
@@ -244,6 +248,27 @@ def _resolve_instance_llm(
     }
 
 
+def _prefixed_llm_fields(prefix: str, llm: dict[str, Any], *, fallback: dict[str, Any]) -> dict[str, str]:
+    """Map resolved instance dict to flat ``{prefix}_provider`` keys with fallback."""
+    src = llm if llm.get("llm_model") else fallback
+    return {
+        f"{prefix}_provider": str(src.get("llm_provider") or fallback.get("llm_provider") or "openai"),
+        f"{prefix}_api_key": str(src.get("llm_api_key") or fallback.get("llm_api_key") or ""),
+        f"{prefix}_model": str(src.get("llm_model") or fallback.get("llm_model") or "gpt-4o-mini"),
+        f"{prefix}_base_url": str(src.get("llm_base_url") or fallback.get("llm_base_url") or ""),
+        f"{prefix}_group_id": str(src.get("llm_group_id") or fallback.get("llm_group_id") or ""),
+    }
+
+
+def _resolve_group_instance_id(
+    prompts: dict[str, Any],
+    param_key: str,
+    default_inst_id: str,
+) -> str:
+    override = str(prompts.get(param_key) or "").strip()
+    return override or default_inst_id
+
+
 
 
 
@@ -346,7 +371,23 @@ def build_runtime_settings(
 
     planner_llm = orch_llm if orch_llm.get("llm_model") else llm
 
+    router_inst_id = _resolve_group_instance_id(
+        prompts, "router_instance_id", orch_inst_id
+    )
+    search_inst_id = _resolve_group_instance_id(
+        prompts, "search_instance_id", orch_inst_id
+    )
+    assessor_inst_id = _resolve_group_instance_id(
+        prompts, "assessor_instance_id", orch_inst_id
+    )
+    pipeline_inst_id = _resolve_group_instance_id(
+        prompts, "pipeline_instance_id", orch_inst_id
+    )
 
+    router_llm = _resolve_instance_llm(instances, credentials, router_inst_id) or planner_llm
+    search_llm = _resolve_instance_llm(instances, credentials, search_inst_id) or planner_llm
+    assessor_llm = _resolve_instance_llm(instances, credentials, assessor_inst_id) or planner_llm
+    pipeline_llm = _resolve_instance_llm(instances, credentials, pipeline_inst_id) or planner_llm
 
     include_domains = _parse_domain_list(web.get("include_domains")) or ACADEMIC_SEARCH_DOMAINS
 
@@ -443,6 +484,11 @@ def build_runtime_settings(
         "planner_llm_base_url": planner_llm.get("llm_base_url") or llm.get("llm_base_url") or "",
 
         "planner_llm_group_id": planner_llm.get("llm_group_id") or llm.get("llm_group_id") or "",
+
+        **_prefixed_llm_fields("router_llm", router_llm, fallback=planner_llm),
+        **_prefixed_llm_fields("search_llm", search_llm, fallback=planner_llm),
+        **_prefixed_llm_fields("assessor_llm", assessor_llm, fallback=planner_llm),
+        **_prefixed_llm_fields("pipeline_llm", pipeline_llm, fallback=planner_llm),
 
         "fetch_parallel": int(fetch.get("fetch_parallel") or 3),
 

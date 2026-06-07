@@ -12,6 +12,7 @@ import {
 import {
   CAP_TIPS,
   capabilityModuleTip,
+  SEARCH_FETCH_CAPABILITY_IDS,
   sortCapabilities,
 } from "@/lib/capabilityTips";
 import {
@@ -47,12 +48,10 @@ function CapabilityCard({
 }) {
   const [saving, setSaving] = useState(false);
   const [rowMsg, setRowMsg] = useState("");
-  const [enabled, setEnabled] = useState(Boolean(cap.enabled));
   const [refId, setRefId] = useState(String(cap.primary_ref?.id || ""));
   const [params, setParams] = useState<Record<string, unknown>>({ ...(cap.params || {}) });
 
   useEffect(() => {
-    setEnabled(Boolean(cap.enabled));
     setRefId(String(cap.primary_ref?.id || ""));
     setParams({ ...(cap.params || {}) });
     setSaving(false);
@@ -82,7 +81,6 @@ function CapabilityCard({
         : undefined;
 
   const dirty =
-    enabled !== Boolean(cap.enabled) ||
     refId !== String(cap.primary_ref?.id || "") ||
     !paramsEqual(params, { ...(cap.params || {}) });
 
@@ -98,7 +96,6 @@ function CapabilityCard({
           ? ({ kind: refOptions.kind, id: refId } as Record<string, unknown>)
           : null;
       const saved = await settingsApiV2.updateCapability(cap.capability_id, {
-        enabled,
         primary_ref,
         params,
       });
@@ -554,7 +551,7 @@ function CapabilityCard({
             {moduleTip ? <FieldTip title={moduleTip} /> : null}
           </span>
         }
-        titleMuted={!enabled}
+        titleMuted={false}
         feedback={rowMsg}
         feedbackOk={feedbackOk(rowMsg)}
         actions={
@@ -569,10 +566,6 @@ function CapabilityCard({
           </button>
         }
       />
-
-      <div className="settings-cap-card__enable-row">
-        <InlineCheck label="启用此能力" checked={enabled} onChange={setEnabled} />
-      </div>
 
       {needsRef ? (
         <InlineField
@@ -621,7 +614,13 @@ export default function AdminCapabilitiesPage() {
 
   const orderedCaps = useMemo(
     () =>
-      sortCapabilities(caps.filter((c) => c.capability_id !== "prompts")),
+      sortCapabilities(
+        caps.filter(
+          (c) =>
+            c.capability_id !== "prompts" &&
+            SEARCH_FETCH_CAPABILITY_IDS.has(c.capability_id),
+        ),
+      ),
     [caps],
   );
 
@@ -636,6 +635,10 @@ export default function AdminCapabilitiesPage() {
   return (
     <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
+
+      <p className="settings-field-note settings-cap-section-note">
+        文献来源、网络检索与网页抓取；编排与综述模型见「编排与综述」页。
+      </p>
 
       <div className="settings-cap-list settings-cred-list--flat">
         {orderedCaps.map((c) => (

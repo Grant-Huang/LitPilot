@@ -109,6 +109,16 @@ async def test_user_only_skips_web_search(tmp_path, monkeypatch) -> None:
             return_value=mock_llm,
         ),
         patch(
+            "app.agents.literature_turn.get_pipeline_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_assessor_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
             "app.agents.literature_turn.get_web_search_api_key",
             new_callable=AsyncMock,
             return_value="tvly-test",
@@ -179,6 +189,16 @@ async def test_understanding_stage_emitted_before_intent_routing(
         ),
         patch(
             "app.agents.literature_turn.get_planner_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_pipeline_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        patch(
+            "app.agents.literature_turn.get_assessor_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,
         ),

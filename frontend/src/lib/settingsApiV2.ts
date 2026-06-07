@@ -49,6 +49,7 @@ export type PromptTemplateMeta = {
   label: string;
   group: string;
   group_label: string;
+  instance_binding?: string | null;
   max_len: number;
   hint: string;
 };

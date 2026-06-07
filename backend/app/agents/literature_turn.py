@@ -74,7 +74,7 @@ from app.core.stream_events import chat_text, process_text, turn_start
 from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.schemas.literature_outline import LiteratureOutline
-from app.services.llm_service import get_planner_llm, get_review_llm
+from app.services.llm_service import get_assessor_llm, get_pipeline_llm, get_planner_llm, get_review_llm
 from app.agents.literature_turn_context import TurnFinalizeContext
 from app.agents.literature_turn_finalize import finalize_turn, yield_clarification_pause
 from app.agents.literature_turn_graph import (
@@ -269,6 +269,7 @@ async def stream_literature_turn(
     working = SessionCorpus()
     review_llm = await get_review_llm()
     planner_llm = await get_planner_llm()
+    pipeline_llm = await get_pipeline_llm()
     fetch_results: list[tuple[dict[str, str], str, str | None]] = []
     cite_records: list[Any] = []
     failed_literature: list[dict[str, str]] = []
@@ -431,14 +432,14 @@ async def stream_literature_turn(
             or intent.search_query
             or route_message.strip()
         )
-        planner_llm = await get_planner_llm()
+        assessor_llm = await get_assessor_llm()
         first_gate, brief_assessment = await assess_first_turn_gate(
             route_message,
             search_query=search_query_for_plan,
             user_turns=user_turns,
             intent=intent.intent,
             gate_resolved=clar_state.resolved,
-            llm=planner_llm,
+            llm=assessor_llm,
         )
         if brief_assessment and not first_gate:
             assess_patch: dict[str, Any] = {
@@ -565,6 +566,7 @@ async def stream_literature_turn(
             finalize_ctx=finalize_ctx,
             store=store,
             planner_llm=planner_llm,
+            pipeline_llm=pipeline_llm,
             emitter=emitter,
             graph=g,
             graph_artifact_id=graph_artifact_id,

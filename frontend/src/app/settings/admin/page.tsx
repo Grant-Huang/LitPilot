@@ -19,10 +19,11 @@ type Credential = Awaited<ReturnType<typeof settingsApiV2.listCredentials>>["ite
 type Instance = Awaited<ReturnType<typeof settingsApiV2.listInstances>>["items"][number];
 
 const CAPABILITY_HREF: Record<string, string> = {
-  review_main: "/settings/admin/capabilities",
-  orchestrator: "/settings/admin/capabilities",
+  review_main: "/settings/admin/prompts",
+  orchestrator: "/settings/admin/prompts",
   web_search: "/settings/admin/capabilities",
   web_fetch: "/settings/admin/capabilities",
+  literature_source: "/settings/admin/capabilities",
 };
 
 function storageStatus(storage: StorageSettings) {
@@ -79,6 +80,7 @@ export default function AdminSettingsPage() {
       row("orchestrator", "编排模型"),
       row("web_search", "网络检索"),
       row("web_fetch", "网页抓取"),
+      row("literature_source", "文献来源"),
     ];
   }, [caps, credentials, instances]);
 

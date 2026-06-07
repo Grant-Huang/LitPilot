@@ -4,15 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Spin } from "antd";
 
-import { FieldTip, InlineCheck, InlineField, SettingToolbar, feedbackOk, SettingsListPanel, useUnsavedGuard } from "../_ui";
+import {
+  FieldTip,
+  InlineCheck,
+  InlineField,
+  SettingToolbar,
+  feedbackOk,
+  SettingsListPanel,
+  useUnsavedGuard,
+} from "../_ui";
 
+import { CAP_TIPS } from "@/lib/capabilityTips";
 import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
+import {
+  instanceOptions,
+  PROMPT_GROUP_CAPABILITY,
+  PROMPT_GROUP_INSTANCE_PARAM,
+  PROMPT_GROUP_INSTANCE_TIPS,
+  PROMPT_GROUP_ORDER,
+  resolveGroupInstanceId,
+} from "@/lib/promptGroupBindings";
 import { SettingsListSkeleton, errorMessage } from "../../_shared";
+import { toastError } from "@/lib/toastFeedback";
 
 import {
   settingsApiV2,
   type PromptTemplateMeta,
   type SystemCapability,
+  type SystemInstance,
 } from "@/lib/settingsApiV2";
 
 type OutlineMode = "off" | "lite" | "full";
@@ -56,44 +75,65 @@ function parsePostRefineMode(raw: unknown): PostRefineMode {
 }
 
 function groupMeta(meta: PromptTemplateMeta[]): { id: string; label: string; items: PromptTemplateMeta[] }[] {
-  const order: string[] = [];
   const map = new Map<string, PromptTemplateMeta[]>();
   for (const item of meta) {
-    if (!map.has(item.group)) {
-      map.set(item.group, []);
-      order.push(item.group);
-    }
-    map.get(item.group)!.push(item);
+    const list = map.get(item.group) || [];
+    list.push(item);
+    map.set(item.group, list);
   }
-  return order.map((id) => ({
+  return PROMPT_GROUP_ORDER.filter((id) => map.has(id)).map((id) => ({
     id,
     label: map.get(id)?.[0]?.group_label || id,
     items: map.get(id) || [],
   }));
 }
 
+function paramsEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export default function AdminPromptsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [caps, setCaps] = useState<SystemCapability[]>([]);
+  const [instances, setInstances] = useState<SystemInstance[]>([]);
   const [saving, setSaving] = useState(false);
   const [meta, setMeta] = useState<PromptTemplateMeta[]>([]);
   const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<Record<string, string>>({});
   const [savedTemplates, setSavedTemplates] = useState<Record<string, string>>({});
-  const [enablePaperAttributes, setEnablePaperAttributes] = useState(true);
-  const [savedEnablePaperAttributes, setSavedEnablePaperAttributes] = useState(true);
-  const [outlineMode, setOutlineMode] = useState<OutlineMode>("lite");
-  const [savedOutlineMode, setSavedOutlineMode] = useState<OutlineMode>("lite");
-  const [postRefineMode, setPostRefineMode] = useState<PostRefineMode>("lite");
-  const [savedPostRefineMode, setSavedPostRefineMode] = useState<PostRefineMode>("lite");
+  const [promptParams, setPromptParams] = useState<Record<string, unknown>>({});
+  const [savedPromptParams, setSavedPromptParams] = useState<Record<string, unknown>>({});
+  const [orchRefId, setOrchRefId] = useState("");
+  const [savedOrchRefId, setSavedOrchRefId] = useState("");
+  const [orchParams, setOrchParams] = useState<Record<string, unknown>>({});
+  const [savedOrchParams, setSavedOrchParams] = useState<Record<string, unknown>>({});
+  const [reviewRefId, setReviewRefId] = useState("");
+  const [savedReviewRefId, setSavedReviewRefId] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     orchestrator: true,
     generation: true,
   });
 
+  const orchestratorCap = useMemo(
+    () => caps.find((c) => c.capability_id === "orchestrator") || null,
+    [caps],
+  );
+  const reviewCap = useMemo(
+    () => caps.find((c) => c.capability_id === "review_main") || null,
+    [caps],
+  );
   const promptsCap = useMemo(() => caps.find((c) => c.capability_id === "prompts") || null, [caps]);
   const groups = useMemo(() => groupMeta(meta), [meta]);
+  const instOpts = useMemo(() => instanceOptions(instances), [instances]);
+
+  const capRefSnapshot = useMemo(
+    () => ({
+      orchestrator: orchRefId,
+      review_main: reviewRefId,
+    }),
+    [orchRefId, reviewRefId],
+  );
 
   const templatesDirty = useMemo(() => {
     const keys = new Set([...Object.keys(templates), ...Object.keys(savedTemplates)]);
@@ -105,9 +145,10 @@ export default function AdminPromptsPage() {
 
   const dirty =
     templatesDirty ||
-    enablePaperAttributes !== savedEnablePaperAttributes ||
-    outlineMode !== savedOutlineMode ||
-    postRefineMode !== savedPostRefineMode;
+    !paramsEqual(promptParams, savedPromptParams) ||
+    orchRefId !== savedOrchRefId ||
+    reviewRefId !== savedReviewRefId ||
+    !paramsEqual(orchParams, savedOrchParams);
 
   useUnsavedGuard(dirty);
 
@@ -116,54 +157,110 @@ export default function AdminPromptsPage() {
       .then(([boot, defRes]) => {
         const items = boot.caps;
         setCaps(items);
+        setInstances(boot.instances);
         setMeta(defRes.meta || []);
         setDefaults(defRes.defaults || {});
 
-        const p = items.find((c) => c.capability_id === "prompts");
-        const params = (p?.params || {}) as Record<string, unknown>;
+        const orch = items.find((c) => c.capability_id === "orchestrator");
+        const review = items.find((c) => c.capability_id === "review_main");
+        const prompts = items.find((c) => c.capability_id === "prompts");
+
+        const orchId = String(orch?.primary_ref?.id || "");
+        setOrchRefId(orchId);
+        setSavedOrchRefId(orchId);
+        const orchP = { ...(orch?.params || {}) };
+        setOrchParams(orchP);
+        setSavedOrchParams({ ...orchP });
+
+        const reviewId = String(review?.primary_ref?.id || "");
+        setReviewRefId(reviewId);
+        setSavedReviewRefId(reviewId);
+
+        const params = (prompts?.params || {}) as Record<string, unknown>;
+        setPromptParams({ ...params });
+        setSavedPromptParams({ ...params });
+
         const loaded: Record<string, string> = {};
         for (const item of defRes.meta || []) {
           loaded[item.key] = String(params[item.key] || "");
         }
         setTemplates(loaded);
         setSavedTemplates({ ...loaded });
-
-        setEnablePaperAttributes(Boolean(params.enable_paper_attributes ?? true));
-        setSavedEnablePaperAttributes(Boolean(params.enable_paper_attributes ?? true));
-        const om = parseOutlineMode(params.outline_mode);
-        setOutlineMode(om);
-        setSavedOutlineMode(om);
-        const pr = parsePostRefineMode(params.post_refine_mode);
-        setPostRefineMode(pr);
-        setSavedPostRefineMode(pr);
       })
       .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  const setGroupInstanceId = (groupId: string, instanceId: string) => {
+    const capId = PROMPT_GROUP_CAPABILITY[groupId];
+    if (capId === "orchestrator") {
+      setOrchRefId(instanceId);
+      return;
+    }
+    if (capId === "review_main") {
+      setReviewRefId(instanceId);
+      return;
+    }
+    const paramKey = PROMPT_GROUP_INSTANCE_PARAM[groupId];
+    if (!paramKey) return;
+    setPromptParams((prev) => ({ ...prev, [paramKey]: instanceId }));
+  };
 
   const onSave = async () => {
     if (!promptsCap) return;
     setSaving(true);
     setMsg("");
     try {
-      const saved = await settingsApiV2.updateCapability("prompts", {
-        params: {
-          ...(promptsCap.params || {}),
-          ...templates,
-          enable_paper_attributes: enablePaperAttributes,
-          outline_mode: outlineMode,
-          post_refine_mode: postRefineMode,
-        },
-      });
+      const orchPrimary =
+        orchRefId && orchestratorCap
+          ? ({ kind: "instance", id: orchRefId } as Record<string, unknown>)
+          : null;
+      const reviewPrimary =
+        reviewRefId && reviewCap
+          ? ({ kind: "instance", id: reviewRefId } as Record<string, unknown>)
+          : null;
+
+      const saves: Promise<SystemCapability>[] = [
+        settingsApiV2.updateCapability("prompts", {
+          params: {
+            ...(promptsCap.params || {}),
+            ...promptParams,
+            ...templates,
+          },
+        }),
+      ];
+      if (orchestratorCap) {
+        saves.push(
+          settingsApiV2.updateCapability("orchestrator", {
+            primary_ref: orchPrimary,
+            params: orchParams,
+          }),
+        );
+      }
+      if (reviewCap) {
+        saves.push(
+          settingsApiV2.updateCapability("review_main", {
+            primary_ref: reviewPrimary,
+          }),
+        );
+      }
+
+      const savedList = await Promise.all(saves);
       invalidateAdminBootstrap();
-      setCaps((prev) => prev.map((c) => (c.capability_id === saved.capability_id ? saved : c)));
+      setCaps((prev) => {
+        const byId = new Map(savedList.map((c) => [c.capability_id, c]));
+        return prev.map((c) => byId.get(c.capability_id) || c);
+      });
       setSavedTemplates({ ...templates });
-      setSavedEnablePaperAttributes(enablePaperAttributes);
-      setSavedOutlineMode(outlineMode);
-      setSavedPostRefineMode(postRefineMode);
+      setSavedPromptParams({ ...promptParams });
+      setSavedOrchRefId(orchRefId);
+      setSavedOrchParams({ ...orchParams });
+      setSavedReviewRefId(reviewRefId);
       setMsg("已保存");
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const text = errorMessage(e);
+      setMsg(text);
+      toastError(text);
     } finally {
       setSaving(false);
     }
@@ -204,26 +301,38 @@ export default function AdminPromptsPage() {
   return (
     <SettingsListPanel className="settings-prompts">
       <SettingToolbar
-        title="提示词与生成策略"
+        title="编排与综述能力"
         feedback={msg}
         feedbackOk={feedbackOk(msg)}
         actions={saveButton}
       />
 
+      <p className="settings-field-note settings-cap-section-note">
+        按分组绑定模型实例并编辑提示词；检索与抓取见「检索与抓取」页。
+      </p>
+
       <div className="settings-prompts__toggles">
         <InlineCheck
           label="启用文献结构化（AttributeTree lite）"
-          checked={enablePaperAttributes}
-          onChange={setEnablePaperAttributes}
+          checked={Boolean(promptParams.enable_paper_attributes ?? true)}
+          onChange={(checked) =>
+            setPromptParams((p) => ({ ...p, enable_paper_attributes: checked }))
+          }
           tip={PAPER_ATTR_TIP}
         />
 
-        <InlineField label="大纲驱动分章" htmlFor="outline-mode" tip={OUTLINE_MODE_TIPS[outlineMode]}>
+        <InlineField
+          label="大纲驱动分章"
+          htmlFor="outline-mode"
+          tip={OUTLINE_MODE_TIPS[parseOutlineMode(promptParams.outline_mode)]}
+        >
           <select
             id="outline-mode"
             className="input settings-prompts__select"
-            value={outlineMode}
-            onChange={(e) => setOutlineMode(parseOutlineMode(e.target.value))}
+            value={parseOutlineMode(promptParams.outline_mode)}
+            onChange={(e) =>
+              setPromptParams((p) => ({ ...p, outline_mode: parseOutlineMode(e.target.value) }))
+            }
           >
             {OUTLINE_MODE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -233,12 +342,21 @@ export default function AdminPromptsPage() {
           </select>
         </InlineField>
 
-        <InlineField label="综述后处理" htmlFor="post-refine-mode" tip={POST_REFINE_TIPS[postRefineMode]}>
+        <InlineField
+          label="综述后处理"
+          htmlFor="post-refine-mode"
+          tip={POST_REFINE_TIPS[parsePostRefineMode(promptParams.post_refine_mode)]}
+        >
           <select
             id="post-refine-mode"
             className="input settings-prompts__select"
-            value={postRefineMode}
-            onChange={(e) => setPostRefineMode(parsePostRefineMode(e.target.value))}
+            value={parsePostRefineMode(promptParams.post_refine_mode)}
+            onChange={(e) =>
+              setPromptParams((p) => ({
+                ...p,
+                post_refine_mode: parsePostRefineMode(e.target.value),
+              }))
+            }
           >
             {POST_REFINE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -256,52 +374,146 @@ export default function AdminPromptsPage() {
         </div>
       </details>
 
-      {groups.map((group) => (
-        <section key={group.id} className="settings-prompts__group">
-          <button
-            type="button"
-            className="settings-prompts__group-toggle"
-            onClick={() => toggleGroup(group.id)}
-            aria-expanded={Boolean(openGroups[group.id])}
-          >
-            {openGroups[group.id] ? "▼" : "▶"} {group.label}
-          </button>
+      {groups.map((group) => {
+        const groupInstanceId = resolveGroupInstanceId(group.id, promptParams, capRefSnapshot);
+        const orchModeTip = [
+          CAP_TIPS.orchestrator_mode,
+          CAP_TIPS.orchestrator_mode_off,
+          CAP_TIPS.orchestrator_mode_lite,
+          CAP_TIPS.orchestrator_mode_full,
+        ].join("\n");
 
-          {openGroups[group.id]
-            ? group.items.map((item) => (
-                <div key={item.key} className="settings-prompts__field">
-                  <div className="settings-prompts__field-head">
-                    <label htmlFor={`prompt-${item.key}`}>
-                      {item.label}
-                      {item.hint ? <FieldTip title={item.hint} /> : null}
-                    </label>
-                    <button
-                      type="button"
-                      className="btn-ghost btn-sm"
-                      onClick={() => resetTemplate(item.key)}
-                    >
-                      恢复默认
-                    </button>
+        return (
+          <section key={group.id} className="settings-prompts__group">
+            <div className="settings-prompts__group-head">
+              <button
+                type="button"
+                className="settings-prompts__group-toggle"
+                onClick={() => toggleGroup(group.id)}
+                aria-expanded={Boolean(openGroups[group.id])}
+              >
+                {openGroups[group.id] ? "▼" : "▶"} {group.label}
+              </button>
+            </div>
+
+            {openGroups[group.id] ? (
+              <div className="settings-prompts__group-body">
+                <InlineField
+                  label="模型实例"
+                  htmlFor={`group-inst-${group.id}`}
+                  tip={PROMPT_GROUP_INSTANCE_TIPS[group.id]}
+                >
+                  <select
+                    id={`group-inst-${group.id}`}
+                    className="input settings-select"
+                    value={groupInstanceId}
+                    onChange={(e) => setGroupInstanceId(group.id, e.target.value)}
+                  >
+                    <option value="">
+                      {group.id === "router" ||
+                      group.id === "search" ||
+                      group.id === "assessor" ||
+                      group.id === "pipeline"
+                        ? "与编排实例相同（默认）"
+                        : "选择模型实例…"}
+                    </option>
+                    {instOpts.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </InlineField>
+
+                {group.id === "orchestrator" ? (
+                  <div className="settings-prompts__orch-params">
+                    <InlineCheck
+                      label="启用 reasoning 模式"
+                      checked={Boolean(orchParams.orchestrator_use_reasoning ?? false)}
+                      onChange={(checked) =>
+                        setOrchParams((p) => ({ ...p, orchestrator_use_reasoning: checked }))
+                      }
+                      tip={CAP_TIPS.orchestrator_reasoning}
+                    />
+                    <div className="settings-cap-params-grid">
+                      <InlineField
+                        label="解说密度"
+                        htmlFor="orch-mode"
+                        tip={orchModeTip}
+                      >
+                        <select
+                          id="orch-mode"
+                          className="input settings-select"
+                          value={String(orchParams.orchestrator_mode ?? "lite")}
+                          onChange={(e) =>
+                            setOrchParams((p) => ({ ...p, orchestrator_mode: e.target.value }))
+                          }
+                        >
+                          <option value="off">off — 关闭阶段解说</option>
+                          <option value="lite">lite — 关键节点简短解说</option>
+                          <option value="full">full — 各阶段均有解说</option>
+                        </select>
+                      </InlineField>
+                      <InlineField
+                        label="Token/阶段"
+                        htmlFor="orch-tok"
+                        tip={CAP_TIPS.orchestrator_tokens}
+                      >
+                        <input
+                          id="orch-tok"
+                          className="input"
+                          type="number"
+                          min={80}
+                          max={500}
+                          value={Number(orchParams.orchestrator_max_tokens_per_phase ?? 280)}
+                          onChange={(e) =>
+                            setOrchParams((p) => ({
+                              ...p,
+                              orchestrator_max_tokens_per_phase: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </InlineField>
+                    </div>
                   </div>
-                  <textarea
-                    id={`prompt-${item.key}`}
-                    className="input settings-textarea font-mono settings-prompts__editor"
-                    value={templates[item.key] || ""}
-                    onChange={(e) => setTemplate(item.key, e.target.value)}
-                    spellCheck={false}
-                    rows={item.key === "review_system_prompt_template" ? 14 : 8}
-                  />
-                  <p className="settings-prompts__hint">
-                    最多 {item.max_len.toLocaleString()} 字符
-                    {(templates[item.key] || "").length > 0
-                      ? ` · 当前 ${(templates[item.key] || "").length}`
-                      : " · 使用内置默认"}
-                  </p>
-                </div>
-              ))
-            : null}
-        </section>
-      ))}
+                ) : null}
+
+                {group.items.map((item) => (
+                  <div key={item.key} className="settings-prompts__field">
+                    <div className="settings-prompts__field-head">
+                      <label htmlFor={`prompt-${item.key}`}>
+                        {item.label}
+                        {item.hint ? <FieldTip title={item.hint} /> : null}
+                      </label>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        onClick={() => resetTemplate(item.key)}
+                      >
+                        恢复默认
+                      </button>
+                    </div>
+                    <textarea
+                      id={`prompt-${item.key}`}
+                      className="input settings-textarea font-mono settings-prompts__editor"
+                      value={templates[item.key] || ""}
+                      onChange={(e) => setTemplate(item.key, e.target.value)}
+                      spellCheck={false}
+                      rows={item.key === "review_system_prompt_template" ? 14 : 8}
+                    />
+                    <p className="settings-prompts__hint">
+                      最多 {item.max_len.toLocaleString()} 字符
+                      {(templates[item.key] || "").length > 0
+                        ? ` · 当前 ${(templates[item.key] || "").length}`
+                        : " · 使用内置默认"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
 
       {dirty ? (
         <div className="settings-prompts__save-bar">

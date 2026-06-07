@@ -543,7 +543,20 @@ async def get_planner_llm_config() -> dict[str, Any]:
     return _llm_cfg_from_flat(await get_merged_settings(), prefix="planner_llm")
 
 
+async def get_router_llm_config() -> dict[str, Any]:
+    return _llm_cfg_from_flat(await get_merged_settings(), prefix="router_llm")
 
+
+async def get_search_llm_config() -> dict[str, Any]:
+    return _llm_cfg_from_flat(await get_merged_settings(), prefix="search_llm")
+
+
+async def get_assessor_llm_config() -> dict[str, Any]:
+    return _llm_cfg_from_flat(await get_merged_settings(), prefix="assessor_llm")
+
+
+async def get_pipeline_llm_config() -> dict[str, Any]:
+    return _llm_cfg_from_flat(await get_merged_settings(), prefix="pipeline_llm")
 
 
 async def get_llm_config() -> dict[str, Any]:

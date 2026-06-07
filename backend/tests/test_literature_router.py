@@ -78,7 +78,7 @@ async def test_route_literature_parses_json() -> None:
         ),
     )
     with patch(
-        "app.agents.literature_router.get_planner_llm",
+        "app.agents.literature_router.get_router_llm",
         new_callable=AsyncMock,
         return_value=mock_llm,
     ):
@@ -108,7 +108,7 @@ async def test_refine_router_session_title_calls_dedicated_router() -> None:
         ),
     )
     with patch(
-        "app.agents.literature_router.get_planner_llm",
+        "app.agents.literature_router.get_router_llm",
         new_callable=AsyncMock,
         return_value=mock_llm,
     ):
@@ -135,7 +135,7 @@ async def test_refine_router_skips_when_title_already_summary() -> None:
 @pytest.mark.asyncio
 async def test_route_literature_fallback_on_error() -> None:
     with patch(
-        "app.agents.literature_router.get_planner_llm",
+        "app.agents.literature_router.get_router_llm",
         new_callable=AsyncMock,
         side_effect=RuntimeError("no llm"),
     ):

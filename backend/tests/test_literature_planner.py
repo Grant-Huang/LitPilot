@@ -110,7 +110,7 @@ async def test_stream_understanding_refines_truncated_orchestrator_output() -> N
             return_value=mock_llm,
         ),
         patch(
-            "app.agents.literature_router.get_planner_llm",
+            "app.agents.literature_router.get_router_llm",
             new_callable=AsyncMock,
             return_value=mock_llm,
         ),
