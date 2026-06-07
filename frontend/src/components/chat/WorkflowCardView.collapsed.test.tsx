@@ -96,4 +96,56 @@ describe("WorkflowCardView collapsed head visibility", () => {
     // The full body text is NOT rendered when collapsed.
     expect(html).not.toContain("检索 hint");
   });
+
+  it("the search card also collapses to a clickable head row when done (same visibility rule)", () => {
+    const html = renderToStaticMarkup(
+      <WorkflowCardView
+        card={makeCard({
+          type: "search",
+          title: "检索文献",
+          state: "done",
+          subTopics: [{ id: "topic-a", title: "Topic A", search_query: "Topic A" }],
+        })}
+        streaming={false}
+      />,
+    );
+    // Same visibility rule: clickable title button, head row exists, body hidden.
+    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
+    expect(html).toContain("litpilot-wf-card__head");
+    expect(html).not.toContain("litpilot-wf-card__body");
+  });
+
+  it("collapsed done card head carries --done modifier (not --open) so CSS uses accent-based background for cross-theme visibility", () => {
+    // CSS contract: .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head
+    // uses background: color-mix(in srgb, var(--color-accent, #d97706) 6%, transparent)
+    // and border-left: color-mix(in srgb, var(--color-accent, #d97706) 38%, transparent)
+    // ensuring the card is never invisible on any theme.
+    const html = renderToStaticMarkup(
+      <WorkflowCardView card={makeCard()} streaming={false} />,
+    );
+    // Root element must have --done class.
+    expect(html).toMatch(/class="[^"]*litpilot-wf-card--done/);
+    // Root element must NOT have --open class, so the collapsed-head rule applies.
+    expect(html).not.toMatch(
+      /class="[^"]*litpilot-wf-card--done[^"]*litpilot-wf-card--open/,
+    );
+    // The head row must exist for the CSS rule to target it.
+    expect(html).toContain("litpilot-wf-card__head");
+    // The title button must exist and be visible.
+    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
+  });
+
+  it("collapsed done card title button text is rendered with visible color", () => {
+    // The CSS rule .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn
+    // sets color: var(--color-text-secondary, #555) which is always visible.
+    const html = renderToStaticMarkup(
+      <WorkflowCardView card={makeCard()} streaming={false} />,
+    );
+    // Verify the title text is actually rendered (not hidden/truncated to nothing).
+    expect(html).toContain("理解研究问题");
+    // The title appears inside a button element for accessibility.
+    expect(html).toMatch(
+      /<button[^>]*class="[^"]*litpilot-wf-card__title-btn[^"]*"[^>]*>[\s\S]*理解研究问题/,
+    );
+  });
 });

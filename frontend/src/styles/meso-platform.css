@@ -3762,21 +3762,25 @@ a.library-badge--action:hover {
   text-align: left;
 }
 
-/* 折叠态的卡片（done 且未展开）：head 自带浅背景与左侧提示条，
-   让"已完成"的卡片在视觉上仍是一张可点击的卡片，而非混入文本流。
-   展开态（--open）不应用，避免与 body 边框重复。 */
+/* 折叠态的卡片（done 且未展开）：head 自带浅背景与左侧 accent 提示条，
+   用 accent 色代替 bg-elevated，确保在任何主题下都可见。 */
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head {
   padding: 4px 8px 4px 6px;
   margin: 0 0 2px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-bg-elevated, transparent) 70%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--color-text-muted, #888) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #d97706) 6%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--color-accent, #d97706) 38%, transparent);
   transition: background 0.12s ease, border-left-color 0.12s ease;
 }
 
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head:hover {
-  background: color-mix(in srgb, var(--color-bg-elevated, transparent) 100%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #d97706) 12%, transparent);
   border-left-color: var(--color-accent, #d97706);
+}
+
+/* 折叠态卡片标题按钮：确保文字颜色有可靠 fallback */
+.litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn {
+  color: var(--color-text-secondary, #555);
 }
 
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn:focus-visible {
