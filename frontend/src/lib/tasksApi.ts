@@ -5,7 +5,6 @@ export type CreateLiteratureTaskBody = {
   message: string;
   session_id?: string;
   fetch_urls?: string[];
-  literature_source_mode?: "merge" | "user_only";
 };
 
 export const tasksApi = {

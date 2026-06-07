@@ -86,19 +86,11 @@ class LiteratureTaskRegistry:
         session_id: str,
         message: str,
         fetch_urls: list[str] | None = None,
-        literature_source_mode: str | None = None,
     ) -> TaskRecord:
-        normalized_mode: str | None = None
-        if literature_source_mode:
-            from app.agents.literature_source import normalize_literature_source_mode
-
-            normalized_mode = normalize_literature_source_mode(literature_source_mode)
-
         record = self._store.create_task(
             session_id=session_id,
             message=message,
             fetch_urls=fetch_urls,
-            literature_source_mode=normalized_mode,
         )
         get_store().append_message(session_id, "user", message)
         await self._maybe_start_runner(record.id)
@@ -212,7 +204,6 @@ class LiteratureTaskRegistry:
                 record.session_id,
                 record.message,
                 extra_fetch_urls=record.fetch_urls or None,
-                literature_source_mode=record.literature_source_mode,
                 persist_user_message=False,
             ):
                 if self._store.is_cancel_requested(task_id):

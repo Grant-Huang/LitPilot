@@ -12,8 +12,6 @@ import type { LiteratureStreamPhase } from "@/lib/literatureStreamPhase";
 
 const { TextArea } = Input;
 
-type LiteratureSourceMode = "merge" | "user_only";
-
 type LitPilotComposerProps = {
   input: string;
   onInputChange: (value: string) => void;
@@ -21,8 +19,6 @@ type LitPilotComposerProps = {
   onFetchUrlsChange: (urls: string[]) => void;
   /** 与设置页 max_fetch_urls 一致，默认 50 上限 */
   maxFetchUrls?: number;
-  literatureSourceMode?: LiteratureSourceMode;
-  onLiteratureSourceModeChange?: (mode: LiteratureSourceMode) => void;
   streamPhase: LiteratureStreamPhase;
   isStreamBusy: boolean;
   streamActivityHint?: string | null;
@@ -40,8 +36,6 @@ export function LitPilotComposer({
   fetchUrls,
   onFetchUrlsChange,
   maxFetchUrls = 50,
-  literatureSourceMode = "merge",
-  onLiteratureSourceModeChange,
   streamPhase,
   isStreamBusy,
   streamActivityHint = null,
@@ -96,44 +90,6 @@ export function LitPilotComposer({
       <div className="litpilot-composer__dock">
         <div className="litpilot-composer__box">
           <div className="litpilot-composer__meta">
-            <div className="litpilot-composer__chips" role="group" aria-label="文献来源模式">
-              <Tooltip title="合并用户链接与学术检索结果">
-                <button
-                  type="button"
-                  className={`litpilot-composer__chip${
-                    literatureSourceMode === "merge"
-                      ? " litpilot-composer__chip--active"
-                      : ""
-                  }`}
-                  disabled={isStreamBusy}
-                  aria-pressed={literatureSourceMode === "merge"}
-                  onClick={() => onLiteratureSourceModeChange?.("merge")}
-                >
-                  合并检索
-                </button>
-              </Tooltip>
-              <Tooltip
-                title={
-                  fetchUrls.length > 0
-                    ? "仅抓取你上传的链接，跳过学术检索"
-                    : "需先上传链接；无链接时发送仍会合并检索"
-                }
-              >
-                <button
-                  type="button"
-                  className={`litpilot-composer__chip${
-                    literatureSourceMode === "user_only"
-                      ? " litpilot-composer__chip--active"
-                      : ""
-                  }`}
-                  disabled={isStreamBusy}
-                  aria-pressed={literatureSourceMode === "user_only"}
-                  onClick={() => onLiteratureSourceModeChange?.("user_only")}
-                >
-                  仅用户链接
-                </button>
-              </Tooltip>
-            </div>
             {isStreamBusy && streamParallelismChips.length > 0 ? (
               <div
                 className="litpilot-composer__readonly-chips"

@@ -71,10 +71,8 @@ async def stream_literature_turn(
     user_message: str,
     *,
     extra_fetch_urls: list[str] | None = None,
-    literature_source_mode: str | None = None,
     persist_user_message: bool = True,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    del literature_source_mode
     store = get_store()
     if persist_user_message:
         store.append_message(session_id, "user", user_message)

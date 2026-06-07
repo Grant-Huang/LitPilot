@@ -176,9 +176,6 @@ async def get_max_fetch_urls() -> int:
 
 
 
-async def get_literature_source_mode() -> str:
-    """v2 仅保留 merge 模式（任务级显式 URL 仍受支持）。"""
-    return "merge"
 
 
 
