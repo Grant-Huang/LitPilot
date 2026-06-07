@@ -3762,6 +3762,29 @@ a.library-badge--action:hover {
   text-align: left;
 }
 
+/* 折叠态的卡片（done 且未展开）：head 自带浅背景与左侧提示条，
+   让"已完成"的卡片在视觉上仍是一张可点击的卡片，而非混入文本流。
+   展开态（--open）不应用，避免与 body 边框重复。 */
+.litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head {
+  padding: 4px 8px 4px 6px;
+  margin: 0 0 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-bg-elevated, transparent) 70%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--color-text-muted, #888) 30%, transparent);
+  transition: background 0.12s ease, border-left-color 0.12s ease;
+}
+
+.litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated, transparent) 100%, transparent);
+  border-left-color: var(--color-accent, #d97706);
+}
+
+.litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn:focus-visible {
+  outline: 2px solid var(--color-accent, #d97706);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .litpilot-wf-card__marker {
   flex-shrink: 0;
   width: 14px;

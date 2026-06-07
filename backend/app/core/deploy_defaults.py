@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -32,10 +33,34 @@ def load_deploy_defaults_raw() -> dict[str, Any]:
 
 
 def deploy_settings() -> dict[str, Any]:
-    """Flat non-sensitive settings for v2 migration seeding."""
+    """Flat non-sensitive settings for v2 migration seeding.
+
+    Sources (priority): env var → deploy.defaults.json → hardcoded fallback.
+    """
     raw = load_deploy_defaults_raw()
-    settings = raw.get("settings")
-    return dict(settings) if isinstance(settings, dict) else {}
+    settings = dict(raw.get("settings") or {})
+
+    settings["llm_model"] = (
+        os.environ.get("OPENAI_MODEL")
+        or str(settings.get("llm_model") or "")
+    ).strip() or "deepseek-v4-pro"
+
+    settings["orchestrator_model"] = (
+        os.environ.get("ORCHESTRATOR_MODEL")
+        or str(settings.get("orchestrator_model") or "")
+    ).strip() or "deepseek-v4-flash"
+
+    settings["llm_base_url"] = (
+        os.environ.get("OPENAI_BASE_URL")
+        or str(settings.get("llm_base_url") or "")
+    ).strip() or "https://api.deepseek.com"
+
+    settings["llm_provider"] = (
+        os.environ.get("LLM_PROVIDER")
+        or str(settings.get("llm_provider") or "")
+    ).strip() or "openai"
+
+    return settings
 
 
 def deploy_credentials() -> list[dict[str, Any]]:

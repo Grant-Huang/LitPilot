@@ -26,9 +26,6 @@ def _utc_now() -> str:
 
 
 _DEFAULT_SESSION_TITLES = frozenset({"新综述", "新对话", "未命名"})
-DEFAULT_REVIEW_MODEL = "MiniMax-M3"
-DEFAULT_ORCHESTRATOR_MODEL = "MiniMax-M2.7-highspeed"
-_MINIMAX_PROVIDERS = frozenset({"minimax_cn", "minimax_intl"})
 
 
 def is_default_session_title(title: str) -> bool:
@@ -504,10 +501,8 @@ class FileStore:
 
         primary_cred_id = cred_by_key.get("llm_primary") or ""
         raw_review_model = str(legacy.get("llm_model") or "").strip()
-        if llm_provider in _MINIMAX_PROVIDERS and (
-            not raw_review_model or raw_review_model == "gpt-4o-mini"
-        ):
-            primary_model = DEFAULT_REVIEW_MODEL
+        if not raw_review_model or raw_review_model == "gpt-4o-mini":
+            primary_model = deploy_settings().get("llm_model") or "deepseek-v4-pro"
         elif raw_review_model:
             primary_model = raw_review_model
         else:
@@ -521,7 +516,8 @@ class FileStore:
         )
         orch_model = (
             str(legacy.get("orchestrator_model") or "").strip()
-            or DEFAULT_ORCHESTRATOR_MODEL
+            or deploy_settings().get("orchestrator_model")
+            or "deepseek-v4-flash"
         )
         add_instance(
             key="orchestrator",
@@ -969,7 +965,7 @@ class FileStore:
                         "name": name,
                         "provider": llm_provider,
                         "credential_id": target_cred_id,
-                        "model_name": model_default or DEFAULT_REVIEW_MODEL,
+                        "model_name": model_default or deploy_settings().get("llm_model") or "deepseek-v4-pro",
                         "default_params": {},
                         "created_at": now,
                         "updated_at": now,
@@ -1158,7 +1154,7 @@ class FileStore:
 
         review = by_name.get("review-main")
         if review and review.get("model_name") == "MiniMax-M2.7":
-            review["model_name"] = DEFAULT_REVIEW_MODEL
+            review["model_name"] = deploy_settings().get("llm_model") or "deepseek-v4-pro"
             review["updated_at"] = _utc_now()
             changed = True
 
@@ -1171,7 +1167,8 @@ class FileStore:
             orch_id = str(orch_tpl.get("id") or "") if orch_tpl else uuid.uuid4().hex
             orch_model = (
                 str(legacy.get("orchestrator_model") or "").strip()
-                or DEFAULT_ORCHESTRATOR_MODEL
+                or deploy_settings().get("orchestrator_model")
+                or "deepseek-v4-flash"
             )
             instances.append(
                 {

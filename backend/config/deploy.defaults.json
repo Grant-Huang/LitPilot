@@ -4,10 +4,6 @@
   "settings": {
     "fetch_parallel": 5,
     "fetch_timeout_sec": 15.0,
-    "llm_provider": "minimax_cn",
-    "llm_model": "MiniMax-M3",
-    "orchestrator_model": "MiniMax-M2.7-highspeed",
-    "llm_base_url": "https://api.minimax.chat/v1",
     "tavily_max_results": 80,
     "max_fetch_urls": 49,
     "tavily_retry_count": 3,
@@ -36,9 +32,9 @@
     {
       "id": "c0a1f4e8b2d34c6e9f1a2b3c4d5e6f03",
       "key": "llm_primary",
-      "type": "llm:minimax_cn",
-      "name": "LLM · minimax_cn · primary",
-      "base_url": "https://api.minimax.chat/v1",
+      "type": "llm:openai",
+      "name": "LLM · openai · primary",
+      "base_url": "https://api.deepseek.com",
       "group_id": ""
     },
     {
@@ -54,14 +50,14 @@
       "key": "review_main",
       "name": "review-main",
       "credential_key": "llm_primary",
-      "model_name": "MiniMax-M3"
+      "model_name": "deepseek-v4-pro"
     },
     {
       "id": "i0a1f4e8b2d34c6e9f1a2b3c4d5e6f02",
       "key": "orchestrator",
       "name": "orchestrator",
       "credential_key": "llm_primary",
-      "model_name": "MiniMax-M2.7-highspeed"
+      "model_name": "deepseek-v4-flash"
     }
   ]
 }

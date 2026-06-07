@@ -16,11 +16,31 @@ from app.storage import backend as storage_backend
 from app.storage.file_store import FileStore
 
 
-def test_deploy_defaults_file_exists() -> None:
+def test_deploy_defaults_file_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("ORCHESTRATOR_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
     assert defaults_path().is_file()
     settings = deploy_settings()
-    assert settings.get("llm_model") == "MiniMax-M3"
-    assert settings.get("orchestrator_model") == "MiniMax-M2.7-highspeed"
+    # Hardcoded fallback when deploy.defaults.json has no model settings
+    assert settings.get("llm_model") == "deepseek-v4-pro"
+    assert settings.get("orchestrator_model") == "deepseek-v4-flash"
+    assert settings.get("llm_base_url") == "https://api.deepseek.com"
+    assert settings.get("llm_provider") == "openai"
+
+    # Env vars take priority
+    monkeypatch.setenv("OPENAI_MODEL", "custom-model")
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "custom-orch")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://custom.api/v1")
+    monkeypatch.setenv("LLM_PROVIDER", "custom_provider")
+    settings2 = deploy_settings()
+    assert settings2["llm_model"] == "custom-model"
+    assert settings2["orchestrator_model"] == "custom-orch"
+    assert settings2["llm_base_url"] == "https://custom.api/v1"
+    assert settings2["llm_provider"] == "custom_provider"
+
     assert "review_system_prompt_template" in settings
     assert "你是学术文献综述助手" in str(settings["review_system_prompt_template"])
     assert "tavily_api_key" not in settings
@@ -98,7 +118,7 @@ def test_migration_uses_stable_instance_ids_and_binds_credentials(
 
     resp = client.put(
         f"/api/settings/system/instances/{templates['review_main']}",
-        json={"credential_id": llm_cred_id, "model_name": "MiniMax-M3"},
+        json={"credential_id": llm_cred_id, "model_name": "deepseek-v4-pro"},
     )
     assert resp.status_code == 200, resp.text
 
@@ -116,8 +136,8 @@ def test_deploy_catalog_remaps_legacy_random_instance_ids(
         [
             {
                 "id": legacy_cred_id,
-                "type": "llm:minimax_cn",
-                "name": "LLM · minimax_cn · primary",
+                "type": "llm:openai",
+                "name": "LLM · openai · primary",
                 "has_secret": True,
                 "secret": "sk-test-key",
                 "created_at": now,
@@ -133,9 +153,9 @@ def test_deploy_catalog_remaps_legacy_random_instance_ids(
             {
                 "id": legacy_inst_id,
                 "name": "review-main",
-                "provider": "minimax_cn",
+                "provider": "openai",
                 "credential_id": legacy_cred_id,
-                "model_name": "MiniMax-M3",
+                "model_name": "deepseek-v4-pro",
                 "default_params": {},
                 "created_at": now,
                 "updated_at": now,
@@ -198,8 +218,8 @@ def test_ensure_default_capabilities_backfills_web_search_and_fetch(
         [
             {
                 "id": legacy_cred_id,
-                "type": "llm:minimax_cn",
-                "name": "LLM · minimax_cn · primary",
+                "type": "llm:openai",
+                "name": "LLM · openai · primary",
                 "has_secret": True,
                 "secret": "sk-test-key",
                 "created_at": now,
@@ -237,9 +257,9 @@ def test_ensure_default_capabilities_backfills_web_search_and_fetch(
             {
                 "id": legacy_inst_id,
                 "name": "review-main",
-                "provider": "minimax_cn",
+                "provider": "openai",
                 "credential_id": legacy_cred_id,
-                "model_name": "MiniMax-M3",
+                "model_name": "deepseek-v4-pro",
                 "default_params": {},
                 "created_at": now,
                 "updated_at": now,

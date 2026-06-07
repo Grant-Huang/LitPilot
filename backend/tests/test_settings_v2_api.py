@@ -5,13 +5,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.deploy_defaults import deploy_settings
 from app.main import app
 from app.storage import backend as storage_backend
-from app.storage.file_store import (
-    DEFAULT_ORCHESTRATOR_MODEL,
-    DEFAULT_REVIEW_MODEL,
-    FileStore,
-)
+from app.storage.file_store import FileStore
 
 
 @pytest.fixture
@@ -63,8 +60,9 @@ def test_migration_creates_review_and_orchestrator_instances(
 
     by_name = {i["name"]: i for i in store.list_system_instances()}
     assert set(by_name) == {"review-main", "orchestrator"}
-    assert by_name["review-main"]["model_name"] == DEFAULT_REVIEW_MODEL
-    assert by_name["orchestrator"]["model_name"] == DEFAULT_ORCHESTRATOR_MODEL
+    ds = deploy_settings()
+    assert by_name["review-main"]["model_name"] == ds["llm_model"]
+    assert by_name["orchestrator"]["model_name"] == ds["orchestrator_model"]
 
 
 def test_ensure_default_instances_backfills_orchestrator(store: FileStore) -> None:
@@ -77,8 +75,9 @@ def test_ensure_default_instances_backfills_orchestrator(store: FileStore) -> No
     store.ensure_settings_v2_migrated()
 
     by_name = {i["name"]: i for i in store.list_system_instances()}
-    assert by_name["review-main"]["model_name"] == DEFAULT_REVIEW_MODEL
-    assert by_name["orchestrator"]["model_name"] == DEFAULT_ORCHESTRATOR_MODEL
+    ds = deploy_settings()
+    assert by_name["review-main"]["model_name"] == ds["llm_model"]
+    assert by_name["orchestrator"]["model_name"] == ds["orchestrator_model"]
 
 
 def test_personal_preferences_roundtrip(client: TestClient) -> None:
