@@ -16,8 +16,8 @@ export default function AdminSettingsLayout({ children }: { children: React.Reac
       brandTitle="管理员配置"
       navAriaLabel="管理员设置分类"
       navGroups={navGroups}
-      pageTitle={meta.title}
-      pageSummary={meta.summary}
+      pageTitle={meta.title || undefined}
+      pageSummary={meta.summary || undefined}
       contentClassName="settings-doc-content"
     >
       {children}

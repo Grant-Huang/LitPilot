@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Dropdown, Modal, message } from "antd";
@@ -21,20 +20,6 @@ import {
 const USER_NAME_KEY = "litpilot:user-name";
 const ACTIVE_SESSION_KEY = "litpilot:active-session";
 const ARTIFACT_KEY = "litpilot:artifact-visible";
-
-function SettingsMenuLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link href={href} prefetch className="litpilot-sidebar-user__menu-link">
-      {children}
-    </Link>
-  );
-}
 
 export function LitPilotSidebarUser() {
   const pathname = usePathname();
@@ -93,20 +78,14 @@ export function LitPilotSidebarUser() {
     {
       key: "settings-personal",
       icon: <SettingOutlined />,
-      label: (
-        <SettingsMenuLink href="/settings/personal">
-          {pendingNavLabel("/settings/personal", "个人设置", pendingHref)}
-        </SettingsMenuLink>
-      ),
+      label: pendingNavLabel("/settings/personal", "个人设置", pendingHref),
+      onClick: () => navigate("/settings/personal"),
     },
     {
       key: "settings-admin",
       icon: <SettingOutlined />,
-      label: (
-        <SettingsMenuLink href="/settings/admin">
-          {pendingNavLabel("/settings/admin", "管理员配置", pendingHref)}
-        </SettingsMenuLink>
-      ),
+      label: pendingNavLabel("/settings/admin", "管理员配置", pendingHref),
+      onClick: () => navigate("/settings/admin"),
     },
     { type: "divider" },
     {

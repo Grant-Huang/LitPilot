@@ -13,8 +13,7 @@ import {
   SettingsErrorMsg,
   SettingsListSkeleton,
 } from "../../_shared";
-import { settingsApiV2, type SystemCapability, type SystemCredential } from "@/lib/settingsApiV2";
-import { WebProviderTestPanel } from "./WebProviderTestPanel";
+import { settingsApiV2, type SystemCredential } from "@/lib/settingsApiV2";
 
 function mergeCredentialList(items: SystemCredential[], updated: SystemCredential): SystemCredential[] {
   return mergeById(items, updated);
@@ -198,7 +197,6 @@ function CredentialRow({
 export default function AdminCredentialsPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<SystemCredential[]>([]);
-  const [caps, setCaps] = useState<SystemCapability[]>([]);
   const [msg, setMsg] = useState("");
 
   const load = async (opts?: { quiet?: boolean }) => {
@@ -206,7 +204,6 @@ export default function AdminCredentialsPage() {
     try {
       const boot = await loadAdminBootstrap();
       setItems(boot.credentials);
-      setCaps(boot.caps);
     } catch (e: unknown) {
       setMsg(errorMessage(e));
     } finally {
@@ -226,13 +223,6 @@ export default function AdminCredentialsPage() {
     );
   }
 
-  const webSearchCap = caps.find((c) => c.capability_id === "web_search");
-  const webFetchCap = caps.find((c) => c.capability_id === "web_fetch");
-  const searchProvider = String(webSearchCap?.params?.search_provider ?? "multi_academic");
-  const fetchProvider = String(webFetchCap?.params?.fetch_provider ?? "native");
-  const pdfExtractBackend = String(webFetchCap?.params?.pdf_extract_backend ?? "pymupdf4llm");
-  const fetchTimeoutSec = Number(webFetchCap?.params?.fetch_timeout_sec ?? 45);
-
   return (
     <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
@@ -248,12 +238,6 @@ export default function AdminCredentialsPage() {
           />
         ))}
 
-        <WebProviderTestPanel
-          fetchProvider={fetchProvider}
-          pdfExtractBackend={pdfExtractBackend}
-          fetchTimeoutSec={fetchTimeoutSec}
-          searchProvider={searchProvider}
-        />
       </div>
     </SettingsListPanel>
   );

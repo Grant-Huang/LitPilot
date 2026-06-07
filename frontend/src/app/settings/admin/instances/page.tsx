@@ -161,16 +161,14 @@ function InstanceRow({
 function CreateInstancePanel({
   credentials,
   onCreated,
-  onCancel,
 }: {
   credentials: SystemCredential[];
   onCreated: (i: SystemInstance) => void;
-  onCancel: () => void;
 }) {
   const llmCreds = credentials.filter(isLlmCredential);
   const [name, setName] = useState("");
   const [credentialId, setCredentialId] = useState(llmCreds[0]?.id || "");
-  const [modelName, setModelName] = useState("MiniMax-M3");
+  const [modelName, setModelName] = useState("");
   const [saving, setSaving] = useState(false);
   const [rowMsg, setRowMsg] = useState("");
 
@@ -193,7 +191,7 @@ function CreateInstancePanel({
         name: name.trim() || "new-instance",
         provider: providerFromCredential(credentialId),
         credential_id: credentialId,
-        model_name: modelName.trim() || "MiniMax-M3",
+        model_name: modelName.trim() || "",
         default_params: {},
       });
       invalidateAdminBootstrap();
@@ -212,15 +210,10 @@ function CreateInstancePanel({
         feedback={rowMsg}
         feedbackOk={feedbackOk(rowMsg)}
         actions={
-          <>
-            <button type="button" className="btn-secondary btn-sm" onClick={onCancel}>
-              取消
-            </button>
-            <button type="button" className="btn-primary btn-sm" disabled={saving} onClick={() => void onCreate()}>
-              {saving ? <Spin size="small" /> : null}
-              创建
-            </button>
-          </>
+          <button type="button" className="btn-primary btn-sm" disabled={saving} onClick={() => void onCreate()}>
+            {saving ? <Spin size="small" /> : null}
+            创建
+          </button>
         }
       />
       <div className="settings-inst-fields">
@@ -252,6 +245,7 @@ function CreateInstancePanel({
           <input
             id="inst-new-model"
             className="input font-mono"
+            placeholder="如 gpt-4o, deepseek-chat"
             value={modelName}
             onChange={(e) => setModelName(e.target.value)}
           />
@@ -313,7 +307,6 @@ export default function AdminInstancesPage() {
         {creating ? (
           <CreateInstancePanel
             credentials={credentials}
-            onCancel={() => setCreating(false)}
             onCreated={(created) => {
               setItems((prev) => [created, ...prev]);
               setCreating(false);

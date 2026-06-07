@@ -57,11 +57,9 @@ export function InlineCheck({
   tip?: string;
 }) {
   return (
-    <label className="settings-cap-inline-check">
+    <InlineField label={label} tip={tip}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
-      {tip ? <FieldTip title={tip} /> : null}
-    </label>
+    </InlineField>
   );
 }
 

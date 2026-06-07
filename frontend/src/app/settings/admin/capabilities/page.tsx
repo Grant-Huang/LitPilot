@@ -24,6 +24,7 @@ import {
 import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import { SettingsErrorMsg, SettingsListSkeleton, errorMessage } from "../../_shared";
 import { toastError } from "@/lib/toastFeedback";
+import { WebProviderTestPanel } from "../credentials/WebProviderTestPanel";
 import {
   settingsApiV2,
   type SystemCapability,
@@ -318,8 +319,7 @@ function CapabilityCard({
           ) : null}
           {String(params.pdf_extract_backend ?? "pymupdf4llm") === "pymupdf4llm" && isNativeFetch ? (
             <p className="settings-cap-field-note">
-              pymupdf4llm 基于 PyMuPDF（Artifex）。商业使用需 Artifex 许可证；可选：{" "}
-              <code>pip install pymupdf4llm</code>
+              pymupdf4llm 基于 PyMuPDF（Artifex）。商业使用需 Artifex 许可证。
             </p>
           ) : null}
           <div className="settings-cap-params-grid">
@@ -486,6 +486,13 @@ export default function AdminCapabilitiesPage() {
     [caps],
   );
 
+  const webSearchCap = caps.find((c) => c.capability_id === "web_search");
+  const webFetchCap = caps.find((c) => c.capability_id === "web_fetch");
+  const searchProvider = String(webSearchCap?.params?.search_provider ?? "multi_academic");
+  const fetchProvider = String(webFetchCap?.params?.fetch_provider ?? "native");
+  const pdfExtractBackend = String(webFetchCap?.params?.pdf_extract_backend ?? "pymupdf4llm");
+  const fetchTimeoutSec = Number(webFetchCap?.params?.fetch_timeout_sec ?? 45);
+
   if (loading) {
     return (
       <SettingsListPanel>
@@ -497,10 +504,6 @@ export default function AdminCapabilitiesPage() {
   return (
     <SettingsListPanel>
       <SettingsErrorMsg msg={msg} />
-
-      <p className="settings-field-note settings-cap-section-note">
-        文献来源、网络检索与网页抓取；编排与综述模型见「编排与综述」页。
-      </p>
 
       <div className="settings-cap-list settings-cred-list--flat">
         {orderedCaps.map((c) => (
@@ -517,6 +520,13 @@ export default function AdminCapabilitiesPage() {
           />
         ))}
       </div>
+
+      <WebProviderTestPanel
+        fetchProvider={fetchProvider}
+        pdfExtractBackend={pdfExtractBackend}
+        fetchTimeoutSec={fetchTimeoutSec}
+        searchProvider={searchProvider}
+      />
     </SettingsListPanel>
   );
 }

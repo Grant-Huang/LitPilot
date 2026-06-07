@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Spin } from "antd";
 import { UserOutlined } from "@ant-design/icons";
 import { getCachedResource, invalidateCachedResource } from "@/lib/resourceCache";
 import {
@@ -9,7 +10,7 @@ import {
 } from "@/lib/settingsBootstrap";
 import { settingsApiV2 } from "@/lib/settingsApiV2";
 import { FunctionalDocShell } from "@/components/layout/FunctionalDocShell";
-import { InlineField } from "../admin/_ui";
+import { InlineField, SettingsListPanel } from "../admin/_ui";
 import {
   errorMessage,
   SettingsErrorMsg,
@@ -87,7 +88,7 @@ export default function PersonalSettingsPage() {
       pageSummary={PERSONAL_SECTION.summary}
       contentClassName="settings-doc-content"
     >
-      <div className="card settings-section settings-personal-panel">
+      <SettingsListPanel>
         {msgOk ? <SettingsSuccessMsg msg={msg} /> : <SettingsErrorMsg msg={msg} />}
 
         <InlineField
@@ -108,10 +109,10 @@ export default function PersonalSettingsPage() {
 
         <div className="settings-personal-panel__actions">
           <button type="button" className="btn-primary btn-sm" onClick={() => void onSave()} disabled={saving}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? <><Spin size="small" /> 保存</> : "保存"}
           </button>
         </div>
-      </div>
+      </SettingsListPanel>
     </FunctionalDocShell>
   );
 }
