@@ -48,12 +48,9 @@ _LEGACY_EXTENSIONS = frozenset(
         "literature_search_pass_start",
         "literature_search_pass_done",
         "literature_search_pass_hits",
-        "literature_search_source_start",
-        "literature_search_source_done",
         "literature_search_merge",
         "literature_fetch_start",
         "literature_fetch_user_start",
-        "literature_relevance_filter",
         "literature_outline",
         "literature_paper_index",
     }
@@ -156,7 +153,15 @@ async def _filter_subtopic_hits(
             continue
         yield ev
     kept = list(result.kept_hits) if result is not None else []
-    yield ("filter_result", {"kept": kept})
+    rejected = (
+        [
+            {"title": d.title, "url": d.url, "score": d.score, "reason": d.reason}
+            for d in result.rejected
+        ]
+        if result is not None
+        else []
+    )
+    yield ("filter_result", {"kept": kept, "rejected": rejected})
 
 
 async def _run_subtopic(
@@ -227,6 +232,7 @@ async def _run_subtopic(
     )
 
     kept: list[dict[str, str]] = []
+    rejected: list[dict[str, Any]] = []
     async for ev in _filter_subtopic_hits(
         hits=raw_hits,
         user_message=ctx.route_message,
@@ -236,6 +242,7 @@ async def _run_subtopic(
     ):
         if ev[0] == "filter_result":
             kept = list(ev[1].get("kept") or [])
+            rejected = list(ev[1].get("rejected") or [])
             continue
         yield ev
 
@@ -266,6 +273,12 @@ async def _run_subtopic(
             "subtopic_id": subtopic_id,
             "kept_count": len(deduped_kept),
             "kept_urls": [h.get("url") for h in deduped_kept if h.get("url")],
+            "kept": [
+                {"title": h.get("title", ""), "url": h.get("url", "")}
+                for h in kept
+                if h.get("title") or h.get("url")
+            ],
+            "rejected": rejected,
         },
     )
 

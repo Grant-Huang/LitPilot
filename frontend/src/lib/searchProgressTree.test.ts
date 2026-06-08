@@ -6,7 +6,7 @@ import {
 } from "./searchProgressTree";
 
 describe("buildSearchProgressTree", () => {
-  it("builds subtopic three-phase tree from v2 extensions", () => {
+  it("builds subtopic search+filter tree from v2 extensions", () => {
     const extensions = [
       {
         name: "literature_subtopic_plan",
@@ -23,7 +23,7 @@ describe("buildSearchProgressTree", () => {
       },
       {
         name: "literature_subtopic_filter_done",
-        data: { subtopic_id: "st1", kept_count: 5 },
+        data: { subtopic_id: "st1", kept_count: 5, kept: [{ title: "Paper A" }], rejected: [] },
       },
       {
         name: "literature_subtopic_fetch_done",
@@ -40,12 +40,15 @@ describe("buildSearchProgressTree", () => {
     expect(st1?.title).toBe("AI-native MOM 定义");
     expect(st1?.search.detail).toBe("命中 30 篇");
     expect(st1?.filter.detail).toBe("保留 5 篇");
-    expect(st1?.fetch.detail).toBe("成功 4 · 失败 1");
+    expect(st1?.sources).toEqual([]);
+    expect(st1?.filterDetails).toHaveLength(1);
+    expect(st1?.filterDetails[0].title).toBe("Paper A");
+    expect(st1?.filterDetails[0].keep).toBe(true);
     expect(subtopicDisplayTitle(st1!)).toBe("AI-native MOM 定义");
-    expect(subtopicStatusLabel(st1!)).toContain("成功 4");
+    expect(subtopicStatusLabel(st1!)).toBe("完成 · 保留 5 篇");
   });
 
-  it("marks all done when every subtopic completes fetch", () => {
+  it("marks all done when every subtopic completes search+filter", () => {
     const extensions = [
       {
         name: "literature_subtopic_plan",
@@ -57,11 +60,7 @@ describe("buildSearchProgressTree", () => {
       },
       {
         name: "literature_subtopic_filter_done",
-        data: { subtopic_id: "st1", kept_count: 3 },
-      },
-      {
-        name: "literature_subtopic_fetch_done",
-        data: { subtopic_id: "st1", ok: 3, failed: 0, skipped: 0 },
+        data: { subtopic_id: "st1", kept_count: 3, kept: [], rejected: [] },
       },
     ];
     const tree = buildSearchProgressTree(extensions);

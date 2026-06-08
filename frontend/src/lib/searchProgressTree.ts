@@ -6,13 +6,30 @@ export type SubtopicPhaseNode = {
   detail?: string;
 };
 
+export type SourceNode = {
+  label: string;
+  hits: number;
+  hits_taken: number;
+  status: SubtopicPhaseStatus;
+  failed?: boolean;
+};
+
+export type FilterDetailItem = {
+  title: string;
+  url?: string;
+  keep: boolean;
+  score?: number;
+  reason?: string;
+};
+
 export type SubtopicProgressNode = {
   id: string;
   title: string;
   query: string;
   search: SubtopicPhaseNode;
   filter: SubtopicPhaseNode;
-  fetch: SubtopicPhaseNode;
+  sources: SourceNode[];
+  filterDetails: FilterDetailItem[];
   durationMs?: number;
 };
 
@@ -49,7 +66,8 @@ function ensureSubtopic(
       query,
       search: phase("pending", "检索"),
       filter: phase("pending", "过滤"),
-      fetch: phase("pending", "抓取"),
+      sources: [],
+      filterDetails: [],
     };
     map.set(id, node);
   }
@@ -59,11 +77,7 @@ function ensureSubtopic(
 }
 
 function subtopicDone(node: SubtopicProgressNode): boolean {
-  return (
-    node.search.status === "done" &&
-    node.filter.status === "done" &&
-    node.fetch.status === "done"
-  );
+  return node.search.status === "done" && node.filter.status === "done";
 }
 
 export function buildSearchProgressTree(
@@ -71,6 +85,9 @@ export function buildSearchProgressTree(
   subTopics?: SubtopicPlanRow[],
 ): SearchProgressSummary {
   const map = new Map<string, SubtopicProgressNode>();
+  // Track per-pass source counts for subtopics without explicit subtopic_id
+  type PassSourceMap = Map<number, Map<string, SourceNode>>;
+  const passSources: PassSourceMap = new Map();
 
   if (subTopics?.length) {
     for (const st of subTopics) {
@@ -100,6 +117,32 @@ export function buildSearchProgressTree(
     }
 
     const subtopicId = String(data.subtopic_id ?? "").trim();
+    const passIndex = typeof data.pass_index === "number" ? data.pass_index : undefined;
+
+    if (ext.name === "literature_search_source_done") {
+      const label = String(data.label ?? data.source ?? "");
+      const hits = typeof data.hits === "number" ? data.hits : 0;
+      const hitsTaken = typeof data.hits_taken === "number" ? data.hits_taken : 0;
+      const failed = Boolean(data.failed);
+
+      if (subtopicId) {
+        const node = ensureSubtopic(map, subtopicId);
+        node.sources.push({
+          label,
+          hits,
+          hits_taken: hitsTaken,
+          status: failed ? "error" : "done",
+          failed,
+        });
+      } else if (passIndex != null) {
+        // Fallback: track by pass index
+        if (!passSources.has(passIndex)) passSources.set(passIndex, new Map());
+        const srcMap = passSources.get(passIndex)!;
+        srcMap.set(label, { label, hits, hits_taken: hitsTaken, status: failed ? "error" : "done", failed });
+      }
+      continue;
+    }
+
     if (!subtopicId) continue;
 
     const node = ensureSubtopic(
@@ -111,7 +154,7 @@ export function buildSearchProgressTree(
 
     if (ext.name === "literature_subtopic_search_done") {
       const raw = typeof data.raw_count === "number" ? data.raw_count : 0;
-      node.search = phase("done", "检索", `命中 ${raw} 篇`);
+      node.search = phase("done", "检索", "命中 " + raw + " 篇");
       node.filter = phase("running", "过滤");
       if (typeof data.duration_ms === "number") node.durationMs = data.duration_ms;
       continue;
@@ -120,27 +163,49 @@ export function buildSearchProgressTree(
     if (ext.name === "literature_subtopic_filter_done") {
       const kept =
         typeof data.kept_count === "number" ? data.kept_count : 0;
-      node.filter = phase("done", "过滤", `保留 ${kept} 篇`);
-      node.fetch = phase("running", "抓取");
-      continue;
-    }
+      node.filter = phase("done", "过滤", "保留 " + kept + " 篇");
 
-    if (ext.name === "literature_subtopic_fetch_done") {
-      const ok = typeof data.ok === "number" ? data.ok : 0;
-      const failed = typeof data.failed === "number" ? data.failed : 0;
-      const skipped = typeof data.skipped === "number" ? data.skipped : 0;
-      const parts = [`成功 ${ok}`];
-      if (failed) parts.push(`失败 ${failed}`);
-      if (skipped) parts.push(`跳过 ${skipped}`);
-      node.fetch = phase(
-        failed && !ok ? "error" : "done",
-        "抓取",
-        parts.join(" · "),
-      );
+      // Parse kept items
+      const keptItems = Array.isArray(data.kept) ? data.kept : [];
+      for (const item of keptItems as Array<Record<string, unknown>>) {
+        node.filterDetails.push({
+          title: String(item.title ?? ""),
+          url: String(item.url ?? ""),
+          keep: true,
+        });
+      }
+
+      // Parse rejected items
+      const rejectedItems = Array.isArray(data.rejected) ? data.rejected : [];
+      for (const item of rejectedItems as Array<Record<string, unknown>>) {
+        node.filterDetails.push({
+          title: String(item.title ?? ""),
+          url: String(item.url ?? ""),
+          keep: false,
+          score: typeof item.score === "number" ? item.score : undefined,
+          reason: String(item.reason ?? ""),
+        });
+      }
+      continue;
     }
   }
 
   const subtopics = [...map.values()];
+
+  // Merge pass-level source data into subtopics if they have no sources yet
+  if (passSources.size > 0 && subtopics.length > 0) {
+    for (const node of subtopics) {
+      if (node.sources.length > 0) continue;
+      // Assign first pass's source data to any substopic missing sources
+      for (const [, srcMap] of passSources) {
+        for (const [, src] of srcMap) {
+          node.sources.push(src);
+        }
+      }
+      break;
+    }
+  }
+
   const totalSubtopics = subtopics.length;
   const completedSubtopics = subtopics.filter(subtopicDone).length;
   const allDone = totalSubtopics > 0 && completedSubtopics >= totalSubtopics;
@@ -164,7 +229,7 @@ export function topicDisplayTitle(topic: {
   if (title) return title;
   const query = String(topic.query ?? "").trim();
   if (query) return query.slice(0, 72);
-  return `主题 ${topic.passIndex ?? ""}`.trim();
+  return "主题 " + (topic.passIndex ?? "");
 }
 
 export function subtopicDisplayTitle(node: SubtopicProgressNode): string {
@@ -173,50 +238,10 @@ export function subtopicDisplayTitle(node: SubtopicProgressNode): string {
 
 export function subtopicStatusLabel(node: SubtopicProgressNode): string {
   if (subtopicDone(node)) {
-    const fetchDetail = node.fetch.detail ?? "";
-    return fetchDetail ? `完成 · ${fetchDetail}` : "完成";
+    const filterDetail = node.filter.detail ?? "";
+    return filterDetail ? "完成 · " + filterDetail : "完成";
   }
-  if (node.fetch.status === "running") return "抓取中…";
   if (node.filter.status === "running") return "过滤中…";
   if (node.search.status === "running") return "检索中…";
   return "待开始";
-}
-
-/** 兼容旧测试/组件：映射到 subtopic 状态 */
-export function topicStatusLabel(topic: {
-  status?: string;
-  hitsTaken?: number;
-  hitsFound?: number;
-  hits?: number;
-  sourcesDone?: number;
-  sourceTotal?: number;
-}): string {
-  if (topic.status === "done") {
-    const taken = topic.hitsTaken ?? topic.hits ?? 0;
-    const found = topic.hitsFound ?? taken;
-    if (taken > 0 || found > 0) {
-      return `检索完成 · 搜到 ${found} 篇，取 ${taken} 篇`;
-    }
-    return "检索完成";
-  }
-  if (topic.status === "running") {
-    return `检索中 · ${topic.sourcesDone ?? 0}/${topic.sourceTotal ?? 5} 源`;
-  }
-  return "待检索";
-}
-
-export function sourceStatusLabel(source: {
-  status?: string;
-  failed?: boolean;
-  hitsFound?: number;
-  hitsTaken?: number;
-}): string {
-  if (source.status === "error" || source.failed) {
-    return "检索超时/失败（0）";
-  }
-  if (source.status === "done") {
-    return `检索完成 · 搜到 ${source.hitsFound ?? 0} 篇，取 ${source.hitsTaken ?? 0} 篇`;
-  }
-  if (source.status === "running") return "检索中…";
-  return "待检索";
 }

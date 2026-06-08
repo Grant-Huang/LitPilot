@@ -57,6 +57,64 @@ function cardHeadMarker(
   return open ? "▾" : "▸";
 }
 
+function renderStepLogLines(
+  steps: WorkflowStep[],
+  trace?: ExecutionTrace,
+  visibleSteps?: WorkflowStep[],
+) {
+  const target = visibleSteps ?? steps;
+  const filtered = filterVisibleWorkflowSteps(target);
+  if (!filtered.length) return null;
+  return (
+    <div className="litpilot-log-lines" role="list">
+      {filtered.map((step) => {
+        if (step.kind === "tool" && trace) {
+          const tool = trace.tools.find(
+            (t, idx) => `tool-${t.id}-${idx}` === step.key,
+          );
+          if (tool) {
+            return (
+              <LitPilotToolStep
+                key={step.key}
+                toolCall={toolStepToState(tool)}
+              />
+            );
+          }
+        }
+        return <WorkflowInlineLogLine key={step.key} step={step} />;
+      })}
+    </div>
+  );
+}
+
+function FetchSubsectionBlock({
+  label,
+  steps,
+  trace,
+}: {
+  label: string;
+  steps: WorkflowStep[];
+  trace?: ExecutionTrace;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="litpilot-wf-subsection">
+      <button
+        type="button"
+        className="litpilot-wf-subsection__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="litpilot-wf-subsection__marker" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        <span className="litpilot-wf-subsection__label">{label}</span>
+      </button>
+      {open ? renderStepLogLines(steps, trace) : null}
+    </div>
+  );
+}
+
 export function WorkflowCardView({
   card,
   trace,
@@ -171,24 +229,39 @@ export function WorkflowCardView({
               streaming={streaming && isRunning}
             />
           ) : null}
-          <div className="litpilot-log-lines" role="list">
-            {visibleSteps.map((step) => {
-              if (step.kind === "tool" && trace) {
-                const tool = trace.tools.find(
-                  (t, idx) => `tool-${t.id}-${idx}` === step.key,
-                );
-                if (tool) {
-                  return (
-                    <LitPilotToolStep
-                      key={step.key}
-                      toolCall={toolStepToState(tool)}
-                    />
+          {card.type === "fetch" && card.subsectionSteps?.length ? (
+            <div className="litpilot-wf-subsections">
+              <FetchSubsectionBlock
+                label="文献获取"
+                steps={card.steps}
+                trace={trace}
+              />
+              <FetchSubsectionBlock
+                label="引用抽取"
+                steps={card.subsectionSteps}
+                trace={trace}
+              />
+            </div>
+          ) : (
+            <div className="litpilot-log-lines" role="list">
+              {visibleSteps.map((step) => {
+                if (step.kind === "tool" && trace) {
+                  const tool = trace.tools.find(
+                    (t, idx) => `tool-${t.id}-${idx}` === step.key,
                   );
+                  if (tool) {
+                    return (
+                      <LitPilotToolStep
+                        key={step.key}
+                        toolCall={toolStepToState(tool)}
+                      />
+                    );
+                  }
                 }
-              }
-              return <WorkflowInlineLogLine key={step.key} step={step} />;
-            })}
-          </div>
+                return <WorkflowInlineLogLine key={step.key} step={step} />;
+              })}
+            </div>
+          )}
         </div>
       ) : null}
     </section>

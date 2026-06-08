@@ -4124,6 +4124,74 @@ a.library-badge--action:hover {
   padding: 0;
 }
 
+/* Search source head (expandable toggle) */
+.litpilot-search-source__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.litpilot-search-source__head:hover {
+  color: var(--color-accent);
+}
+
+.litpilot-search-topic__sub-items {
+  list-style: none;
+  margin: 4px 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Fetch card subsections */
+.litpilot-wf-subsections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.litpilot-wf-subsection__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-text-secondary);
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.litpilot-wf-subsection__head:hover {
+  color: var(--color-accent);
+}
+
+.litpilot-wf-subsection__marker {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.litpilot-wf-subsection__label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
 .litpilot-composer__meta {
   display: flex;
   align-items: center;

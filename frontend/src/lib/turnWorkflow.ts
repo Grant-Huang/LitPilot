@@ -45,6 +45,8 @@ export type WorkflowCard = {
   pinnedThink?: string;
   locked?: boolean;
   subTopics?: Array<{ id: string; title: string; search_query: string }>;
+  /** Sub-section steps for merge card types (e.g. citation in fetch). */
+  subsectionSteps?: WorkflowStep[];
 };
 
 export type TurnWorkflow = {
@@ -391,6 +393,15 @@ export function buildTurnWorkflowFromTrace(
     return c;
   });
 
+  // Merge "cite" card into "fetch" card as subsection (引用抽取)
+  const citedFetchCard = enrichedCards.find((c) => c.type === "fetch");
+  const citeCard = enrichedCards.find((c) => c.type === "cite");
+  if (citedFetchCard && citeCard) {
+    citedFetchCard.subsectionSteps = citeCard.steps;
+    const idx = enrichedCards.indexOf(citeCard);
+    if (idx !== -1) enrichedCards.splice(idx, 1);
+  }
+
   let mergedKept = 0;
   let hasFilter = false;
   for (const ext of opts.extensions ?? []) {
@@ -451,6 +462,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       pinnedThink: c.pinnedThink,
       locked: c.locked ?? false,
       subTopics: c.subTopics,
+      subsectionSteps: c.subsectionSteps,
     })),
   };
 }
