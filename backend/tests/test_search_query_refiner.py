@@ -18,7 +18,8 @@ MOM_BRIEF = """我要写一个与AI原生MOM有关的文献综述，包括4个�
 
 def test_apply_academic_search_suffix() -> None:
     q = apply_academic_search_suffix("graph neural networks")
-    assert "academic survey" in q.lower()
+    assert "academic research" in q.lower()
+    assert "peer-reviewed" in q.lower()
 
 
 def test_refine_search_queries_rule_preserves_count() -> None:

@@ -14,7 +14,7 @@ from app.agents.prompt_settings import get_prompt_max_tokens
 
 
 def test_default_max_tokens_for_understanding() -> None:
-    assert default_max_tokens_for("understanding_system_template") == 1200
+    assert default_max_tokens_for("understanding_system_template") == 2000
 
 
 def test_clamp_prompt_params_max_tokens() -> None:
@@ -54,4 +54,4 @@ async def test_get_prompt_max_tokens_understanding_builtin_default() -> None:
         new=AsyncMock(return_value={}),
     ):
         tok = await get_prompt_max_tokens("understanding_system_template")
-    assert tok == 1200
+    assert tok == 2000

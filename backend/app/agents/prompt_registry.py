@@ -13,7 +13,9 @@ from app.agents.review_prompt import (
 _SHARED_SEARCH_QUERY_RULES = (
     "- 聚焦研究对象、领域与方法/系统；不要写成教程或「如何写综述」类检索。\n"
     "- 多义缩写须写清所属领域与全称，避免与常见同名术语混淆。\n"
-    "- 优先 survey、systematic review、peer-reviewed 等学术表述；不要复述用户整段提纲。"
+    "- 使用「研究对象 + 领域词 + 方法/技术词」组合，而不是泛词「survey」单独成式；"
+    "含 survey/review 仅当明确需要收集综述类文献时才附加。\n"
+    "- 不要复述用户整段提纲；检索式须为英文（学术 API 对中文支持差）。"
 )
 
 # --- JSON / output contracts (appended when custom template omits them) ---
@@ -21,18 +23,18 @@ _SHARED_SEARCH_QUERY_RULES = (
 UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown 代码块）：
 {
   "session_title": "8-24字，禁止「综述」「新综述」等泛称",
-  "search_query": "≤120字首条检索线索（单主题 brief 时使用）",
+  "search_query": "≤120字首条英文检索线索（单主题 brief 时使用）",
   "narration_focus": "1-2句，后续解说侧重",
   "writing_emphasis": "可选，综述结构或论证侧重",
   "search_aspects": [
     {
       "aspect_id": 1,
       "aspect_label": "与用户 brief 子方向一致的名称",
-      "core_concepts": ["概念1", "概念2"],
-      "arxiv_query": "≤80字，含消歧共现词，适合 arXiv",
-      "semantic_scholar_query": "≤80字，适合 Semantic Scholar",
-      "openalex_crossref_query": "≤80字，精确短语，适合 OpenAlex/CrossRef",
-      "pubmed_query": "≤80字；非生物医学方向留空",
+      "core_concepts": ["概念1（中文）", "Concept2（英文）"],
+      "arxiv_query": "英文，≤80字，「技术词+领域词+方法词」布尔组合，如 graph neural network recommendation collaborative filtering",
+      "semantic_scholar_query": "英文，≤80字，自然语言风格，如 knowledge graph enhanced recommendation system for e-commerce",
+      "openalex_crossref_query": "英文，≤80字，精确概念短语，如 \"knowledge graph\" \"recommendation system\" neural",
+      "pubmed_query": "英文，≤80字；非生物医学/健康方向留空",
       "exclude_terms": ["municipal", "peer review process", "how to write"]
     }
   ]
@@ -40,9 +42,13 @@ UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown
 规则：
 - 用户 brief 含「其一…其二…」等多 aspect 时：search_aspects 须与用户子方向 **一一对应**（≥2 项），各方向填写 **分源检索式**；search_query 可为首方向摘要
 - 单主题 brief：search_aspects 可为 []，仅填 search_query
-- 各 aspect 的检索式须通过 **共现词** 消歧（对象+领域+方法），避免泛词「知识图谱」「survey」单独成式
+- **所有检索式必须为英文**（arXiv/Semantic Scholar/OpenAlex/CrossRef 对中文查询支持很差，系统会自动剥离中文字符）
+- 各 aspect 的检索式须通过「研究对象+领域+方法」**共现词** 消歧，避免单独用泛词「survey」「review」作为检索式
+- arxiv_query：技术词+方法词布尔组合，侧重模型/算法/系统名词
+- semantic_scholar_query：更自然语言化，可含研究场景描述
+- openalex_crossref_query：精确短语+关键概念组合，侧重概念精确匹配
 {_SHARED_SEARCH_QUERY_RULES}
-- exclude_terms：列出该方向常见噪声（跨域 KG、同行评审方法论、市政/医疗等非目标领域词等）
+- exclude_terms：列出该方向常见噪声（跨域歧义词、市政/医疗等非目标领域词等）
 - pubmed_query 仅在 brief 明确生物医学/健康方向时填写；工业/CS/工程方向留空
 - 澄清需求由下游「首轮评估」处理，此处不向用户提问"""
 
@@ -78,9 +84,9 @@ REFINER_JSON_CONTRACT = """{
 }
 规则：
 - **1:1 精炼**：queries 条数必须与输入草案相同、顺序一一对应；勿增删条数
-- 每条 ≤120 字符，适合 web_search 英文学术检索（必要时可含中文关键词）
+- 每条 ≤120 字符，必须为英文（学术 API 不支持中文）；使用「研究对象 + 领域 + 方法/技术词」组合
 - 依据用户全文消歧缩写/多义术语，展开为可检索的技术词（不要复述整段提纲）
-- 每条须含 survey / systematic review / peer-reviewed 之一（若草案缺失则补上）
+- 禁止将 survey / systematic review 作为唯一检索意图词；这类元词仅在草案本身以收集综述为目的时保留
 - 禁止教程类检索；禁止 site: 等搜索引擎操作符
 - exclude_title_substrings：列出与已确定研究域明显冲突的结果标题短语（小写英文或中文均可）
 - 本步骤不生成多条扩展式、不向用户提问；澄清由「首轮评估」负责
@@ -329,7 +335,7 @@ PROMPT_MAX_TOKENS_SUFFIX = "_max_tokens"
 
 # 各提示词 LLM 调用的默认 max_tokens（可被 prompts.params 中 {key}_max_tokens 覆盖）
 PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
-    "understanding_system_template": 1200,
+    "understanding_system_template": 2000,
     "narrate_search_after_template": 400,
     "narrate_fetch_after_template": 400,
     "intent_router_system_template": 300,

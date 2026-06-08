@@ -32,7 +32,8 @@ def test_build_payload_always_excludes_social_noise() -> None:
 
 def test_augment_query_adds_academic_context_only_for_generic_topics() -> None:
     q = apply_academic_search_suffix("graph neural networks link prediction")
-    assert "academic survey" in q.lower()
+    assert "academic research" in q.lower()
+    assert "peer-reviewed" in q.lower()
     assert "manufacturing" not in q.lower()
 
 

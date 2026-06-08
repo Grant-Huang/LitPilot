@@ -41,13 +41,13 @@ class SearchQueryRefinement:
 
 
 def apply_academic_search_suffix(query: str) -> str:
-    """Rule fallback: append academic intent when LLM unavailable."""
+    """Rule fallback: append academic intent marker when LLM unavailable."""
     q = (query or "").strip()
     if not q:
         return q
     lower = q.lower()
     if not any(x in lower for x in _ACADEMIC_MARKERS):
-        q = f"{q} academic survey peer-reviewed"
+        q = f"{q} academic research peer-reviewed"
     return q[:500]
 
 

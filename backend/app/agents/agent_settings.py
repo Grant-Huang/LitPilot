@@ -396,7 +396,17 @@ async def get_max_source_chars() -> int:
     return max(2_000, min(n, 50_000))
 
 
-def _llm_cfg_from_flat(s: dict[str, Any], *, prefix: str = "") -> dict[str, Any]:
+async def get_orchestrator_use_reasoning() -> bool:
+    """规划模型推理开关（orchestrator_use_reasoning），控制 DeepSeek thinking 模式。"""
+    return bool((await get_merged_settings()).get("orchestrator_use_reasoning", False))
+
+
+def _llm_cfg_from_flat(
+    s: dict[str, Any],
+    *,
+    prefix: str = "",
+    thinking: str | None = None,
+) -> dict[str, Any]:
     from app.llm.factory import PROVIDER_REGISTRY
 
     if prefix:
@@ -416,6 +426,8 @@ def _llm_cfg_from_flat(s: dict[str, Any], *, prefix: str = "") -> dict[str, Any]
     extra: dict[str, str] = {}
     if group_id:
         extra["group_id"] = group_id
+    if thinking:
+        extra["thinking"] = thinking
     return {
         "provider": provider,
         "api_key": api_key,
@@ -430,14 +442,11 @@ async def get_review_llm_config() -> dict[str, Any]:
     return _llm_cfg_from_flat(await get_merged_settings())
 
 
-
-
-
 async def get_planner_llm_config() -> dict[str, Any]:
-
     """orchestrator 能力绑定的编排模型（理解、解说、检索精炼、抓取摘要、结构化等）。"""
-
-    return _llm_cfg_from_flat(await get_merged_settings(), prefix="planner_llm")
+    s = await get_merged_settings()
+    thinking = "enabled" if s.get("orchestrator_use_reasoning") else None
+    return _llm_cfg_from_flat(s, prefix="planner_llm", thinking=thinking)
 
 
 async def get_router_llm_config() -> dict[str, Any]:

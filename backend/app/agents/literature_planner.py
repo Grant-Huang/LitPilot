@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.agent_settings import (
+    get_orchestrator_use_reasoning,
     get_use_llm_planner,
 )
 from app.agents.prompt_registry import NARRATE_CHECKPOINT_KEYS
@@ -55,7 +56,7 @@ class PlannerContext:
 async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
-        use_reasoning=False,
+        use_reasoning=await get_orchestrator_use_reasoning(),
         max_tokens=280,
     )
 

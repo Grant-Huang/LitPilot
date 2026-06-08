@@ -58,7 +58,7 @@ def test_prompt_metadata_includes_max_tokens() -> None:
 
     meta = prompt_registry_metadata()
     understanding = next(m for m in meta if m["key"] == "understanding_system_template")
-    assert understanding["default_max_tokens"] == 1200
+    assert understanding["default_max_tokens"] == 2000
     assert understanding["max_tokens_limit"] == 4000
 
 
