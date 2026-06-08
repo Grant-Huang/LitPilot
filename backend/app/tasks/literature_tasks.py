@@ -48,10 +48,17 @@ HEARTBEAT_SEC = 15.0
 DEFAULT_SWEEP_SEC = 30
 DEFAULT_STALE_SEC = 600
 
-# 流式增量事件合并：按 ~1 行中文或 50ms 空闲合并一次落库
+# 流式增量事件合并：按 ~4 行中文或 100ms 空闲合并一次落库
+# 阈值从 20/50ms 上调至 80/100ms，降低 token 级文件 I/O 频率（约 4×）；
+# 仍可感知为实时流式（前端 SSE 轮询 50ms，叠加感知延迟 ≤200ms）。
 COALESCE_TYPES = frozenset({"text", "think", "artifact"})
-COALESCE_MAX_CHARS = 20
-COALESCE_MAX_IDLE_MS = 50
+COALESCE_MAX_CHARS = 80
+COALESCE_MAX_IDLE_MS = 100
+
+# 落库前再做一次批量缓冲：把若干次 coalescer flush 合并为一次 store 调用，
+# 节省锁/meta 写入开销。BATCH_MAX_EVENTS 与 BATCH_MAX_IDLE_MS 共同决定上限。
+EVENT_BATCH_MAX_EVENTS = 16
+EVENT_BATCH_MAX_IDLE_MS = 80
 
 
 class _StreamCoalescer:
@@ -127,6 +134,58 @@ class _StreamCoalescer:
         self._parts = []
         self._length = 0
         self._flush_cb(ev_type, merged)
+
+
+class _EventBatchBuffer:
+    """落库前的批量缓冲区：累积 SSE 事件行，达阈值或空闲超时即批量写盘。
+
+    每次单条 ``append_event`` 在 FileTaskStore 下要做「FileLock + open append
+    + meta 读写」共 ~4 次磁盘 syscall。把 N 条事件合并为 1 次
+    ``append_events_batch`` 调用后，I/O 锁次数与 meta 重写次数同比下降 N 倍。
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        *,
+        store: Any,
+        wake: Callable[[str], None],
+        max_events: int = EVENT_BATCH_MAX_EVENTS,
+        max_idle_ms: int = EVENT_BATCH_MAX_IDLE_MS,
+    ) -> None:
+        self._task_id = task_id
+        self._store = store
+        self._wake = wake
+        self._max_events = max_events
+        self._max_idle_ms = max_idle_ms
+        self._buf: list[str] = []
+        self._first_mono: float = 0.0
+
+    def add(self, line: str) -> None:
+        if not self._buf:
+            self._first_mono = time.monotonic()
+        self._buf.append(line)
+        if (
+            len(self._buf) >= self._max_events
+            or (time.monotonic() - self._first_mono) * 1000 >= self._max_idle_ms
+        ):
+            self.flush()
+
+    def maybe_flush_idle(self) -> None:
+        if not self._buf:
+            return
+        if (time.monotonic() - self._first_mono) * 1000 >= self._max_idle_ms:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._buf:
+            return
+        lines = self._buf
+        self._buf = []
+        try:
+            self._store.append_events_batch(self._task_id, lines)
+        finally:
+            self._wake(self._task_id)
 
 
 def _sweep_interval_sec() -> int:
@@ -261,6 +320,8 @@ class LiteratureTaskRegistry:
         task_id: str,
         event_type: str,
         payload: dict[str, Any],
+        *,
+        batch: "_EventBatchBuffer | None" = None,
     ) -> None:
         record = self._store.get_task(task_id)
         if not record:
@@ -269,7 +330,10 @@ class LiteratureTaskRegistry:
         prev_stage = record.stage
         record = self._progress_from_event(record, event_type, payload)
         line = sse_event(event_type, payload)
-        self._store.append_event(task_id, line)
+        if batch is not None:
+            batch.add(line)
+        else:
+            self._store.append_event(task_id, line)
         # 仅在进度/阶段变化时写 meta，避免每个 token 都重写一次（append_event 已更新 updated_at）
         if record.progress != prev_progress or record.stage != prev_stage:
             self._store.update_task(
@@ -281,14 +345,29 @@ class LiteratureTaskRegistry:
         if sig is not None:
             sig.set()
 
+    def _wake_signal(self, task_id: str) -> None:
+        sig = self._event_signals.get(task_id)
+        if sig is not None:
+            sig.set()
+
     async def _run(self, task_id: str) -> None:
         record = self._store.get_task(task_id)
         if not record:
             return
         self._store.update_task(task_id, status="running", stage="starting")
         self._signal_for(task_id)
+        batch = _EventBatchBuffer(
+            task_id,
+            store=self._store,
+            wake=self._wake_signal,
+        )
+
+        def _flush_both() -> None:
+            coalescer.flush()
+            batch.flush()
+
         coalescer = _StreamCoalescer(
-            lambda t, p: self._persist_event(task_id, t, p)
+            lambda t, p: self._persist_event(task_id, t, p, batch=batch)
         )
         try:
             self._persist_event(
@@ -299,8 +378,11 @@ class LiteratureTaskRegistry:
                     "version": "1.0",
                     "data": {"session_id": record.session_id},
                 },
+                batch=batch,
             )
-            self._persist_event(task_id, "capabilities", capabilities_payload())
+            self._persist_event(
+                task_id, "capabilities", capabilities_payload(), batch=batch
+            )
 
             async for ev_type, payload in stream_literature_turn(
                 record.session_id,
@@ -309,7 +391,7 @@ class LiteratureTaskRegistry:
                 persist_user_message=False,
             ):
                 if self._store.is_cancel_requested(task_id):
-                    coalescer.flush()
+                    _flush_both()
                     finished = time.time()
                     self._persist_event(task_id, "error", {"message": "任务已中止"})
                     self._persist_event(task_id, "done", {})
@@ -322,8 +404,10 @@ class LiteratureTaskRegistry:
 
                 for norm_type, norm_payload in normalize_chat_event(ev_type, payload):
                     coalescer.add(norm_type, norm_payload)
+                # 每轮事件处理后顺手做一次空闲检查，避免 buffer 长期不刷
+                batch.maybe_flush_idle()
 
-            coalescer.flush()
+            _flush_both()
             current = self._store.get_task(task_id)
             if current and current.status == "running":
                 self._persist_event(task_id, "done", {})
@@ -335,7 +419,7 @@ class LiteratureTaskRegistry:
                     finished_at=time.time(),
                 )
         except asyncio.CancelledError:
-            coalescer.flush()
+            _flush_both()
             current = self._store.get_task(task_id)
             if current and current.status not in TERMINAL_STATUSES:
                 finished = time.time()
@@ -348,7 +432,7 @@ class LiteratureTaskRegistry:
                 )
             raise
         except ValueError as e:
-            coalescer.flush()
+            _flush_both()
             finished = time.time()
             self._persist_event(task_id, "error", {"message": str(e)})
             self._persist_event(task_id, "done", {})
@@ -360,7 +444,7 @@ class LiteratureTaskRegistry:
             )
         except Exception as e:
             logger.exception("literature task %s failed", task_id)
-            coalescer.flush()
+            _flush_both()
             finished = time.time()
             message = f"Error: {e}"
             self._persist_event(task_id, "error", {"message": message})
