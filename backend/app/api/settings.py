@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_err_msg(prefix: str, e: BaseException) -> str:
+    """避免把含密钥/堆栈的原始异常文本直接回显给前端。"""
+    name = type(e).__name__
+    # 只保留异常类名 + 简短摘要（限制长度），完整堆栈走日志。
+    summary = str(e)
+    if len(summary) > 160:
+        summary = summary[:157] + "..."
+    return f"{prefix}: {name}"
 
 from app.agents.agent_settings import MAX_FETCH_URLS_CAP, SEARCH_MAX_RESULTS_CAP
 from app.agents.prompt_registry import (
@@ -800,9 +813,10 @@ async def test_web_fetch(body: WebFetchTestBody):
     except Exception as e:
         from app.agents.tools.web_providers import normalize_fetch_provider
 
+        logger.exception("test_web_fetch failed url=%s", body.url)
         provider = normalize_fetch_provider(body.provider)
         return err(
-            f"抓取失败: {e}",
+            _safe_err_msg("抓取失败", e),
             data={"ok": False, "provider": provider, "url": (body.url or "").strip()},
         )
 
@@ -845,9 +859,10 @@ async def test_web_search(body: CapabilityTestBody):
     except Exception as e:
         from app.agents.tools.web_providers import normalize_search_provider
 
+        logger.exception("test_web_search failed query=%s", body.query)
         provider = normalize_search_provider(body.provider)
         return err(
-            f"检索失败: {e}",
+            _safe_err_msg("检索失败", e),
             data={"ok": False, "provider": provider, "query": (body.query or "").strip()},
         )
 
@@ -875,9 +890,10 @@ async def test_capability(capability_id: str, body: CapabilityTestBody | None = 
         except Exception as e:
             from app.agents.tools.web_providers import normalize_fetch_provider
 
+            logger.exception("test_capability web_fetch failed url=%s", url)
             provider = normalize_fetch_provider(body.provider)
             return err(
-                f"抓取失败: {e}",
+                _safe_err_msg("抓取失败", e),
                 data={"ok": False, "provider": provider, "url": url},
             )
 
@@ -892,9 +908,10 @@ async def test_capability(capability_id: str, body: CapabilityTestBody | None = 
         except Exception as e:
             from app.agents.tools.web_providers import normalize_search_provider
 
+            logger.exception("test_capability web_search failed query=%s", query)
             provider = normalize_search_provider(body.provider)
             return err(
-                f"检索失败: {e}",
+                _safe_err_msg("检索失败", e),
                 data={"ok": False, "provider": provider, "query": query},
             )
 

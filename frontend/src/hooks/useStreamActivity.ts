@@ -44,12 +44,19 @@ export function useStreamActivity(
     );
   }, [stream, streaming]);
 
+  // 关键修复：之前 deps 包含 stream，每来一帧 SSE 都重新创建 1s 定时器；
+  // 改用 ref 持有最新 stream，定时器只随 streaming 启停。
+  const streamRef = useRef(stream);
+  useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
+
   useEffect(() => {
     if (!streaming) return;
     const id = window.setInterval(() => {
       setSnapshot(
         buildStreamActivitySnapshot(
-          stream,
+          streamRef.current,
           Date.now(),
           lastEventAtRef.current,
           startedAtRef.current,
@@ -57,7 +64,7 @@ export function useStreamActivity(
       );
     }, TICK_MS);
     return () => window.clearInterval(id);
-  }, [stream, streaming]);
+  }, [streaming]);
 
   return snapshot;
 }

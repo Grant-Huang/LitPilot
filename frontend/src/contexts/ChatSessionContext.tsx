@@ -189,20 +189,27 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    void loadSessions().then(async () => {
-      const stored =
-        typeof window !== "undefined"
-          ? localStorage.getItem(STORAGE_KEY)
-          : null;
-      if (stored) {
-        try {
-          await handleSelectSession(stored);
-        } catch {
-          // session may be deleted or data incompatible
-          clearStoredActiveSession();
+    // 关键修复：之前 .then 链没有 .catch，loadSessions 本身 reject（如初次启动网络异常）会变成
+    // unhandled rejection；handleSelectSession 内部仅捕获 404，5xx 同样会冒泡。
+    void loadSessions()
+      .then(async () => {
+        const stored =
+          typeof window !== "undefined"
+            ? localStorage.getItem(STORAGE_KEY)
+            : null;
+        if (stored) {
+          try {
+            await handleSelectSession(stored);
+          } catch (err) {
+            // 任何非 404 错误也一并清掉本地选中，避免反复尝试一个无法加载的 session
+            console.warn("[ChatSession] restore active session failed:", err);
+            clearStoredActiveSession();
+          }
         }
-      }
-    });
+      })
+      .catch((err) => {
+        console.warn("[ChatSession] initial loadSessions failed:", err);
+      });
   }, [loadSessions, handleSelectSession]);
 
   const value = useMemo(

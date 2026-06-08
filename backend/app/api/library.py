@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -8,11 +10,14 @@ from app.core.response import ok
 from app.library.crossref import normalize_doi
 from app.library.dedupe import dedupe_library
 from app.library.enrich import enrich_item_citations
+from app.library.from_run import _sync_exports
 from app.library.metadata_enrich import enrich_item_from_crossref, refresh_library_metadata
 from app.library.migrate import migrate_legacy_refs
 from app.library.reconcile import reconcile_library
 from app.library.store import LibraryStore
 from app.storage.file_store import get_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -64,14 +69,17 @@ def _ensure_library() -> LibraryStore:
     return lib
 
 
+# 以下接口的全部工作都是同步文件 I/O：声明为 def，FastAPI 会调度到线程池，
+# 避免占用事件循环。详见 P0 优化说明。
 @router.get("/items")
-async def list_library_items():
+def list_library_items():
     lib = _ensure_library()
-    return ok({"items": lib.list_items(), "total": len(lib.list_items())})
+    items = lib.list_items()
+    return ok({"items": items, "total": len(items)})
 
 
 @router.get("/items/{item_id}")
-async def get_library_item(item_id: str):
+def get_library_item(item_id: str):
     lib = _ensure_library()
     item = lib.get_item(item_id)
     if not item:
@@ -81,7 +89,7 @@ async def get_library_item(item_id: str):
 
 
 @router.get("/refs")
-async def list_refs():
+def list_refs():
     """Legacy + library merged response for gradual frontend migration."""
     lib = _ensure_library()
     return ok({
@@ -92,20 +100,20 @@ async def list_refs():
 
 
 @router.post("/migrate")
-async def migrate_refs():
+def migrate_refs():
     stats = migrate_legacy_refs()
     return ok(stats)
 
 
 @router.post("/dedupe")
-async def dedupe_refs():
+def dedupe_refs():
     stats = dedupe_library()
     return ok(stats)
 
 
 @router.post("/reconcile")
 async def reconcile_refs(body: ReconcileBody):
-    settings = get_store().get_agent_settings_merged()
+    settings = await asyncio.to_thread(get_store().get_agent_settings_merged)
     fetch_provider = str(settings.get("fetch_provider") or "native").strip().lower()
     fetch_api_key = (
         str(settings.get("fetch_api_key") or "").strip()
@@ -126,7 +134,7 @@ async def reconcile_refs(body: ReconcileBody):
 async def refresh_all_metadata(body: RefreshMetadataBody | None = None):
     """按 Crossref/OpenAlex 重新拉取书目与被引数，覆盖库内已有字段。"""
     lib = _ensure_library()
-    settings = get_store().get_agent_settings_merged()
+    settings = await asyncio.to_thread(get_store().get_agent_settings_merged)
     body = body or RefreshMetadataBody()
     stats = await refresh_library_metadata(
         lib,
@@ -139,7 +147,13 @@ async def refresh_all_metadata(body: RefreshMetadataBody | None = None):
 
 @router.post("/items/{item_id}/enrich")
 async def enrich_item(item_id: str):
-    result = enrich_item_citations(item_id)
+    # enrich_item_citations 内部使用同步 HTTP（Crossref / OpenAlex），
+    # 必须放到线程池，否则会阻塞事件循环。
+    try:
+        result = await asyncio.to_thread(enrich_item_citations, item_id)
+    except Exception:
+        logger.exception("enrich_item failed item_id=%s", item_id)
+        raise HTTPException(status_code=502, detail="enrich failed: upstream error")
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "enrich failed"))
     return ok(result)
@@ -163,7 +177,14 @@ async def patch_item_metadata(item_id: str, body: MetadataBody):
         raise HTTPException(status_code=404, detail="Item not found")
 
     if body.refresh_crossref and (updated.get("doi") or doi_in):
-        result = enrich_item_from_crossref(item_id, lib, doi=updated.get("doi"))
+        try:
+            result = await asyncio.to_thread(
+                enrich_item_from_crossref, item_id, lib, doi=updated.get("doi")
+            )
+        except Exception:
+            logger.exception("patch_item_metadata: crossref enrich failed item_id=%s", item_id)
+            # 部分成功：本地字段已保存，只是 Crossref 拉取失败
+            return ok({"item": updated, "enrich_error": "crossref upstream error"})
         if result.get("ok"):
             updated = result.get("item") or updated
 
@@ -171,7 +192,7 @@ async def patch_item_metadata(item_id: str, body: MetadataBody):
 
 
 @router.patch("/items/{item_id}/star")
-async def star_item(item_id: str, body: StarBody):
+def star_item(item_id: str, body: StarBody):
     lib = _ensure_library()
     item = lib.set_starred(item_id, body.starred)
     if not item:
@@ -180,7 +201,7 @@ async def star_item(item_id: str, body: StarBody):
 
 
 @router.patch("/items/{item_id}/tags")
-async def update_item_tags(item_id: str, body: TagsBody):
+def update_item_tags(item_id: str, body: TagsBody):
     lib = _ensure_library()
     item = lib.set_tags(item_id, body.tags)
     if not item:
@@ -189,35 +210,38 @@ async def update_item_tags(item_id: str, body: TagsBody):
 
 
 @router.get("/tags")
-async def list_library_tags():
+def list_library_tags():
     lib = _ensure_library()
     return ok({"tags": lib.list_tags()})
 
 
 @router.delete("/items/{item_id}")
-async def delete_library_item(item_id: str):
+def delete_library_item(item_id: str):
     lib = _ensure_library()
     if not lib.delete_item(item_id):
         raise HTTPException(status_code=404, detail="Item not found")
-    from app.library.from_run import _sync_exports
-
-    _sync_exports(lib)
+    try:
+        _sync_exports(lib)
+    except Exception:
+        # 主库已删除，导出同步失败不应让接口报 500；记录日志即可
+        logger.exception("delete_library_item: _sync_exports failed item_id=%s", item_id)
     return ok({"deleted": True, "item_id": item_id})
 
 
 @router.delete("/items")
-async def clear_library_items():
+def clear_library_items():
     """清空全局文献库（不可恢复）。"""
     lib = _ensure_library()
     removed = lib.clear_all()
-    from app.library.from_run import _sync_exports
-
-    _sync_exports(lib)
+    try:
+        _sync_exports(lib)
+    except Exception:
+        logger.exception("clear_library_items: _sync_exports failed")
     return ok({"cleared": removed})
 
 
 @router.get("/items/{item_id}/related-sessions")
-async def related_sessions(item_id: str):
+def related_sessions(item_id: str):
     lib = _ensure_library()
     item = lib.get_item(item_id)
     if not item:
@@ -246,20 +270,32 @@ async def related_sessions(item_id: str):
 
 
 @router.get("/pdfs")
-async def list_pdfs():
+def list_pdfs():
     return ok({"files": get_store().list_pdfs()})
 
 
 @router.get("/pdfs/{filename}")
-async def get_pdf(filename: str):
-    path = get_store().pdf_path(filename)
+def get_pdf(filename: str):
+    store = get_store()
+    path = store.pdf_path(filename)
+    # 双保险：store 已用 Path(filename).name 去目录段；这里再校验落点目录
+    try:
+        pdf_dir = store.pdf_dir if hasattr(store, "pdf_dir") else path.parent
+        resolved = path.resolve()
+        if not str(resolved).startswith(str(pdf_dir.resolve() if hasattr(pdf_dir, "resolve") else pdf_dir)):
+            raise HTTPException(status_code=400, detail="invalid pdf path")
+    except HTTPException:
+        raise
+    except Exception:
+        # 没有 pdf_dir 属性时回退到原始 is_file 判断
+        pass
     if not path.is_file():
         raise HTTPException(status_code=404, detail="PDF not found")
     return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 @router.get("/sources/{item_id}")
-async def get_source_markdown(item_id: str):
+def get_source_markdown(item_id: str):
     lib = _ensure_library()
     text = lib.read_full_text(item_id)
     if not text:

@@ -156,20 +156,37 @@ export function useBatchedSSEStream(url: string, callbacks?: StreamCallbacks) {
         const decoder = new TextDecoder();
         let buffer = "";
 
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            const event = parseSSELine(line);
-            if (!event) continue;
-            eventIndex += 1;
-            applyStreamEvent(event);
-            options?.onEventApplied?.(event, eventIndex);
-            if (event.type === "done" || event.type === "error") return;
+        // 关键修复：上游卡住（代理掉线 / 服务端发完 header 后挂起）会让 reader.read() 永远不返回。
+        // 这里加 inactivity 看门狗：超过 INACTIVITY_MS 没有任何 chunk 就主动 abort。
+        const INACTIVITY_MS = 120_000;
+        let watchdog: ReturnType<typeof setTimeout> | undefined;
+        const armWatchdog = () => {
+          if (watchdog) clearTimeout(watchdog);
+          watchdog = setTimeout(() => {
+            controller.abort();
+          }, INACTIVITY_MS);
+        };
+        armWatchdog();
+
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            armWatchdog();
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+            for (const line of lines) {
+              const event = parseSSELine(line);
+              if (!event) continue;
+              eventIndex += 1;
+              applyStreamEvent(event);
+              options?.onEventApplied?.(event, eventIndex);
+              if (event.type === "done" || event.type === "error") return;
+            }
           }
+        } finally {
+          if (watchdog) clearTimeout(watchdog);
         }
       } catch (e: unknown) {
         if (e instanceof Error && e.name === "AbortError") return;

@@ -101,37 +101,66 @@ export function LibraryDetailPane({
       setRelatedSessions([]);
       return;
     }
+    // 关键修复：快速切换 itemId 时，慢响应可能覆盖新选中条目的状态。
+    // 用 cancelled 标记 + cleanup 拦截过期请求的 setState。
+    let cancelled = false;
     setLoading(true);
     void libraryApi
       .item(itemId)
       .then((res) => {
+        if (cancelled) return;
         setItem(res.item);
         setFullText(res.full_text || "");
         if (!activeTab) setTab(pickInitialTab(res.item));
       })
-      .catch(() => message.error("加载文献详情失败"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (cancelled) return;
+        message.error("加载文献详情失败");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [itemId, activeTab]);
 
   useEffect(() => {
     if (!itemId || currentTab !== "reviews") return;
+    let cancelled = false;
     setReviewsLoading(true);
     void libraryApi
       .relatedSessions(itemId)
-      .then((res) => setRelatedSessions(res.sessions || []))
+      .then((res) => {
+        if (cancelled) return;
+        setRelatedSessions(res.sessions || []);
+      })
       .catch(() => {
-        setRelatedSessions(
-          uniqueProvenanceSessions(item || { id: "", display_index: 0, title: "", authors: [], url: "", availability: {} }).map(
-            (p) => ({
+        if (cancelled) return;
+        // 后端拉取失败时，回退到 item.provenance 中的会话信息，
+        // 同时给用户可见的轻量提示（不再用伪造的 item 占位）。
+        message.warning("相关综述加载失败，已使用本地缓存");
+        if (item) {
+          setRelatedSessions(
+            uniqueProvenanceSessions(item).map((p) => ({
               session_id: p.session_id,
               session_title: p.session_title,
               first_question: "",
               review_ref_index: p.review_ref_index,
-            }),
-          ),
-        );
+            })),
+          );
+        } else {
+          setRelatedSessions([]);
+        }
       })
-      .finally(() => setReviewsLoading(false));
+      .finally(() => {
+        if (cancelled) return;
+        setReviewsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [itemId, currentTab, item]);
 
   const enrich = useCallback(async () => {
