@@ -216,6 +216,8 @@ class LiteratureTaskRegistry:
         self._lock = asyncio.Lock()
         # 本地 runner 落库新事件时唤醒同进程的 SSE 消费端，避免固定轮询延迟
         self._event_signals: dict[str, asyncio.Event] = {}
+        # 初始事件写入完成信号：_run 完成首次 batch.flush 后 set，create_and_start 等待此信号
+        self._runner_ready_events: dict[str, asyncio.Event] = {}
 
     def _signal_for(self, task_id: str) -> asyncio.Event:
         sig = self._event_signals.get(task_id)
@@ -243,22 +245,6 @@ class LiteratureTaskRegistry:
             fetch_urls=fetch_urls,
         )
         get_store().append_message(session_id, "user", message)
-        # 在启动 _run 之前，同步写入初始事件（session + capabilities + stage），
-        # 避免 Vercel serverless 在 _run 执行 batch.flush 前终止进程导致
-        # 前端 SSE 永远等不到 stage 事件、一直显示"正在连接…"
-        self._store.append_event(
-            record.id,
-            sse_event("extension", {"name": "session", "version": "1.0", "data": {"session_id": session_id}}),
-        )
-        self._store.append_event(record.id, sse_event("capabilities", capabilities_payload()))
-        self._store.append_event(
-            record.id, sse_event("stage", {"name": "理解研究问题", "state": "active"})
-        )
-        self._store.update_task(
-            record.id,
-            progress=2,
-            stage="understanding",
-        )
         await self._maybe_start_runner(record.id)
         refreshed = self._store.get_task(record.id)
         return refreshed or record
@@ -270,7 +256,15 @@ class LiteratureTaskRegistry:
         async with self._lock:
             if task_id in self._local_runners and not self._local_runners[task_id].done():
                 return
+            ready = asyncio.Event()
+            self._runner_ready_events[task_id] = ready
             self._local_runners[task_id] = asyncio.create_task(self._run(task_id))
+        # 等待 _run 完成初始事件写入（session + capabilities + stage），
+        # 确保前端 SSE 连接建立时这些事件已落库，不显示"正在连接…"
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
 
     async def cancel(self, task_id: str) -> TaskRecord | None:
         record = self._store.request_cancel(task_id)
@@ -396,6 +390,30 @@ class LiteratureTaskRegistry:
             lambda t, p: self._persist_event(task_id, t, p, batch=batch)
         )
         try:
+            # 写入初始事件：session / capabilities / stage，完成后立即刷盘并通知 create_and_start
+            self._persist_event(
+                task_id,
+                "extension",
+                {
+                    "name": "session",
+                    "version": "1.0",
+                    "data": {"session_id": record.session_id},
+                },
+                batch=batch,
+            )
+            self._persist_event(
+                task_id, "capabilities", capabilities_payload(), batch=batch
+            )
+            self._persist_event(
+                task_id, "stage", {"name": "理解研究问题", "state": "active"}, batch=batch
+            )
+            coalescer.flush()
+            batch.flush()
+            # 通知 _maybe_start_runner：初始事件已落库，前端可以连接
+            ready = self._runner_ready_events.pop(task_id, None)
+            if ready is not None:
+                ready.set()
+
             async for ev_type, payload in stream_literature_turn(
                 record.session_id,
                 record.message,
@@ -471,6 +489,9 @@ class LiteratureTaskRegistry:
         finally:
             self._local_runners.pop(task_id, None)
             self._event_signals.pop(task_id, None)
+            ready = self._runner_ready_events.pop(task_id, None)
+            if ready is not None:
+                ready.set()
 
     async def iter_stream(self, task_id: str, since: int = 0):
         cursor = max(0, since)
