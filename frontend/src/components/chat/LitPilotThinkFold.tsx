@@ -36,6 +36,16 @@ export function LitPilotThinkFold({
 
   const segments = useMemo(() => parseThinkSegments(content), [content]);
 
+  const headerLabel = useMemo(() => {
+    if (!streaming) return "推理过程";
+    const first = content
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+    if (!first) return "正在调用模型…";
+    return first.length > 48 ? first.slice(0, 48) + "…" : first;
+  }, [content, streaming]);
+
   const hasContent = content.trim().length > 0;
 
   useEffect(() => {
@@ -44,8 +54,6 @@ export function LitPilotThinkFold({
   }, [content, streaming, open]);
 
   if (!hasContent && !streaming) return null;
-
-  const label = streaming ? "思考中" : "推理过程";
 
   return (
     <div
@@ -73,9 +81,9 @@ export function LitPilotThinkFold({
         >
           <polyline points="3,5 7,9 11,5" />
         </svg>
-        <span className="meso-think__label">{label}</span>
+        <span className="meso-think__label">{headerLabel}</span>
         {streaming && open ? (
-          <span className="meso-think__dot litpilot-think__dot" aria-label="思考中" />
+          <span className="meso-think__dot litpilot-think__dot" aria-label="推理中" />
         ) : null}
       </button>
       {open ? (
@@ -97,9 +105,7 @@ export function LitPilotThinkFold({
                   </span>
                 ),
               )
-            ) : (
-              <p className="litpilot-think__system">正在调用模型…</p>
-            )}
+            ) : null}
             {streaming ? (
               <span className="meso-think__cursor" aria-hidden="true">
                 ▋
