@@ -39,6 +39,7 @@ from app.agents.literature_intent import (
 )
 from app.agents.literature_outline import build_subtopic_plan, mount_papers_by_subtopic_tags
 from app.agents.literature_planner import load_planner_context, stream_understanding_and_route
+from app.agents.literature_progress import literature_progress_payload
 from app.agents.literature_router import (
     LiteratureRouterResult,
     resolve_auto_session_title,
@@ -88,6 +89,12 @@ async def stream_literature_turn(
     if persist_user_message:
         store.append_message(session_id, "user", user_message)
 
+    # I/O 阶段进度提示，避免前端无反馈
+    yield (
+        "literature_progress",
+        literature_progress_payload("understand", "正在加载会话数据…"),
+    )
+
     # 将独立 Turso/DB 读操作并行化
     import asyncio
 
@@ -122,7 +129,11 @@ async def stream_literature_turn(
     route_message = user_message
     think_acc = ThinkAccumulator()
     yield turn_start(turn_index=user_turns, intent="new_topic")
-
+    # 前置 I/O 完成后立即告知前端当前阶段，避免长时间显示"正在连接…"
+    yield (
+        "literature_progress",
+        literature_progress_payload("understand", "正在分析意图…"),
+    )
     intent = await route_literature_intent(
         route_message,
         turn_ctx=turn_ctx,
@@ -200,6 +211,7 @@ async def stream_literature_turn(
     )
 
     if intent.intent == "short_answer":
+        yield ("stage", {"name": "理解研究问题", "state": "done"})
         msg = (
             "如需调整文献综述，请明确说明操作，例如：\n"
             "• 「增加子主题：XXX」—— 新增检索方向与章节\n"
@@ -271,6 +283,10 @@ async def stream_literature_turn(
             stored_outline=outline_obj,
             intent=intent.intent,
         )
+    else:
+        yield ("stage", {"name": "理解研究问题", "state": "active"})
+        yield ("stage", {"name": "理解研究问题", "state": "done"})
+        upsert_stage(execution_trace, "理解研究问题", "done")
 
     g = build_literature_graph(
         _section_specs_for_graph(outline_obj) if outline_obj else None
