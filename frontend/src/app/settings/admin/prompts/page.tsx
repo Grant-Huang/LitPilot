@@ -14,8 +14,17 @@ import {
 
 import { loadAdminBootstrap, invalidateAdminBootstrap } from "@/lib/settingsBootstrap";
 import {
+  applyGroupInstanceToParams,
+  capabilityRefIds,
+  effectivePromptTemplate,
+  groupItemsByGroup,
   instanceOptions,
+  isPromptTemplateCustomized,
+  loadGroupInstances,
+  primaryRefForGroup,
+  PROMPT_GROUP_INSTANCE_TIPS,
   promptMaxTokensParam,
+  promptTemplateForSave,
 } from "@/lib/promptGroupBindings";
 import { SettingsListSkeleton, errorMessage } from "../../_shared";
 import { toastError } from "@/lib/toastFeedback";
@@ -50,10 +59,6 @@ const STAGE_ORDER: readonly string[] = [
   "generate",
 ];
 
-function promptInstanceKey(key: string): string {
-  return `${key}_instance_id`;
-}
-
 function stageMeta(
   meta: PromptTemplateMeta[],
 ): { id: string; label: string; items: PromptTemplateMeta[] }[] {
@@ -76,6 +81,14 @@ function paramsEqual(a: Record<string, unknown>, b: Record<string, unknown>): bo
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function groupInstancesEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if ((a[key] || "") !== (b[key] || "")) return false;
+  }
+  return true;
+}
+
 export default function AdminPromptsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -88,12 +101,8 @@ export default function AdminPromptsPage() {
   const [savedTemplates, setSavedTemplates] = useState<Record<string, string>>({});
   const [promptParams, setPromptParams] = useState<Record<string, unknown>>({});
   const [savedPromptParams, setSavedPromptParams] = useState<Record<string, unknown>>({});
-  const [promptInstances, setPromptInstances] = useState<Record<string, string>>({});
-  const [savedPromptInstances, setSavedPromptInstances] = useState<Record<string, string>>({});
-  const [orchRefId, setOrchRefId] = useState("");
-  const [savedOrchRefId, setSavedOrchRefId] = useState("");
-  const [reviewRefId, setReviewRefId] = useState("");
-  const [savedReviewRefId, setSavedReviewRefId] = useState("");
+  const [groupInstances, setGroupInstances] = useState<Record<string, string>>({});
+  const [savedGroupInstances, setSavedGroupInstances] = useState<Record<string, string>>({});
   const [savingPrompt, setSavingPrompt] = useState<string | null>(null);
   const [promptMsgs, setPromptMsgs] = useState<Record<string, string>>({});
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -124,24 +133,15 @@ export default function AdminPromptsPage() {
     return false;
   }, [templates, savedTemplates]);
 
-  const promptInstancesDirty = useMemo(() => {
-    const keys = new Set([
-      ...Object.keys(promptInstances),
-      ...Object.keys(savedPromptInstances),
-    ]);
-    for (const key of keys) {
-      if ((promptInstances[key] || "") !== (savedPromptInstances[key] || ""))
-        return true;
-    }
-    return false;
-  }, [promptInstances, savedPromptInstances]);
+  const groupInstancesDirty = useMemo(
+    () => !groupInstancesEqual(groupInstances, savedGroupInstances),
+    [groupInstances, savedGroupInstances],
+  );
 
   const dirty =
     templatesDirty ||
-    promptInstancesDirty ||
-    !paramsEqual(promptParams, savedPromptParams) ||
-    orchRefId !== savedOrchRefId ||
-    reviewRefId !== savedReviewRefId;
+    groupInstancesDirty ||
+    !paramsEqual(promptParams, savedPromptParams);
 
   useUnsavedGuard(dirty);
 
@@ -152,71 +152,66 @@ export default function AdminPromptsPage() {
         setCaps(items);
         setInstances(boot.instances);
         setMeta(defRes.meta || []);
-        setDefaults(defRes.defaults || {});
+        const builtIns = defRes.defaults || {};
+        setDefaults(builtIns);
 
-        const orch = items.find((c) => c.capability_id === "orchestrator");
-        const review = items.find((c) => c.capability_id === "review_main");
         const prompts = items.find((c) => c.capability_id === "prompts");
-
-        const orchId = String(orch?.primary_ref?.id || "");
-        setOrchRefId(orchId);
-        setSavedOrchRefId(orchId);
-        const reviewId = String(review?.primary_ref?.id || "");
-        setReviewRefId(reviewId);
-        setSavedReviewRefId(reviewId);
-
         const params = (prompts?.params || {}) as Record<string, unknown>;
         setPromptParams({ ...params });
         setSavedPromptParams({ ...params });
 
+        const capRefs = capabilityRefIds(items);
+        const loadedGroups = loadGroupInstances(defRes.meta || [], params, capRefs);
+        setGroupInstances(loadedGroups);
+        setSavedGroupInstances(loadedGroups);
+
         const loaded: Record<string, string> = {};
-        const loadedInstances: Record<string, string> = {};
         for (const item of defRes.meta || []) {
-          loaded[item.key] = String(params[item.key] || "");
-          const instKey = promptInstanceKey(item.key);
-          loadedInstances[item.key] = String(params[instKey] || "");
+          loaded[item.key] = effectivePromptTemplate(
+            String(params[item.key] || ""),
+            builtIns[item.key],
+          );
         }
         setTemplates(loaded);
         setSavedTemplates({ ...loaded });
-        setPromptInstances(loadedInstances);
-        setSavedPromptInstances({ ...loadedInstances });
       })
       .catch((e: unknown) => setMsg(errorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
+
+  const buildPromptParamsForSave = (): Record<string, unknown> => {
+    let allParams: Record<string, unknown> = {
+      ...(promptsCap?.params || {}),
+      ...promptParams,
+    };
+    for (const item of meta) {
+      allParams[item.key] = promptTemplateForSave(
+        templates[item.key] || "",
+        defaults[item.key],
+      );
+    }
+    for (const [group, instId] of Object.entries(groupInstances)) {
+      allParams = applyGroupInstanceToParams(group, instId, allParams);
+    }
+    return allParams;
+  };
 
   const onSave = async () => {
     if (!promptsCap) return;
     setSaving(true);
     setMsg("");
     try {
-      const orchPrimary =
-        orchRefId && orchestratorCap
-          ? ({ kind: "instance", id: orchRefId } as Record<string, unknown>)
-          : null;
-      const reviewPrimary =
-        reviewRefId && reviewCap
-          ? ({ kind: "instance", id: reviewRefId } as Record<string, unknown>)
-          : null;
-
-      const allParams: Record<string, unknown> = {
-        ...(promptsCap.params || {}),
-        ...promptParams,
-        ...templates,
-      };
-      for (const [key, instId] of Object.entries(promptInstances)) {
-        if (instId) {
-          allParams[promptInstanceKey(key)] = instId;
-        }
-      }
-
+      const allParams = buildPromptParamsForSave();
       const saves: Promise<SystemCapability>[] = [
         settingsApiV2.updateCapability("prompts", { params: allParams }),
       ];
       if (orchestratorCap) {
         saves.push(
           settingsApiV2.updateCapability("orchestrator", {
-            primary_ref: orchPrimary,
+            primary_ref: primaryRefForGroup(
+              "orchestrator",
+              groupInstances.orchestrator || "",
+            ),
             params: orchestratorCap.params || {},
           }),
         );
@@ -224,7 +219,10 @@ export default function AdminPromptsPage() {
       if (reviewCap) {
         saves.push(
           settingsApiV2.updateCapability("review_main", {
-            primary_ref: reviewPrimary,
+            primary_ref: primaryRefForGroup(
+              "generation",
+              groupInstances.generation || "",
+            ),
           }),
         );
       }
@@ -237,9 +235,7 @@ export default function AdminPromptsPage() {
       });
       setSavedTemplates({ ...templates });
       setSavedPromptParams({ ...promptParams });
-      setSavedOrchRefId(orchRefId);
-      setSavedReviewRefId(reviewRefId);
-      setSavedPromptInstances({ ...promptInstances });
+      setSavedGroupInstances({ ...groupInstances });
       setMsg("已保存");
     } catch (e: unknown) {
       const text = errorMessage(e);
@@ -252,19 +248,44 @@ export default function AdminPromptsPage() {
 
   const onSavePrompt = async (promptKey: string) => {
     if (!promptsCap) return;
+    const item = meta.find((m) => m.key === promptKey);
+    if (!item) return;
     setSavingPrompt(promptKey);
     try {
-      const params: Record<string, unknown> = {};
-      params[promptKey] = templates[promptKey] || "";
+      const params: Record<string, unknown> = {
+        [promptKey]: promptTemplateForSave(
+          templates[promptKey] || "",
+          defaults[promptKey],
+        ),
+      };
       const tokenParam = promptMaxTokensParam(promptKey);
       if (promptParams[tokenParam] !== undefined) {
         params[tokenParam] = promptParams[tokenParam];
       }
-      if (promptInstances[promptKey]) {
-        params[promptInstanceKey(promptKey)] = promptInstances[promptKey];
+      const instId = groupInstances[item.group] || "";
+      Object.assign(params, applyGroupInstanceToParams(item.group, instId, {}));
+
+      const saves: Promise<SystemCapability>[] = [
+        settingsApiV2.updateCapability("prompts", { params }),
+      ];
+      const capRef = primaryRefForGroup(item.group, instId);
+      if (item.group === "orchestrator" && orchestratorCap) {
+        saves.push(
+          settingsApiV2.updateCapability("orchestrator", {
+            primary_ref: capRef,
+            params: orchestratorCap.params || {},
+          }),
+        );
+      }
+      if (item.group === "generation" && reviewCap) {
+        saves.push(
+          settingsApiV2.updateCapability("review_main", {
+            primary_ref: capRef,
+          }),
+        );
       }
 
-      await settingsApiV2.updateCapability("prompts", { params });
+      await Promise.all(saves);
       invalidateAdminBootstrap();
 
       setSavedTemplates((prev) => ({
@@ -274,11 +295,12 @@ export default function AdminPromptsPage() {
       setSavedPromptParams((prev) => {
         const next = { ...prev };
         next[tokenParam] = promptParams[tokenParam];
+        next[promptKey] = params[promptKey];
         return next;
       });
-      setSavedPromptInstances((prev) => ({
+      setSavedGroupInstances((prev) => ({
         ...prev,
-        [promptKey]: promptInstances[promptKey] || "",
+        [item.group]: instId,
       }));
       setPromptMsgs((prev) => ({ ...prev, [promptKey]: "已保存" }));
       setTimeout(() =>
@@ -302,20 +324,25 @@ export default function AdminPromptsPage() {
 
   const resetTemplate = (key: string) => {
     setTemplate(key, defaults[key] || "");
+    const tokenParam = promptMaxTokensParam(key);
+    setPromptParams((p) => {
+      const next = { ...p };
+      delete next[tokenParam];
+      return next;
+    });
   };
 
-  const setPromptInstance = (key: string, instanceId: string) => {
-    setPromptInstances((prev) => ({ ...prev, [key]: instanceId }));
+  const setGroupInstance = (group: string, instanceId: string) => {
+    setGroupInstances((prev) => ({ ...prev, [group]: instanceId }));
   };
 
   const toggleGroup = (id: string) => {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const perPromptDirty = (key: string): boolean => {
+  const perPromptDirty = (key: string, group: string): boolean => {
     const tDirty = (templates[key] || "") !== (savedTemplates[key] || "");
-    const iDirty =
-      (promptInstances[key] || "") !== (savedPromptInstances[key] || "");
+    const iDirty = (groupInstances[group] || "") !== (savedGroupInstances[group] || "");
     const tokenParam = promptMaxTokensParam(key);
     const pDirty =
       (promptParams[tokenParam] ?? undefined) !==
@@ -367,124 +394,129 @@ export default function AdminPromptsPage() {
 
           {openGroups[stage.id] ? (
             <div className="settings-prompts__group-body">
-              {stage.items.map((item) => {
-                const tokenParam = promptMaxTokensParam(item.key);
-                const tokenDefault = item.default_max_tokens ?? 280;
-                const tokenLimit = item.max_tokens_limit ?? 8000;
-                const storedToken = promptParams[tokenParam];
-                const tokenDisplay =
-                  storedToken === undefined ||
-                  storedToken === null ||
-                  storedToken === ""
-                    ? tokenDefault
-                    : Number(storedToken);
-                const promptDirty = perPromptDirty(item.key);
-                const isSaving = savingPrompt === item.key;
-                const promptMsg = promptMsgs[item.key];
-
-                return (
-                  <div key={item.key} className="settings-prompts__field">
-                    <div className="settings-prompts__field-head">
-                      <label htmlFor={`prompt-${item.key}`}>
-                        {item.label}（{item.key}）
-                        {item.hint ? <FieldTip title={item.hint} /> : null}
-                      </label>
-                      <span className="settings-prompts__field-head-actions">
-                        {promptMsg ? (
-                          <span
-                            className={
-                              promptMsg === "已保存"
-                                ? "settings-cred-row__feedback--ok"
-                                : "settings-cred-row__feedback--err"
-                            }
-                          >
-                            {promptMsg}
-                          </span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="btn-primary btn-sm"
-                          disabled={isSaving || !promptDirty}
-                          onClick={() => void onSavePrompt(item.key)}
-                        >
-                          {isSaving ? <Spin size="small" /> : null}
-                          保存
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-ghost btn-sm"
-                          onClick={() => {
-                            resetTemplate(item.key);
-                            setPromptParams((p) => {
-                              const next = { ...p };
-                              delete next[tokenParam];
-                              return next;
-                            });
-                            setPromptInstance(item.key, "");
-                          }}
-                        >
-                          恢复默认
-                        </button>
-                      </span>
-                    </div>
-
-                    <div className="settings-prompts__instance-row">
-                      <select
-                        id={`inst-${item.key}`}
-                        className="input settings-select settings-prompts__instance-select"
-                        value={promptInstances[item.key] || ""}
-                        onChange={(e) =>
-                          setPromptInstance(item.key, e.target.value)
-                        }
-                      >
-                        <option value="">选择模型实例…</option>
-                        {instOpts.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-
-                      <input
-                        id={`tok-${item.key}`}
-                        className="input settings-prompts__token-input"
-                        type="number"
-                        min={80}
-                        max={tokenLimit}
-                        placeholder={String(tokenDefault)}
-                        title={`单次调用的最大输出 token 数。默认 ${tokenDefault}，上限 ${tokenLimit}。`}
-                        value={tokenDisplay}
-                        onChange={(e) =>
-                          setPromptParams((p) => ({
-                            ...p,
-                            [tokenParam]: Number(e.target.value),
-                          }))
-                        }
-                      />
-                      <span className="settings-prompts__token-label">
-                        最大输出Token
-                      </span>
-                    </div>
-
-                    <textarea
-                      id={`prompt-${item.key}`}
-                      className="input settings-textarea font-mono settings-prompts__editor"
-                      value={templates[item.key] || ""}
-                      onChange={(e) => setTemplate(item.key, e.target.value)}
-                      spellCheck={false}
-                      rows={
-                        item.key === "review_system_prompt_template" ? 14 : 8
-                      }
-                    />
-                    <p className="settings-prompts__hint">
-                      最多 {item.max_len.toLocaleString()} 字符
-                      {(templates[item.key] || "").length > 0
-                        ? ` · 当前 ${(templates[item.key] || "").length}`
-                        : " · 使用内置默认"}
-                    </p>
+              {groupItemsByGroup(stage.items).map(({ group, groupLabel, items }) => (
+                <div key={group} className="settings-prompts__subgroup">
+                  <div className="settings-prompts__instance-row settings-prompts__subgroup-head">
+                    <label htmlFor={`inst-group-${group}`}>
+                      模型实例 · {groupLabel}
+                      {PROMPT_GROUP_INSTANCE_TIPS[group] ? (
+                        <FieldTip title={PROMPT_GROUP_INSTANCE_TIPS[group]!} />
+                      ) : null}
+                    </label>
+                    <select
+                      id={`inst-group-${group}`}
+                      className="input settings-select settings-prompts__instance-select"
+                      value={groupInstances[group] || ""}
+                      onChange={(e) => setGroupInstance(group, e.target.value)}
+                    >
+                      <option value="">选择模型实例…</option>
+                      {instOpts.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                );
-              })}
+
+                  {items.map((item) => {
+                    const tokenParam = promptMaxTokensParam(item.key);
+                    const tokenDefault = item.default_max_tokens ?? 280;
+                    const tokenLimit = item.max_tokens_limit ?? 8000;
+                    const storedToken = promptParams[tokenParam];
+                    const tokenDisplay =
+                      storedToken === undefined ||
+                      storedToken === null ||
+                      storedToken === ""
+                        ? tokenDefault
+                        : Number(storedToken);
+                    const promptDirty = perPromptDirty(item.key, group);
+                    const isSaving = savingPrompt === item.key;
+                    const promptMsg = promptMsgs[item.key];
+                    const customized = isPromptTemplateCustomized(
+                      templates[item.key] || "",
+                      defaults[item.key],
+                    );
+
+                    return (
+                      <div key={item.key} className="settings-prompts__field">
+                        <div className="settings-prompts__field-head">
+                          <label htmlFor={`prompt-${item.key}`}>
+                            {item.label}（{item.key}）
+                            {item.hint ? <FieldTip title={item.hint} /> : null}
+                          </label>
+                          <span className="settings-prompts__field-head-actions">
+                            {promptMsg ? (
+                              <span
+                                className={
+                                  promptMsg === "已保存"
+                                    ? "settings-cred-row__feedback--ok"
+                                    : "settings-cred-row__feedback--err"
+                                }
+                              >
+                                {promptMsg}
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="btn-primary btn-sm"
+                              disabled={isSaving || !promptDirty}
+                              onClick={() => void onSavePrompt(item.key)}
+                            >
+                              {isSaving ? <Spin size="small" /> : null}
+                              保存
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-ghost btn-sm"
+                              onClick={() => resetTemplate(item.key)}
+                            >
+                              恢复默认
+                            </button>
+                          </span>
+                        </div>
+
+                        <div className="settings-prompts__instance-row">
+                          <input
+                            id={`tok-${item.key}`}
+                            className="input settings-prompts__token-input"
+                            type="number"
+                            min={80}
+                            max={tokenLimit}
+                            placeholder={String(tokenDefault)}
+                            title={`单次调用的最大输出 token 数。默认 ${tokenDefault}，上限 ${tokenLimit}。`}
+                            value={tokenDisplay}
+                            onChange={(e) =>
+                              setPromptParams((p) => ({
+                                ...p,
+                                [tokenParam]: Number(e.target.value),
+                              }))
+                            }
+                          />
+                          <span className="settings-prompts__token-label">
+                            最大输出Token
+                          </span>
+                        </div>
+
+                        <textarea
+                          id={`prompt-${item.key}`}
+                          className="input settings-textarea font-mono settings-prompts__editor"
+                          value={templates[item.key] || ""}
+                          onChange={(e) => setTemplate(item.key, e.target.value)}
+                          spellCheck={false}
+                          rows={
+                            item.key === "review_system_prompt_template" ? 14 : 8
+                          }
+                        />
+                        <p className="settings-prompts__hint">
+                          最多 {item.max_len.toLocaleString()} 字符
+                          {` · 当前 ${(templates[item.key] || "").length}`}
+                          {customized ? " · 已自定义" : " · 内置默认"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           ) : null}
         </section>

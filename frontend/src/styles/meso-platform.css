@@ -1975,6 +1975,23 @@
   cursor: pointer;
 }
 
+.settings-prompts__subgroup {
+  margin: 8px 0 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border-light);
+}
+
+.settings-prompts__subgroup-head {
+  margin-bottom: 8px;
+}
+
+.settings-prompts__subgroup-head label {
+  flex: 0 0 auto;
+  min-width: 120px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .settings-prompts__field {
   margin: 10px 0 16px;
 }
