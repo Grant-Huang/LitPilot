@@ -80,6 +80,12 @@ session, msgs, corpus = await asyncio.gather(session_task, msgs_task, corpus_tas
 - 消费端优先 `asyncio.Event` 事件驱动唤醒，跨进程用短超时（≤50ms）轮询回退；`list_events` 按事件序号增量读，禁止每轮重读整个文件。
 - 长时间无事件时发送 SSE 注释心跳 `: keepalive\n\n`（前端忽略非 `data:` 行），防代理断连。
 
+### 初始事件写入
+
+- `_run` 的初始事件（`session` / `capabilities` / `stage`）**禁止经过 `_EventBatchBuffer` 缓冲**，因为 Serverless 进程可能在 `batch.flush()` 前被终止，导致 `event_count=0` 前端永久卡在"正在连接…"。
+- 必须用 `append_events_batch` + `update_task` 直接同步落库。
+- **变更后必须验证**：新增 Store 方法调用的底层 HTTP 连接方法是否存在（参见 `turso-http-completeness` 规则）。
+
 ## Prompt / 参数
 
 - system prompt 保持短小；非必要不开 function calling / JSON mode（增加首 token 解析延迟）。
