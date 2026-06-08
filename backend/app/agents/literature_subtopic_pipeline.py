@@ -323,38 +323,47 @@ async def _run_subtopic(
         if _forward_event(ev):
             yield ev
 
-    delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
-    ok = int(fetch_out.get("fetch_ok") or 0)
-    failed = int(fetch_out.get("fetch_failed") or 0)
-    ctx.fetch_ok += ok
-    ctx.fetch_failed += failed
-    ctx.working.merge(delta)
-    ctx.fetch_results.extend(delta.fetch_results)
-    ctx.failed_literature.extend(delta.failed_literature)
+    # 即使后续处理抛出异常，也先确保 fetch 获取的数据不丢失。
+    # stream_fetch_phase 执行完成后，fetch_out["delta"] 已经被赋值。
+    # try/finally 保护 merge 操作不受后续 paper 构建代码异常影响。
+    fetch_delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
+    fetch_ok = int(fetch_out.get("fetch_ok") or 0)
+    fetch_failed = int(fetch_out.get("fetch_failed") or 0)
+    ctx.fetch_ok += fetch_ok
+    ctx.fetch_failed += fetch_failed
+    try:
+        ctx.working.merge(fetch_delta)
+        ctx.fetch_results.extend(fetch_delta.fetch_results)
+        ctx.failed_literature.extend(fetch_delta.failed_literature)
 
-    papers: list[CorpusPaperRecord] = []
-    for hit, md, err in delta.fetch_results:
-        url = str(hit.get("url") or "")
-        status = FETCH_STATUS_OK if md and not err else FETCH_STATUS_FAILED
-        lite = extract_enrich_lite_from_text(md or "")
-        papers.append(
-            CorpusPaperRecord(
-                url=url,
-                title=str(hit.get("title") or ""),
-                subtopic_tags=[subtopic_id],
-                fetch_status=status,
-                cite_in_review=status == FETCH_STATUS_OK,
-                enrich_lite=lite,
+        papers: list[CorpusPaperRecord] = []
+        for hit, md, err in fetch_delta.fetch_results:
+            url = str(hit.get("url") or "")
+            status = FETCH_STATUS_OK if md and not err else FETCH_STATUS_FAILED
+            lite = extract_enrich_lite_from_text(md or "")
+            papers.append(
+                CorpusPaperRecord(
+                    url=url,
+                    title=str(hit.get("title") or ""),
+                    subtopic_tags=[subtopic_id],
+                    fetch_status=status,
+                    cite_in_review=status == FETCH_STATUS_OK,
+                    enrich_lite=lite,
+                )
             )
+        ctx.working.merge_papers(papers)
+    except Exception:
+        _log.exception(
+            "subtopic %s paper merge failed after fetch; fetch delta already merged",
+            subtopic_id,
         )
-    ctx.working.merge_papers(papers)
 
     yield (
         "literature_subtopic_fetch_done",
         {
             "subtopic_id": subtopic_id,
-            "ok": ok,
-            "failed": failed,
+            "ok": fetch_ok,
+            "failed": fetch_failed,
             "skipped": max(0, len(deduped_kept) - len(batch)),
         },
     )
