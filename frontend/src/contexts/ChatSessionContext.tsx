@@ -28,7 +28,7 @@ type ChatSessionContextValue = {
   reloadSessionMessages: (
     id: string,
     opts?: { pendingUserText?: string | null; maxAttempts?: number },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 };
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -73,14 +73,14 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       const pending = opts?.pendingUserText?.trim() || null;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const msgs = await sessionsApi.messages(id);
-        if (loadGenRef.current !== gen) return;
+        if (loadGenRef.current !== gen) return false;
         const hasAssistant = msgs.some((m) => m.role === "assistant");
         const userOk =
           !pending ||
           msgs.some((m) => m.role === "user" && m.content === pending);
         if (hasAssistant && userOk) {
           setMessages(msgs);
-          return;
+          return true;
         }
         if (attempt < maxAttempts - 1) {
           await new Promise((resolve) =>
@@ -89,8 +89,13 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         }
       }
       const msgs = await sessionsApi.messages(id);
-      if (loadGenRef.current !== gen) return;
+      if (loadGenRef.current !== gen) return false;
       setMessages(msgs);
+      const hasAssistant = msgs.some((m) => m.role === "assistant");
+      const userOk =
+        !pending ||
+        msgs.some((m) => m.role === "user" && m.content === pending);
+      return hasAssistant && userOk;
     },
     [],
   );

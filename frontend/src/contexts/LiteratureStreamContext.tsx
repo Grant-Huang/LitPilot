@@ -319,10 +319,13 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     });
 
     void (async () => {
+      let reloadOk = false;
       try {
         await loadSessions();
         if (sid) {
-          await reloadSessionMessages(sid, { pendingUserText: pendingUser });
+          reloadOk = await reloadSessionMessages(sid, {
+            pendingUserText: pendingUser,
+          });
         }
         await refreshFromServer();
       } finally {
@@ -331,11 +334,15 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         streamStartedRef.current = false;
         turnSessionRef.current = null;
         streamSessionRef.current = null;
-        pendingUserTextRef.current = null;
         streamFinalizeRef.current = false;
         connectedTaskIdRef.current = null;
         setStreamSettling(false);
-        setLiveMessages([]);
+        if (reloadOk || !pendingUser || !sid) {
+          pendingUserTextRef.current = null;
+          setLiveMessages([]);
+        }
+        // 否则保留 liveMessages 占位（含 chatText/trace），
+        // 由 storedMessages 同步 effect 在 assistant 真正落库后清理。
       }
     })();
   }, [
@@ -353,6 +360,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     const log = streamState.extensionLog;
     const extCtx = {
       isChat,
+      activeSessionId,
       setActiveSessionId,
       loadSessions,
       persistActiveSession,
@@ -371,7 +379,13 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       handleLiteratureExtensionEvent(name, data, extCtx);
     }
     extensionHandledRef.current = log.length;
-  }, [streamState.extensionLog, isChat, setActiveSessionId, loadSessions]);
+  }, [
+    streamState.extensionLog,
+    isChat,
+    activeSessionId,
+    setActiveSessionId,
+    loadSessions,
+  ]);
 
   useEffect(() => {
     const pending = pendingUserTextRef.current;
