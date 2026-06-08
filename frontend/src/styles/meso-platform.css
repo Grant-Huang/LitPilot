@@ -1996,6 +1996,29 @@
   margin: 10px 0 16px;
 }
 
+.settings-prompts__controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.settings-prompts__control-label {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-prompts__token-input {
+  width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-prompts__field-head {
   display: flex;
   align-items: center;
