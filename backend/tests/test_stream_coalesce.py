@@ -1,12 +1,13 @@
-"""第二档：流式落库批处理与游标语义测试。"""
+"""流式落库批处理与游标语义测试。"""
 from __future__ import annotations
 
 import json
 import tempfile
+import time as _time
 from pathlib import Path
 
 from app.core.streaming import sse_event
-from app.tasks.literature_tasks import COALESCE_MAX_CHARS, _StreamCoalescer
+from app.tasks.literature_tasks import COALESCE_MAX_CHARS, COALESCE_MAX_IDLE_MS, _StreamCoalescer
 from app.tasks.task_store import FileTaskStore
 
 
@@ -109,3 +110,28 @@ def test_file_store_incremental_read_picks_up_appends() -> None:
     assert len(second) == 1
     payload = json.loads(second[0][len("data: "):].strip())["payload"]
     assert payload["delta"] == "b"
+
+
+def test_coalesce_idle_flush_on_slow_model(monkeypatch) -> None:
+    """模拟慢模型：增量间隔超过 COALESCE_MAX_IDLE_MS 时即使未满阈值也刷盘。"""
+    out, flush = _collect()
+    c = _StreamCoalescer(flush)
+    clock = [1000.0]
+
+    def _fake_mono():
+        now = clock[0]
+        clock[0] = now + 0.001
+        return now
+
+    monkeypatch.setattr(_time, "monotonic", _fake_mono)
+
+    c.add("text", {"delta": "ab", "delivery": "chat"})
+    assert len(out) == 0  # 未满阈值，未到空闲
+
+    clock[0] += COALESCE_MAX_IDLE_MS / 1000 + 0.001
+    c.add("text", {"delta": "c", "delivery": "chat"})
+    # 空闲超限应触发 flush，c 写入新缓冲
+    assert out == [("text", {"delta": "ab", "delivery": "chat"})]
+
+    c.flush()
+    assert out[1] == ("text", {"delta": "c", "delivery": "chat"})

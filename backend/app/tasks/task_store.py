@@ -140,8 +140,6 @@ class FileTaskStore(TaskStore):
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or DATA_DIR / "tasks").resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        # task_id -> (已读事件数, 对应文件字节偏移)，用于顺序游标的增量读取
-        self._read_cursor: dict[str, tuple[int, int]] = {}
 
     def _meta_path(self, task_id: str) -> Path:
         return self.root / task_id / "meta.json"
@@ -313,45 +311,26 @@ class FileTaskStore(TaskStore):
             return int(meta["event_count"])
 
     def list_events(self, task_id: str, since: int = 0) -> list[str]:
-        """按「事件序号」返回 ``seq > since`` 的事件（空行不计数）。
+        """按「事件序号」返回 ``seq >= since`` 的事件（空行不计数）。
 
-        每个事件以 ``data: ...\\n\\n`` 写入，物理上占两行；``since`` 表示已消费的
-        事件数，故按非空行计数，避免把空行算入序号导致重复返回。顺序游标命中缓存
-        时直接 seek 到上次结束的字节偏移增量读取，避免每次轮询重读整个文件。
+        每事件占两物理行（``data: …\n\n``）；遍历全文件，按非空行计数事件索引，
+        避免空行参与序号导致重复返回。采用简单顺序读而非 seek，因为 Python
+        text-mode ``tell()`` 返回不透明值、二次 seek 不可靠。
         """
         path = self._events_path(task_id)
         if not path.is_file():
             return []
 
         event_idx = 0
-        start_offset = 0
-        cache = self._read_cursor.get(task_id)
-        if since > 0 and cache and cache[0] == since:
-            cached_idx, cached_offset = cache
-            try:
-                if cached_offset <= path.stat().st_size:
-                    event_idx = cached_idx
-                    start_offset = cached_offset
-            except OSError:
-                event_idx, start_offset = 0, 0
-
         out: list[str] = []
         with open(path, encoding="utf-8") as f:
-            if start_offset:
-                f.seek(start_offset)
-            while True:
-                raw = f.readline()
-                if not raw:
-                    break
+            for raw in f:
                 line = raw.rstrip("\n")
                 if not line:
                     continue
                 if event_idx >= since:
                     out.append(line if line.endswith("\n\n") else f"{line}\n\n")
                 event_idx += 1
-            end_offset = f.tell()
-
-        self._read_cursor[task_id] = (event_idx, end_offset)
         return out
 
     def requeue_stale_running(self, updated_before_epoch: float) -> list[str]:

@@ -48,17 +48,18 @@ HEARTBEAT_SEC = 15.0
 DEFAULT_SWEEP_SEC = 30
 DEFAULT_STALE_SEC = 600
 
-# 流式增量事件合并：把连续的同类 token 增量合并成一次落库，降低文件锁/DB 往返开销
+# 流式增量事件合并：按 ~1 行中文或 50ms 空闲合并一次落库
 COALESCE_TYPES = frozenset({"text", "think", "artifact"})
-COALESCE_MAX_CHARS = 80
+COALESCE_MAX_CHARS = 20
+COALESCE_MAX_IDLE_MS = 50
 
 
 class _StreamCoalescer:
-    """合并连续同类 token 增量后再落库，逐字 flush 改为按字符阈值/边界 flush。
+    """合并连续同类 token 增量后落库，按字符阈值 / 空闲时效刷盘。
 
     仅合并「纯增量」事件（``delta`` 字符串、未标记 ``done``、且除 ``delta`` 外的
-    其余字段完全一致）。遇到不同签名/不可合并事件/结束时先 flush，保证顺序与
-    前端按 delta 拼接的重建结果完全一致（不丢字、不串流）。
+    其余字段完全一致）。遇到不同签名 / 不可合并事件 / 超时 / 结束时先 flush，
+    保证顺序与前端按 delta 重建结果一致（不丢字、不串流）。
     """
 
     def __init__(self, flush: Callable[[str, dict[str, Any]], None]) -> None:
@@ -68,6 +69,7 @@ class _StreamCoalescer:
         self._payload: dict[str, Any] | None = None
         self._parts: list[str] = []
         self._length = 0
+        self._first_mono: float = 0.0
 
     @staticmethod
     def _is_coalescable(ev_type: str, payload: dict[str, Any]) -> bool:
@@ -95,14 +97,18 @@ class _StreamCoalescer:
             return
 
         sig = self._signature(ev_type, payload)
-        if self._payload is not None and sig != self._sig:
-            self.flush()
+        if self._payload is not None:
+            if sig != self._sig:
+                self.flush()
+            elif (time.monotonic() - self._first_mono) * 1000 >= COALESCE_MAX_IDLE_MS:
+                self.flush()
         if self._payload is None:
             self._type = ev_type
             self._sig = sig
             self._payload = dict(payload)
             self._parts = []
             self._length = 0
+            self._first_mono = time.monotonic()
         delta = payload.get("delta", "")
         self._parts.append(delta)
         self._length += len(delta)
