@@ -132,15 +132,12 @@ DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与
 2. 末行输出 JSON（无 markdown 代码块）：
 {UNDERSTANDING_JSON_CONTRACT}"""
 
-DEFAULT_NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 2–4 句话说明：
+DEFAULT_NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 **1–2 句** 简洁说明：
 - 命中规模与整体相关性
-- 接下来抓取时的优先级（1–2 条原则）
-不要编造未在列表中出现的论文细节。不要输出 JSON。"""
-
-DEFAULT_NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取结果】用 2–4 句话说明：
-- 成功/失败概况
-- 对后续引用抽取与综述撰写的含义
-不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
+- 抓取优先级（1 条原则）
+总字数控制在 **80 字以内**。不要编造未出现的论文细节。不要输出 JSON。"""
+DEFAULT_NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取结果】用 **1 句** 简要说明抓取概况。
+总字数控制在 **40 字以内**。不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
 
 DEFAULT_ROUTER_SYSTEM = f"""你是文献综述助手的路由器。根据用户首条研究问题，输出唯一 JSON（无 markdown 代码块）：
 {ROUTER_JSON_CONTRACT}"""
@@ -333,8 +330,8 @@ PROMPT_MAX_TOKENS_SUFFIX = "_max_tokens"
 # 各提示词 LLM 调用的默认 max_tokens（可被 prompts.params 中 {key}_max_tokens 覆盖）
 PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "understanding_system_template": 1200,
-    "narrate_search_after_template": 800,
-    "narrate_fetch_after_template": 800,
+    "narrate_search_after_template": 400,
+    "narrate_fetch_after_template": 400,
     "intent_router_system_template": 300,
     "search_refiner_system_template": 640,
     "assessor_system_template": 720,
