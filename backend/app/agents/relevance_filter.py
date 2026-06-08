@@ -37,7 +37,15 @@ RELEVANCE_SYSTEM = """你是学术文献相关性评审助手。根据【用户�
 HIGH_REJECT_RATIO = 0.5
 MIN_HITS_FOR_QUERY_WARN = 4
 KEEP_SCORE_THRESHOLD = 3
-BATCH_SIZE = 24
+# 单批最多打包 40 条命中：常见 per-subtopic 检索量（≤40）一次 LLM 即可完结，
+# 减少串行批数；prompt 中每条命中也已精简，避免上下文膨胀。
+BATCH_SIZE = 40
+# 单条命中片段截断阈值（控制 prompt 体积）
+HIT_SNIPPET_CHARS = 100
+HIT_URL_CHARS = 80
+USER_MSG_TRIM_CHARS = 800
+QUERY_TRIM_CHARS = 300
+FILTER_MAX_TOKENS = 800
 
 
 @dataclass
@@ -89,10 +97,10 @@ def _hit_label(hit: dict[str, str], *, index: int) -> str:
     snippet = str(hit.get("snippet") or hit.get("content") or "").strip()
     line = f"[{index}] {title}"
     if snippet:
-        line += f" — {snippet[:160]}"
+        line += f" — {snippet[:HIT_SNIPPET_CHARS]}"
     if url:
-        line += f" ({url[:120]})"
-    return line[:400]
+        line += f" ({url[:HIT_URL_CHARS]})"
+    return line[:320]
 
 
 def _normalize_decisions(
@@ -228,8 +236,8 @@ async def _run_filter_batches(
         batch = hits[batch_start : batch_start + BATCH_SIZE]
         lines = [_hit_label(h, index=i) for i, h in enumerate(batch)]
         prompt = (
-            f"【用户研究说明】\n{(user_message or '').strip()[:2000]}\n\n"
-            f"【检索式】\n{(search_query or '').strip()[:500]}\n\n"
+            f"【用户研究说明】\n{(user_message or '').strip()[:USER_MSG_TRIM_CHARS]}\n\n"
+            f"【检索式】\n{(search_query or '').strip()[:QUERY_TRIM_CHARS]}\n\n"
             f"【待评估文献】共 {len(batch)} 条\n"
             + "\n".join(lines)
         )
@@ -239,7 +247,7 @@ async def _run_filter_batches(
             [LLMMessage(role="user", content=prompt)],
             system=RELEVANCE_SYSTEM,
             accumulator=think_acc,
-            max_tokens=1200,
+            max_tokens=FILTER_MAX_TOKENS,
             temperature=0.1,
             hide_json_in_stream=True,
             json_hide_hint="正在评估相关性…",
@@ -309,8 +317,8 @@ async def filter_hits_by_relevance(
         batch = hits[batch_start : batch_start + BATCH_SIZE]
         lines = [_hit_label(h, index=i) for i, h in enumerate(batch)]
         prompt = (
-            f"【用户研究说明】\n{(user_message or '').strip()[:2000]}\n\n"
-            f"【检索式】\n{(search_query or '').strip()[:500]}\n\n"
+            f"【用户研究说明】\n{(user_message or '').strip()[:USER_MSG_TRIM_CHARS]}\n\n"
+            f"【检索式】\n{(search_query or '').strip()[:QUERY_TRIM_CHARS]}\n\n"
             f"【待评估文献】共 {len(batch)} 条\n"
             + "\n".join(lines)
         )
