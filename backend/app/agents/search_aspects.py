@@ -227,12 +227,20 @@ def query_for_source(
 
 
 def sub_topic_pass_spec(sub: ResearchSubTopic) -> tuple[str, dict[str, str], frozenset[str]]:
-    """Return display query, per-source queries, and sources to skip."""
+    """Return display query, per-source queries, and sources to skip.
+
+    Only search sources that have a dedicated (non-fallback) query in
+    ``source_queries``.  Sources without a per-aspect query are skipped
+    because any results they would return via the generic fallback are
+    already covered by the primary query and would be redundant.
+    """
+    _ALL_SOURCES = (SOURCE_ARXIV, SOURCE_SEMANTIC_SCHOLAR, SOURCE_OPENALEX, SOURCE_CROSSREF, SOURCE_PUBMED)
     fallback = clamp_search_query(sub.search_query, fallback=sub.title)
     source_queries = dict(sub.source_queries or {})
     if not source_queries and fallback:
         source_queries = {SOURCE_ARXIV: fallback, SOURCE_CROSSREF: fallback}
     skip: set[str] = set()
-    if SOURCE_PUBMED not in source_queries:
-        skip.add(SOURCE_PUBMED)
+    for src in _ALL_SOURCES:
+        if src not in source_queries:
+            skip.add(src)
     return fallback, source_queries, frozenset(skip)
