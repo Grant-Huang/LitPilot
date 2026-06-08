@@ -73,12 +73,21 @@ export function WorkflowCardView({
     if (!streaming) setManualOpen(false);
   }, [streaming]);
 
+  const pinnedThink = card.pinnedThink?.trim() ?? "";
+  const hasBriefBody = Boolean(card.body?.trim());
+  const retainWhileStreaming =
+    streaming &&
+    card.state === "done" &&
+    (card.type === "understand" || card.type === "brief") &&
+    (Boolean(pinnedThink) || hasBriefBody);
+
   const open =
     forceOpen ||
     locked ||
     isRunning ||
     (streaming && defaultOpen) ||
-    manualOpen;
+    manualOpen ||
+    retainWhileStreaming;
   const canToggle = !locked && !isRunning && card.state === "done";
 
   const cardSummary = useMemo(
@@ -91,11 +100,13 @@ export function WorkflowCardView({
     [card.steps],
   );
 
+  const liveThink = trace?.thinkContent?.trim() ?? "";
+  const thinkForCard = isRunning ? liveThink : pinnedThink || liveThink;
   const hasThinkStream =
     (card.type === "understand" ||
       card.type === "brief" ||
       card.type === "search") &&
-    Boolean(trace?.thinkContent?.trim() || (streaming && isRunning));
+    Boolean(thinkForCard || (streaming && isRunning));
 
   const statusLabel =
     isRunning && open && !hasThinkStream ? "进行中" : null;
@@ -140,10 +151,11 @@ export function WorkflowCardView({
           {(card.type === "understand" ||
             card.type === "brief" ||
             card.type === "search") &&
-          (trace?.thinkContent || (streaming && isRunning)) ? (
+          (thinkForCard || (streaming && isRunning)) ? (
             <LitPilotThinkFold
-              content={trace?.thinkContent ?? ""}
+              content={thinkForCard}
               streaming={streaming && isRunning}
+              turnStreaming={streaming}
             />
           ) : null}
           {card.body ? (

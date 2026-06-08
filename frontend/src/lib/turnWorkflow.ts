@@ -41,6 +41,8 @@ export type WorkflowCard = {
   summary?: string;
   steps: WorkflowStep[];
   body?: string;
+  /** Frozen think snapshot when a phase completes (see literature_phase_think). */
+  pinnedThink?: string;
   locked?: boolean;
   subTopics?: Array<{ id: string; title: string; search_query: string }>;
 };
@@ -67,6 +69,14 @@ const CARD_TITLES: Record<WorkflowCardType, string> = {
   clarify: "等待澄清",
   manage: "文献库操作",
 };
+
+function phaseThinkStageToCardType(stageKey: string): WorkflowCardType | null {
+  const key = stageKey.trim().toLowerCase();
+  if (key === "brief") return "brief";
+  if (key === "search") return "search";
+  if (key === "understand" || key === "understanding") return "understand";
+  return null;
+}
 
 function stageToCardType(name: string): WorkflowCardType | null {
   const n = name.trim();
@@ -296,6 +306,17 @@ export function buildTurnWorkflowFromTrace(
   }
 
   for (const ext of opts.extensions ?? []) {
+    if (ext.name === "literature_phase_think") {
+      const content = String(ext.data.content ?? "").trim();
+      if (!content) continue;
+      const ctype = phaseThinkStageToCardType(String(ext.data.stage ?? ""));
+      if (!ctype) continue;
+      const target = cards.find((c) => c.type === ctype);
+      if (target) {
+        target.pinnedThink = content;
+      }
+      continue;
+    }
     if (ext.name !== "literature_progress") continue;
     const detail = String(ext.data.detail ?? "").trim();
     if (!detail) continue;
@@ -427,6 +448,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,
+      pinnedThink: c.pinnedThink,
       locked: c.locked ?? false,
       subTopics: c.subTopics,
     })),

@@ -5,24 +5,34 @@ import { parseThinkSegments } from "@/lib/thinkContent";
 
 type Props = {
   content: string;
+  /** Phase-level streaming (cursor / label). */
   streaming?: boolean;
+  /** Whole-turn streaming; only collapse when this becomes false. */
+  turnStreaming?: boolean;
 };
 
 /** 与流式输出同款的思考折叠块；系统注记（⟦sys⟧）灰色显示。 */
-export function LitPilotThinkFold({ content, streaming = false }: Props) {
+export function LitPilotThinkFold({
+  content,
+  streaming = false,
+  turnStreaming,
+}: Props) {
   const [open, setOpen] = useState(streaming);
   const contentRef = useRef<HTMLDivElement>(null);
-  const wasStreamingRef = useRef(streaming);
+  const wasPhaseStreamingRef = useRef(streaming);
+  const wasTurnStreamingRef = useRef(turnStreaming ?? streaming);
 
   useEffect(() => {
-    if (streaming && !wasStreamingRef.current) {
+    if (streaming && !wasPhaseStreamingRef.current) {
       setOpen(true);
     }
-    if (!streaming && wasStreamingRef.current) {
+    const turnActive = turnStreaming ?? streaming;
+    if (!turnActive && wasTurnStreamingRef.current) {
       setOpen(false);
     }
-    wasStreamingRef.current = streaming;
-  }, [streaming]);
+    wasPhaseStreamingRef.current = streaming;
+    wasTurnStreamingRef.current = turnActive;
+  }, [streaming, turnStreaming]);
 
   const segments = useMemo(() => parseThinkSegments(content), [content]);
 

@@ -72,6 +72,32 @@ describe("buildTurnWorkflowFromTrace streaming layout", () => {
     expect(understand?.body).toBeUndefined();
   });
 
+  it("pins understand think via literature_phase_think extension", () => {
+    const wf = buildTurnWorkflowFromTrace(
+      {
+        stages: [
+          { name: "理解研究问题", state: "done" },
+          { name: "文献检索", state: "running" },
+        ],
+        tools: [],
+        workflows: [],
+        thinkContent: "理解阶段解说…\n\n检索阶段解说…",
+      },
+      {
+        streaming: true,
+        extensions: [
+          {
+            name: "literature_phase_think",
+            data: { stage: "understand", content: "理解阶段解说…" },
+          },
+        ],
+      },
+    );
+    const understand = wf.cards.find((c) => c.type === "understand");
+    expect(understand?.pinnedThink).toBe("理解阶段解说…");
+    expect(understand?.state).toBe("done");
+  });
+
   it("creates brief card only from structured assessment", () => {
     const wf = buildTurnWorkflowFromTrace(
       {

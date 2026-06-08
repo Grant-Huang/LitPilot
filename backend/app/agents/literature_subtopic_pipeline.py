@@ -420,6 +420,7 @@ async def run_subtopic_retrieval(
     total_kept = 0
 
     upsert_stage(ctx.execution_trace, "文献检索", "active")
+    yield ("stage", {"name": "文献检索", "state": "active"})
     for i, st in enumerate(subtopics, start=1):
         async for ev in _run_subtopic(
             ctx,
@@ -439,6 +440,7 @@ async def run_subtopic_retrieval(
                 fetch_left -= int(ev[1].get("ok") or 0) + int(ev[1].get("failed") or 0)
 
     upsert_stage(ctx.execution_trace, "文献检索", "done")
+    yield ("stage", {"name": "文献检索", "state": "done"})
     record_literature_stats(
         ctx.execution_trace,
         searchMerged=total_kept,

@@ -61,7 +61,14 @@ from app.agents.session_corpus import SessionCorpus, resolve_session_corpus
 from app.agents.url_list import sanitize_fetch_urls
 from app.agents.workflow_emitter import WorkflowNodeEmitter
 from app.agents.workflow_graph import apply_fetch_provider_label, build_literature_graph
-from app.core.stream_events import chat_text, process_text, turn_start
+from app.core.stream_events import (
+    chat_text,
+    literature_brief_assessment,
+    literature_phase_think,
+    process_text,
+    process_text_extension,
+    turn_start,
+)
 from app.core.think_stream import ThinkAccumulator
 from app.schemas.literature_outline import LiteratureOutline
 from app.services.llm_service import get_pipeline_llm, get_planner_llm, get_review_llm
@@ -224,6 +231,10 @@ async def stream_literature_turn(
         yield ("stage", {"name": "理解研究问题", "state": "done"})
         upsert_stage(execution_trace, "理解研究问题", "done")
 
+        understand_think = think_acc.finalize()
+        if understand_think:
+            yield literature_phase_think("understand", understand_think)
+
         search_query_for_plan = (
             router_result.search_query.strip()
             or route_message.strip()
@@ -234,9 +245,12 @@ async def stream_literature_turn(
             if rq_msg:
                 finalize_ctx.assistant_prefix = rq_msg
                 finalize_ctx.process_text = rq_msg
+                yield literature_brief_assessment(brief.to_dict())
                 for para in rq_msg.split("\n\n"):
                     if para.strip():
-                        yield process_text(para.strip() + "\n\n")
+                        chunk = para.strip() + "\n\n"
+                        yield process_text(chunk)
+                        yield process_text_extension(chunk)
 
         outline_obj, sub_topics = build_subtopic_plan(
             user_message=route_message,

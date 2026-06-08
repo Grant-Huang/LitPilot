@@ -21,6 +21,41 @@ def process_text(delta: str) -> tuple[str, dict[str, Any]]:
     return text_event(delta, delivery=TEXT_DELIVERY_PROCESS)
 
 
+def process_text_extension(delta: str) -> tuple[str, dict[str, Any]]:
+    """Extension mirror of process_text for streaming UI (Meso text drops delivery)."""
+    return (
+        "extension",
+        {
+            "name": "process_text",
+            "version": "1.0",
+            "data": {"delta": delta},
+        },
+    )
+
+
+def literature_phase_think(stage: str, content: str) -> tuple[str, dict[str, Any]]:
+    """Pin phase think snapshot so UI keeps it after stage transitions."""
+    return (
+        "extension",
+        {
+            "name": "literature_phase_think",
+            "version": "1.0",
+            "data": {"stage": stage, "content": content},
+        },
+    )
+
+
+def literature_brief_assessment(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    return (
+        "extension",
+        {
+            "name": "literature_brief_assessment",
+            "version": "1.0",
+            "data": data,
+        },
+    )
+
+
 def turn_start(*, turn_index: int, intent: str) -> tuple[str, dict[str, Any]]:
     return (
         "extension",
