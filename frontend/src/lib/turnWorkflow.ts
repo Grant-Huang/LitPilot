@@ -357,7 +357,7 @@ export function buildTurnWorkflowFromTrace(
 
   const briefSummary = (opts.briefSummary ?? opts.processText ?? "").trim();
   if (briefSummary) {
-    cards.unshift({
+    cards.splice(cards.length === 0 ? 0 : 1, 0, {
       id: "card-brief",
       type: "brief",
       title: CARD_TITLES.brief,
