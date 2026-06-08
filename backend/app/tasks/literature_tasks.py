@@ -393,6 +393,12 @@ class LiteratureTaskRegistry:
             self._persist_event(
                 task_id, "capabilities", capabilities_payload(), batch=batch
             )
+            # 在 stream_literature_turn 调用前即发射 stage，
+            # 确保前端在阻塞 I/O / LLM 调用前就有 card，不显示"正在连接…"
+            self._persist_event(
+                task_id, "stage", {"name": "理解研究问题", "state": "active"}, batch=batch
+            )
+            batch.flush()
 
             async for ev_type, payload in stream_literature_turn(
                 record.session_id,

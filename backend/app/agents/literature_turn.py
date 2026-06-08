@@ -227,7 +227,6 @@ async def stream_literature_turn(
 
     needs_understanding = intent.intent in ("new_topic", "subtopic_change", "append_urls")
     if needs_understanding:
-        yield ("stage", {"name": "理解研究问题", "state": "active"})
         async for ev in stream_understanding_and_route(
             route_message,
             think_acc=think_acc,
@@ -284,7 +283,6 @@ async def stream_literature_turn(
             intent=intent.intent,
         )
     else:
-        yield ("stage", {"name": "理解研究问题", "state": "active"})
         yield ("stage", {"name": "理解研究问题", "state": "done"})
         upsert_stage(execution_trace, "理解研究问题", "done")
 
