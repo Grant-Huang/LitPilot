@@ -238,12 +238,14 @@ async def _run_subtopic(
         user_message=ctx.route_message,
         search_query=query,
         llm=ctx.pipeline_llm,
-        think_acc=ctx.think_acc,
+        think_acc=None,  # Don't pollute shared think accumulator with raw filter JSON
     ):
         if ev[0] == "filter_result":
             kept = list(ev[1].get("kept") or [])
             rejected = list(ev[1].get("rejected") or [])
             continue
+        if ev[0] == "think":
+            continue  # Filter LLM raw JSON decisions should not reach frontend
         yield ev
 
     deduped_kept: list[dict[str, str]] = []

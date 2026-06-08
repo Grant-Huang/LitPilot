@@ -41,23 +41,17 @@ function SourceRow({ source }: { source: SourceNode }) {
 }
 
 function FilterDetailRow({ item }: { item: FilterDetailItem }) {
-  const label = item.keep
-    ? "保留"
-    : "剔除 [" + (item.score ?? "?") + "]";
   const reason = item.keep ? "" : item.reason ?? "";
   const title = item.title || "(无标题)";
-  const cls = item.keep ? "done" : "error";
+  const variant = item.keep ? "kept" : "rejected";
+  const verdict = item.keep
+    ? "保留"
+    : "剔除 [" + (item.score ?? "?") + "]" + (reason ? " · " + reason.slice(0, 50) : "");
   return (
-    <li className={`litpilot-search-source litpilot-search-source--${cls}`}>
-      <span className="litpilot-search-source__marker" aria-hidden="true">
-        {item.keep ? "●" : "○"}
-      </span>
-      <div className="litpilot-search-source__body">
-        <span className="litpilot-search-source__label">{title}</span>
-        <span className="litpilot-search-source__status">
-          {label}{reason ? " · " + reason.slice(0, 60) : ""}
-        </span>
-      </div>
+    <li className={"litpilot-filter-item litpilot-filter-item--" + variant}>
+      <span className="litpilot-filter-item__dot" aria-hidden="true" />
+      <span className="litpilot-filter-item__title" title={title}>{title}</span>
+      <span className="litpilot-filter-item__verdict">{verdict}</span>
     </li>
   );
 }
@@ -93,25 +87,25 @@ function SubtopicBlock({
         <ul className="litpilot-search-topic__sources">
           {/* Search phase: per-source details */}
           {node.search.status !== "pending" ? (
-            <li key="search" className="litpilot-search-source litpilot-search-source--done">
+            <li key="search" className="litpilot-search-phase">
               <button
                 type="button"
-                className="litpilot-search-source__head"
+                className="litpilot-search-phase__head"
                 onClick={() => setSourcesOpen((v) => !v)}
                 aria-expanded={sourcesOpen}
               >
-                <span className="litpilot-search-source__marker" aria-hidden="true">
+                <span className="litpilot-search-phase__marker" aria-hidden="true">
                   {sourcesOpen ? "▾" : node.search.status === "running" ? <span className="litpilot-log-line__spinner" /> : "▸"}
                 </span>
-                <span className="litpilot-search-source__label">检索</span>
-                <span className="litpilot-search-source__status">
+                <span className="litpilot-search-phase__label">检索</span>
+                <span className="litpilot-search-phase__count">
                   {node.search.detail ?? (node.search.status === "running" ? "进行中…" : "完成")}
                 </span>
               </button>
               {sourcesOpen && node.sources.length > 0 ? (
-                <ul className="litpilot-search-topic__sub-items">
+                <ul className="litpilot-search-phase__items">
                   {node.sources.map((src, i) => (
-                    <SourceRow key={`${src.label}-${i}`} source={src} />
+                    <SourceRow key={src.label + "-" + i} source={src} />
                   ))}
                 </ul>
               ) : null}
@@ -120,25 +114,25 @@ function SubtopicBlock({
 
           {/* Filter phase: kept/rejected details */}
           {node.filter.status !== "pending" ? (
-            <li key="filter" className={`litpilot-search-source litpilot-search-source--${node.filter.status}`}>
+            <li key="filter" className="litpilot-search-phase">
               <button
                 type="button"
-                className="litpilot-search-source__head"
+                className="litpilot-search-phase__head"
                 onClick={() => setFilterOpen((v) => !v)}
                 aria-expanded={filterOpen}
               >
-                <span className="litpilot-search-source__marker" aria-hidden="true">
+                <span className="litpilot-search-phase__marker" aria-hidden="true">
                   {filterOpen ? "▾" : node.filter.status === "running" ? <span className="litpilot-log-line__spinner" /> : "▸"}
                 </span>
-                <span className="litpilot-search-source__label">过滤</span>
-                <span className="litpilot-search-source__status">
+                <span className="litpilot-search-phase__label">过滤</span>
+                <span className="litpilot-search-phase__count">
                   {node.filter.detail ?? (node.filter.status === "running" ? "进行中…" : "完成")}
                 </span>
               </button>
               {filterOpen && node.filterDetails.length > 0 ? (
-                <ul className="litpilot-search-topic__sub-items">
+                <ul className="litpilot-search-phase__items">
                   {node.filterDetails.map((item, i) => (
-                    <FilterDetailRow key={`${item.title}-${i}`} item={item} />
+                    <FilterDetailRow key={item.title + "-" + i} item={item} />
                   ))}
                 </ul>
               ) : null}

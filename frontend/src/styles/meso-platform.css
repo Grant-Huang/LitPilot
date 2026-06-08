@@ -4152,6 +4152,117 @@ a.library-badge--action:hover {
   gap: 4px;
 }
 
+/* Expandable phase rows (检索 / 过滤) inside a subtopic — must be column layout */
+.litpilot-search-phase {
+  display: flex;
+  flex-direction: column;
+}
+
+.litpilot-search-phase__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.litpilot-search-phase__head:hover {
+  color: var(--color-accent);
+}
+
+.litpilot-search-phase__marker {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.litpilot-search-phase__label {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.litpilot-search-phase__count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
+}
+
+.litpilot-search-phase__items {
+  list-style: none;
+  margin: 2px 0 4px 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Filter kept/rejected items */
+.litpilot-filter-item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  padding: 2px 0;
+  min-width: 0;
+}
+
+.litpilot-filter-item__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+.litpilot-filter-item--kept .litpilot-filter-item__dot {
+  background-color: #16a34a;
+}
+
+.litpilot-filter-item--rejected .litpilot-filter-item__dot {
+  background-color: var(--color-text-muted);
+  opacity: 0.45;
+}
+
+.litpilot-filter-item__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.litpilot-filter-item--rejected .litpilot-filter-item__title {
+  color: var(--color-text-muted);
+  opacity: 0.75;
+}
+
+.litpilot-filter-item__verdict {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.litpilot-filter-item--kept .litpilot-filter-item__verdict {
+  color: #16a34a;
+}
+
 /* Fetch card subsections */
 .litpilot-wf-subsections {
   display: flex;
