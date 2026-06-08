@@ -201,13 +201,12 @@ export function buildSearchProgressTree(
   if (passSources.size > 0 && subtopics.length > 0) {
     for (const node of subtopics) {
       if (node.sources.length > 0) continue;
-      // Assign first pass's source data to any substopic missing sources
+      // Assign first pass's source data to any subtopic missing sources
       for (const [, srcMap] of passSources) {
         for (const [, src] of srcMap) {
           node.sources.push(src);
         }
       }
-      break;
     }
   }
 

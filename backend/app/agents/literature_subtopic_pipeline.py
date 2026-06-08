@@ -173,12 +173,16 @@ async def _run_subtopic(
     seen_url_keys: set[str],
     fetch_slots_left: int,
     corpus_base: SessionCorpus | None,
+    seen_source_hits: set[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     subtopic_id = normalize_subtopic_id(st.id)
     query = str(st.search_query or ctx.search_query_for_plan)
     t0 = time.monotonic()
 
     _, source_queries, skip_sources = sub_topic_pass_spec(st)
+    # Skip sources that already returned hits in earlier subtopics
+    if seen_source_hits:
+        skip_sources |= seen_source_hits
     per_cap = _per_subtopic_cap(ctx.search_max_results, pass_total)
 
     search_out: dict[str, Any] = {}
@@ -216,6 +220,11 @@ async def _run_subtopic(
         source_queries=source_queries or None,
         skip_sources=skip_sources or None,
     ):
+        if ev[0] == "literature_search_source_done":
+            hits = int(ev[1].get("hits") or 0)
+            source = str(ev[1].get("source") or "")
+            if hits > 0 and source and seen_source_hits is not None:
+                seen_source_hits.add(source)
         if _forward_event(ev):
             yield ev
 
@@ -442,6 +451,7 @@ async def run_subtopic_retrieval(
 
     corpus_base = working if working.known_url_keys else None
     seen_keys: set[str] = set(working.known_url_keys)
+    seen_source_hits: set[str] = set()
     fetch_left = ctx.max_fetch_urls
     total_raw = 0
     total_kept = 0
@@ -466,6 +476,7 @@ async def run_subtopic_retrieval(
                     seen_url_keys=seen_keys,
                     fetch_slots_left=per_st_fetch,
                     corpus_base=corpus_base,
+                    seen_source_hits=seen_source_hits,
                 ):
                     await queue.put(ev)
             except Exception as exc:

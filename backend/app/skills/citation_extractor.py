@@ -788,7 +788,7 @@ async def extract_and_persist_batch(
 
     timeout: float = 60.0,
 
-    max_items: int = 5,
+    max_items: int = 20,
 
     citation_format: CitationFormat = "apa",
 
@@ -856,33 +856,33 @@ async def extract_and_persist_batch(
 
 
 
-    success_recs = [r for r in results if r.success]
-
+    enrich_candidates = [r for r in results if r.url]
     enrich_list: list[dict] = []
-
-    if success_recs:
-
+    if enrich_candidates:
         enrich_list = await enrich_records_parallel(
-
-            success_recs,
-
+            enrich_candidates,
             parallel=parallel,
-
         )
 
-
+    def _patch(rec, ep):
+        if not rec.doi:
+            rec.doi = str(ep.get("doi") or "")
+        if not rec.title:
+            rec.title = str(ep.get("title") or "")
+        if not rec.authors:
+            rec.authors = str(ep.get("authors") or "")
+        if not rec.year:
+            rec.year = str(ep.get("year") or "")
 
     enrich_iter = iter(enrich_list)
-
     lib = LibraryStore()
 
     for rec in results:
-
-        if not rec.success:
-
-            continue
-
         ep = next(enrich_iter, {})
+        _patch(rec, ep)
+        _evaluate_success(rec, detect_publisher(rec.url), rec.url)
+        if not rec.success:
+            continue
 
         upsert_from_citation(
 
@@ -902,7 +902,7 @@ async def extract_and_persist_batch(
 
 
 
-    if success_recs:
+    if results:
 
         _sync_exports(lib)
 

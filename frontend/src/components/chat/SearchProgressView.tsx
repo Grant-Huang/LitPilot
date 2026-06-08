@@ -43,16 +43,19 @@ function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
 }
 
 function SourceRow({ source }: { source: SourceNode }) {
-  const detail = source.failed ? "失败" : `命中 ${source.hits} 篇`;
   return (
     <li className={`litpilot-search-source litpilot-search-source--${source.status}`}>
       <span className="litpilot-search-source__marker">
         {phaseStatusIcon(source.status)}
       </span>
-      <div className="litpilot-search-source__body">
-        <span className="litpilot-search-source__label">{source.label}</span>
-        <span className="litpilot-search-source__status">{detail}</span>
-      </div>
+      <span className="litpilot-search-source__label">
+        {source.label}
+        {source.failed ? (
+          <span className="litpilot-search-source__failure"> 失败</span>
+        ) : (
+          <span className="litpilot-search-source__hits-inline"> ({source.hits})</span>
+        )}
+      </span>
     </li>
   );
 }

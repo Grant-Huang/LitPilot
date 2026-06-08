@@ -4101,6 +4101,16 @@ a.library-badge--action:hover {
   color: var(--color-text-muted);
 }
 
+.litpilot-search-source__hits-inline {
+  font-weight: var(--lp-fw-normal);
+  color: var(--color-text-muted);
+}
+
+.litpilot-search-source__failure {
+  font-weight: var(--lp-fw-normal);
+  color: var(--color-text-error, var(--color-text-danger, #e53e3e));
+}
+
 .litpilot-search-source__query,
 .litpilot-search-source__url,
 .litpilot-search-source__urls a {
