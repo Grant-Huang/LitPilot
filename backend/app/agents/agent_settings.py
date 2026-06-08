@@ -2,6 +2,7 @@
 serverless cold-start file fallback."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -84,8 +85,9 @@ async def get_merged_settings() -> dict[str, Any]:
         _SETTINGS_CACHE = file_data
         _SETTINGS_CACHE_TS = now
         return _SETTINGS_CACHE
-    # 3) 真实 Turso / File store 查询
-    _SETTINGS_CACHE = get_store().get_agent_settings_merged()
+    # 3) 真实 Turso / File store 查询（asyncio.to_thread 防止阻塞事件循环）
+    store = get_store()
+    _SETTINGS_CACHE = await asyncio.to_thread(store.get_agent_settings_merged)
     _SETTINGS_CACHE_TS = now
     _write_file_cache(_SETTINGS_CACHE)
     return _SETTINGS_CACHE

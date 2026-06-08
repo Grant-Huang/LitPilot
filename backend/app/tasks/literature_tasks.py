@@ -52,8 +52,8 @@ DEFAULT_STALE_SEC = 600
 # 阈值从 20/50ms 上调至 80/100ms，降低 token 级文件 I/O 频率（约 4×）；
 # 仍可感知为实时流式（前端 SSE 轮询 50ms，叠加感知延迟 ≤200ms）。
 COALESCE_TYPES = frozenset({"text", "think", "artifact"})
-COALESCE_MAX_CHARS = 80
-COALESCE_MAX_IDLE_MS = 100
+COALESCE_MAX_CHARS = 20
+COALESCE_MAX_IDLE_MS = 50
 
 # 落库前再做一次批量缓冲：把若干次 coalescer flush 合并为一次 store 调用，
 # 节省锁/meta 写入开销。BATCH_MAX_EVENTS 与 BATCH_MAX_IDLE_MS 共同决定上限。
@@ -266,13 +266,23 @@ class LiteratureTaskRegistry:
         if record.status in TERMINAL_STATUSES:
             return record
         finished = time.time()
-        self._persist_event(task_id, "error", {"message": "任务已中止"})
-        self._persist_event(task_id, "done", {})
-        return self._store.update_task(
-            task_id,
-            status="cancelled",
-            finished_at=finished,
-        )
+        try:
+            self._persist_event(task_id, "error", {"message": "任务已中止"})
+        except Exception:
+            logger.exception("cancel: failed to persist error event for %s", task_id)
+        try:
+            self._persist_event(task_id, "done", {})
+        except Exception:
+            logger.exception("cancel: failed to persist done event for %s", task_id)
+        try:
+            return self._store.update_task(
+                task_id,
+                status="cancelled",
+                finished_at=finished,
+            )
+        except Exception:
+            logger.exception("cancel: failed to update task %s", task_id)
+            return self._store.get_task(task_id)
 
     def _progress_from_event(
         self,
