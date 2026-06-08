@@ -116,6 +116,38 @@ class TursoHttpConnection:
                 rows.append(tuple(_decode_cell(cell) for cell in row))
         return TursoCursor(rows=rows)
 
+    def executemany(
+        self, sql: str, seq_of_parameters: list[tuple[Any, ...]] | list[list[Any]]
+    ) -> TursoCursor:
+        """Execute the same SQL for each parameters row using pipelined requests."""
+        if not seq_of_parameters:
+            return TursoCursor(rows=[])
+        requests: list[dict[str, Any]] = []
+        for params in seq_of_parameters:
+            stmt: dict[str, Any] = {"sql": sql}
+            if params:
+                stmt["args"] = [_encode_arg(p) for p in params]
+            requests.append({"type": "execute", "stmt": stmt})
+        requests.append({"type": "close"})
+        headers = {"Authorization": f"Bearer {self._token}"}
+        resp = self._client.post(self._url, headers=headers, json={"requests": requests})
+        resp.raise_for_status()
+        data = resp.json()
+        rows: list[tuple[Any, ...]] = []
+        for item in data.get("results") or []:
+            if item.get("type") == "error":
+                err = item.get("error") or item
+                raise RuntimeError(f"Turso SQL error: {err}")
+            if item.get("type") != "ok":
+                continue
+            response = item.get("response") or {}
+            if response.get("type") != "execute":
+                continue
+            result = response.get("result") or {}
+            for row in result.get("rows") or []:
+                rows.append(tuple(_decode_cell(cell) for cell in row))
+        return TursoCursor(rows=rows)
+
     def execute_many(self, statements: list[str]) -> None:
         """Run multiple DDL/DML in one pipeline (migration)."""
         requests: list[dict[str, Any]] = [

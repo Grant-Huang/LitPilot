@@ -390,25 +390,26 @@ class LiteratureTaskRegistry:
             lambda t, p: self._persist_event(task_id, t, p, batch=batch)
         )
         try:
-            # 写入初始事件：session / capabilities / stage，完成后立即刷盘并通知 create_and_start
-            self._persist_event(
-                task_id,
-                "extension",
-                {
-                    "name": "session",
-                    "version": "1.0",
-                    "data": {"session_id": record.session_id},
-                },
-                batch=batch,
+            # 初始事件直接落库，绕过 batch buffer，避免 Vercel serverless 生命周期截断
+            initial_lines = [
+                sse_event(
+                    "extension",
+                    {
+                        "name": "session",
+                        "version": "1.0",
+                        "data": {"session_id": record.session_id},
+                    },
+                ),
+                sse_event("capabilities", capabilities_payload()),
+                sse_event("stage", {"name": "理解研究问题", "state": "active"}),
+            ]
+            self._store.append_events_batch(task_id, initial_lines)
+            # 同步更新进度/阶段（与 _progress_from_event 一致）
+            record.progress = 2
+            record.stage = "understanding"
+            self._store.update_task(
+                task_id, progress=record.progress, stage=record.stage
             )
-            self._persist_event(
-                task_id, "capabilities", capabilities_payload(), batch=batch
-            )
-            self._persist_event(
-                task_id, "stage", {"name": "理解研究问题", "state": "active"}, batch=batch
-            )
-            coalescer.flush()
-            batch.flush()
             # 通知 _maybe_start_runner：初始事件已落库，前端可以连接
             ready = self._runner_ready_events.pop(task_id, None)
             if ready is not None:
