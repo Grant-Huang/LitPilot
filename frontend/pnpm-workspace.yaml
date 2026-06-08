@@ -7,6 +7,4 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: true
-minimumReleaseAgeExclude:
-  - '@meso.ai/types@1.0.0'
-  - '@meso.ai/ui@2.0.0'
+minimumReleaseAge: 0
