@@ -126,6 +126,16 @@ class TaskStore(ABC):
     def append_event(self, task_id: str, event_line: str) -> int:
         raise NotImplementedError
 
+    def append_events_batch(self, task_id: str, event_lines: list[str]) -> int:
+        """单次落库多条事件。默认实现为顺序回退。
+
+        子类应覆盖以将 N 次锁/写/meta 操作合并为 1 次，显著降低磁盘 I/O。
+        """
+        last = 0
+        for line in event_lines:
+            last = self.append_event(task_id, line)
+        return last
+
     @abstractmethod
     def list_events(self, task_id: str, since: int = 0) -> list[str]:
         raise NotImplementedError
@@ -297,15 +307,21 @@ class FileTaskStore(TaskStore):
             return self._meta_to_record(meta)
 
     def append_event(self, task_id: str, event_line: str) -> int:
+        return self.append_events_batch(task_id, [event_line])
+
+    def append_events_batch(self, task_id: str, event_lines: list[str]) -> int:
+        if not event_lines:
+            return 0
         events_path = self._events_path(task_id)
         events_path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self._lock_path(task_id))):
             with open(events_path, "a", encoding="utf-8") as f:
-                f.write(event_line if event_line.endswith("\n") else f"{event_line}\n")
+                for line in event_lines:
+                    f.write(line if line.endswith("\n") else f"{line}\n")
             meta = self._read_meta_unlocked(task_id)
             if not meta:
                 return 0
-            meta["event_count"] = int(meta.get("event_count") or 0) + 1
+            meta["event_count"] = int(meta.get("event_count") or 0) + len(event_lines)
             meta["updated_at"] = _utc_now()
             self._write_meta_unlocked(task_id, meta)
             return int(meta["event_count"])
@@ -564,24 +580,33 @@ class TursoTaskStore(TaskStore):
         return self.get_task(task_id)
 
     def append_event(self, task_id: str, event_line: str) -> int:
+        return self.append_events_batch(task_id, [event_line])
+
+    def append_events_batch(self, task_id: str, event_lines: list[str]) -> int:
+        if not event_lines:
+            return 0
         now = _utc_now()
         row = self._conn.execute(
             "SELECT COALESCE(MAX(seq), 0) FROM literature_task_events WHERE task_id = ?",
             (task_id,),
         ).fetchone()
-        seq = int(row[0] if row else 0) + 1
-        self._conn.execute(
+        base = int(row[0] if row else 0)
+        rows = [
+            (task_id, base + i + 1, line.rstrip("\n"), now)
+            for i, line in enumerate(event_lines)
+        ]
+        self._conn.executemany(
             """
             INSERT INTO literature_task_events (task_id, seq, event_line, created_at)
             VALUES (?, ?, ?, ?)
             """,
-            (task_id, seq, event_line.rstrip("\n"), now),
+            rows,
         )
         self._conn.execute(
             "UPDATE literature_tasks SET updated_at = ? WHERE id = ?",
             (now, task_id),
         )
-        return seq
+        return base + len(event_lines)
 
     def list_events(self, task_id: str, since: int = 0) -> list[str]:
         rows = self._conn.execute(

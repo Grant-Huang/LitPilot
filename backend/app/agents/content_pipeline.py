@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 CHUNK_SIZE = 3_200
 MAX_CHUNKS = 6
 MIN_USEFUL_CHARS = 80
+CHUNK_SUMMARY_PARALLEL = 4
 
 _INSTRUCTION_PATTERNS = [
     re.compile(p, re.I | re.M)
@@ -84,22 +86,31 @@ async def summarize_chunks(llm: BaseLLM, chunks: list[str], *, url: str) -> str:
     summary_system = await get_summary_system_prompt()
     chunk_tokens = await get_prompt_max_tokens("summary_system_template")
     merge_tokens = max(80, min(chunk_tokens, 500))
-    parts: list[str] = []
-    for i, ch in enumerate(chunks, 1):
-        resp = await llm.chat(
-            [
-                LLMMessage(
-                    role="user",
-                    content=f"来源 URL: {url}\n片段 {i}/{len(chunks)}:\n\n{ch[:CHUNK_SIZE]}",
-                ),
-            ],
-            system=summary_system,
-            max_tokens=chunk_tokens,
-            temperature=0.1,
-        )
-        part = (resp.content or "").strip()
-        if part:
-            parts.append(part)
+    sem = asyncio.Semaphore(CHUNK_SUMMARY_PARALLEL)
+
+    async def _one(idx: int, ch: str) -> str:
+        async with sem:
+            try:
+                resp = await llm.chat(
+                    [
+                        LLMMessage(
+                            role="user",
+                            content=f"来源 URL: {url}\n片段 {idx}/{len(chunks)}:\n\n{ch[:CHUNK_SIZE]}",
+                        ),
+                    ],
+                    system=summary_system,
+                    max_tokens=chunk_tokens,
+                    temperature=0.1,
+                )
+            except Exception:
+                return ""
+            return (resp.content or "").strip()
+
+    results = await asyncio.gather(
+        *[_one(i, ch) for i, ch in enumerate(chunks, 1)],
+        return_exceptions=False,
+    )
+    parts = [r for r in results if r]
     if not parts:
         return ""
     if len(parts) == 1:
