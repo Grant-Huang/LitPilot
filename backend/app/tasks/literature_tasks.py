@@ -414,8 +414,9 @@ class LiteratureTaskRegistry:
 
                 for norm_type, norm_payload in normalize_chat_event(ev_type, payload):
                     coalescer.add(norm_type, norm_payload)
-                # 每轮事件处理后顺手做一次空闲检查，避免 buffer 长期不刷
-                batch.maybe_flush_idle()
+                # 每轮事件处理后立即刷盘，避免后续阻塞操作将事件困在缓冲区
+                coalescer.flush()
+                batch.flush()
 
             _flush_both()
             current = self._store.get_task(task_id)
