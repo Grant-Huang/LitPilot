@@ -15,9 +15,14 @@ from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUD
 from app.core.config import DATA_DIR
 from app.core.deploy_defaults import (
     SENSITIVE_SETTING_KEYS,
+    build_instance_lookup,
+    deploy_capability_instance_bindings,
     deploy_credentials,
     deploy_instances,
+    deploy_prompt_instance_bindings,
     deploy_settings,
+    resolve_instance_id_for_binding,
+    resolved_prompt_instance_params,
 )
 
 
@@ -396,6 +401,7 @@ class FileStore:
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
             self._ensure_deploy_catalog()
+            self._ensure_prompt_instance_bindings()
             return
 
         legacy = self._legacy_agent_settings_merged()
@@ -526,7 +532,7 @@ class FileStore:
             self._save_config_list(self.system_instances_path, instances)
 
         # capabilities (bindings + system params)
-        from app.storage.runtime_settings import WEB_SEARCH_PARAM_DEFAULTS
+        from app.storage.runtime_settings import PROMPTS_PARAM_DEFAULTS, WEB_SEARCH_PARAM_DEFAULTS
 
         capabilities: list[dict[str, Any]] = []
 
@@ -605,6 +611,8 @@ class FileStore:
             "提示词模板",
             primary_ref=None,
             params={
+                **PROMPTS_PARAM_DEFAULTS,
+                **resolved_prompt_instance_params(instances),
             },
         )
 
@@ -625,6 +633,7 @@ class FileStore:
         self._ensure_default_capabilities()
         self._ensure_capability_param_defaults()
         self._ensure_deploy_catalog()
+        self._ensure_prompt_instance_bindings()
 
     _REQUIRED_CAPABILITY_IDS: tuple[str, ...] = (
         "review_main",
@@ -1047,6 +1056,68 @@ class FileStore:
         self._ensure_brave_credential()
         self._ensure_semantic_scholar_credential()
         self._ensure_provider_capability_labels()
+
+    def _ensure_prompt_instance_bindings(self) -> None:
+        """Seed empty prompt/capability instance bindings from deploy.defaults.json + env."""
+        if not self._config_path_exists(self.system_capabilities_path):
+            return
+        instances = (
+            self._load_config_list(self.system_instances_path)
+            if self.system_instances_path.is_file()
+            else []
+        )
+        inst_by_key, inst_by_name = build_instance_lookup(instances)
+        caps = self._load_config_list(self.system_capabilities_path)
+        changed = False
+        now = _utc_now()
+
+        for cap_id, binding in deploy_capability_instance_bindings().items():
+            cap = next((c for c in caps if str(c.get("capability_id") or "") == cap_id), None)
+            if not cap:
+                continue
+            if "primary_ref" in cap and cap.get("primary_ref") is None:
+                continue
+            ref = cap.get("primary_ref")
+            current_id = str(ref.get("id") or "") if isinstance(ref, dict) else ""
+            if current_id:
+                continue
+            want = resolve_instance_id_for_binding(
+                binding,
+                inst_by_key=inst_by_key,
+                inst_by_name=inst_by_name,
+            )
+            if not want:
+                continue
+            cap["primary_ref"] = {"kind": "instance", "id": want}
+            cap["updated_at"] = now
+            changed = True
+
+        prompts_cap = next(
+            (c for c in caps if str(c.get("capability_id") or "") == "prompts"),
+            None,
+        )
+        if prompts_cap is not None:
+            params = dict(prompts_cap.get("params") or {})
+            params_changed = False
+            for param_key, binding in deploy_prompt_instance_bindings().items():
+                if str(params.get(param_key) or "").strip():
+                    continue
+                want = resolve_instance_id_for_binding(
+                    binding,
+                    inst_by_key=inst_by_key,
+                    inst_by_name=inst_by_name,
+                )
+                if not want:
+                    continue
+                params[param_key] = want
+                params_changed = True
+            if params_changed:
+                prompts_cap["params"] = params
+                prompts_cap["updated_at"] = now
+                changed = True
+
+        if changed:
+            self._save_config_list(self.system_capabilities_path, caps)
 
     def _ensure_provider_capability_labels(self) -> None:
         if not self.system_capabilities_path.is_file():

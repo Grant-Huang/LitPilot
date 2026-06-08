@@ -6,10 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.deploy_defaults import (
+    build_instance_lookup,
+    deploy_capability_instance_bindings,
     deploy_credentials,
     deploy_instances,
+    deploy_prompt_instance_bindings,
     deploy_settings,
     defaults_path,
+    resolve_instance_id_for_binding,
+    resolved_prompt_instance_params,
 )
 from app.main import app
 from app.storage import backend as storage_backend
@@ -62,6 +67,36 @@ def test_deploy_catalog_has_stable_ids_and_bindings() -> None:
         assert inst.get("credential_key")
         assert cred_by_key.get(cred_key)
         assert str(inst.get("model_name") or "").strip()
+
+
+def test_deploy_prompt_instance_bindings_default_to_orchestrator() -> None:
+    bindings = deploy_prompt_instance_bindings()
+    assert bindings["router_instance_id"] == "orchestrator"
+    assert bindings["search_instance_id"] == "orchestrator"
+    assert bindings["assessor_instance_id"] == "orchestrator"
+    assert bindings["pipeline_instance_id"] == "orchestrator"
+    caps = deploy_capability_instance_bindings()
+    assert caps["orchestrator"] == "orchestrator"
+    assert caps["review_main"] == "review_main"
+
+
+def test_env_overrides_prompt_instance_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEARCH_INSTANCE_KEY", "review_main")
+    bindings = deploy_prompt_instance_bindings()
+    assert bindings["search_instance_id"] == "review_main"
+
+
+def test_resolved_prompt_instance_params_use_stable_ids() -> None:
+    inst_by_key, _ = build_instance_lookup(
+        [{"id": "runtime-orch", "name": "orchestrator"}]
+    )
+    orch_id = resolve_instance_id_for_binding("orchestrator", inst_by_key=inst_by_key)
+    assert orch_id
+    params = resolved_prompt_instance_params(
+        [{"id": orch_id, "name": "orchestrator"}, {"id": "runtime-review", "name": "review-main"}]
+    )
+    assert params["router_instance_id"] == orch_id
+    assert params["search_instance_id"] == orch_id
 
 
 @pytest.fixture
@@ -121,6 +156,48 @@ def test_migration_uses_stable_instance_ids_and_binds_credentials(
         json={"credential_id": llm_cred_id, "model_name": "deepseek-v4-pro"},
     )
     assert resp.status_code == 200, resp.text
+
+
+def test_migration_seeds_prompt_instance_bindings(
+    client: TestClient,
+    store: FileStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.delenv("ROUTER_INSTANCE_KEY", raising=False)
+
+    client.get("/api/settings/system/capabilities")
+
+    caps = store.list_system_capabilities()
+    prompts = next(c for c in caps if c.get("capability_id") == "prompts")
+    params = prompts.get("params") or {}
+    templates = {str(t["key"]): str(t["id"]) for t in deploy_instances()}
+    orch_id = templates["orchestrator"]
+    review_id = templates["review_main"]
+    assert params.get("router_instance_id") == orch_id
+    assert params.get("search_instance_id") == orch_id
+    assert params.get("assessor_instance_id") == orch_id
+    assert params.get("pipeline_instance_id") == orch_id
+
+    orch_cap = next(c for c in caps if c.get("capability_id") == "orchestrator")
+    review_cap = next(c for c in caps if c.get("capability_id") == "review_main")
+    assert orch_cap["primary_ref"]["id"] == orch_id
+    assert review_cap["primary_ref"]["id"] == review_id
+
+
+def test_prompt_instance_bindings_respect_explicit_unbind(store: FileStore) -> None:
+    store.ensure_settings_v2_migrated()
+    caps = store.list_system_capabilities()
+    for cap in caps:
+        if cap.get("capability_id") == "orchestrator":
+            cap["primary_ref"] = None
+    store._save_config_list(store.system_capabilities_path, caps)
+
+    store.ensure_settings_v2_migrated()
+
+    caps_after = store.list_system_capabilities()
+    orch_cap = next(c for c in caps_after if c.get("capability_id") == "orchestrator")
+    assert orch_cap.get("primary_ref") is None
 
 
 def test_deploy_catalog_remaps_legacy_random_instance_ids(

@@ -59,5 +59,15 @@
       "credential_key": "llm_primary",
       "model_name": "deepseek-v4-flash"
     }
-  ]
+  ],
+  "prompt_instance_bindings": {
+    "router_instance_id": "orchestrator",
+    "search_instance_id": "orchestrator",
+    "assessor_instance_id": "orchestrator",
+    "pipeline_instance_id": "orchestrator"
+  },
+  "capability_instance_bindings": {
+    "orchestrator": "orchestrator",
+    "review_main": "review_main"
+  }
 }

@@ -81,6 +81,7 @@ class TursoStore(FileStore):
             self._ensure_capability_param_defaults()
             self._ensure_default_instances()
             self._ensure_deploy_catalog()
+            self._ensure_prompt_instance_bindings()
             return
         super().ensure_settings_v2_migrated()
 
