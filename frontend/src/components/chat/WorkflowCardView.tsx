@@ -24,13 +24,30 @@ type Props = {
 };
 
 function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
+  const [expanded, setExpanded] = useState(false);
   const { primary, outcome } = formatInlineLogLine(step);
+  const hasDetail = Boolean(step.detail);
   const iconStatus =
     step.status === "running" || step.status === "pending"
       ? "running"
       : step.status === "error"
         ? "error"
         : "done";
+
+  const rowContent = (
+    <>
+      <span className="litpilot-log-line__primary">{primary}</span>
+      {outcome ? (
+        <span className="litpilot-log-line__outcome"> {outcome}</span>
+      ) : null}
+      {hasDetail ? (
+        <span className="litpilot-log-line__chevron" aria-hidden="true">
+          {expanded ? " ▾" : " ▸"}
+        </span>
+      ) : null}
+    </>
+  );
+
   return (
     <div
       className={`litpilot-log-line litpilot-log-line--${step.status}${
@@ -41,12 +58,23 @@ function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
       <span className="litpilot-log-line__marker">
         <StatusIcon status={iconStatus} />
       </span>
-      <p className="litpilot-log-line__text">
-        <span className="litpilot-log-line__primary">{primary}</span>
-        {outcome ? (
-          <span className="litpilot-log-line__outcome"> {outcome}</span>
+      <div className="litpilot-log-line__body">
+        {hasDetail ? (
+          <button
+            type="button"
+            className="litpilot-log-line__text litpilot-log-line__text--toggle"
+            onClick={() => setExpanded((o) => !o)}
+            aria-expanded={expanded}
+          >
+            {rowContent}
+          </button>
+        ) : (
+          <p className="litpilot-log-line__text">{rowContent}</p>
+        )}
+        {expanded && step.detail ? (
+          <pre className="litpilot-log-line__detail">{step.detail}</pre>
         ) : null}
-      </p>
+      </div>
     </div>
   );
 }

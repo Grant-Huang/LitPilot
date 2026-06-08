@@ -3814,20 +3814,28 @@ a.library-badge--action:hover {
   color: var(--lp-status-error);
 }
 
-.litpilot-log-line__detail-toggle {
-  margin-top: 2px;
-  padding: 0;
+/* Inline-expandable text row — looks like plain text, chevron appended */
+.litpilot-log-line__text--toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
   border: none;
   background: none;
-  font-size: var(--lp-fs-caption);
-  color: var(--color-text-muted);
+  padding: 0;
+  margin: 0;
+  font: inherit;
   cursor: pointer;
-  font-family: inherit;
+  word-break: break-word;
 }
 
-.litpilot-log-line__detail-toggle:hover {
+.litpilot-log-line__chevron {
+  color: var(--color-text-muted);
+  font-size: var(--lp-fs-caption);
+  user-select: none;
+}
+
+.litpilot-log-line__text--toggle:hover .litpilot-log-line__chevron {
   color: var(--color-text-secondary);
-  text-decoration: underline;
 }
 
 .litpilot-log-line__detail {
