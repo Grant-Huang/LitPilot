@@ -187,3 +187,70 @@ async def test_task_rerun_skips_duplicate_user_message(tmp_path, monkeypatch):
         msgs = store.load_messages(session["id"])
         assert sum(1 for m in msgs if m.get("role") == "user") == 1
         assert calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_initial_events_written_before_turn_yields() -> None:
+    """_run writes initial events (session, capabilities, stage) synchronously
+    before entering the async for loop over stream_literature_turn.
+
+    This is a regression test for a production bug where initial events went
+    through _EventBatchBuffer → batch.flush() → TursoTaskStore.append_events_batch
+    → self._conn.executemany(...), but TursoHttpConnection had no executemany
+    method, causing a silent AttributeError that left event_count=0 forever.
+    """
+    store = get_task_store()
+    record = store.create_task(session_id="sess-init", message="test init events")
+
+    async def _blocking_turn(*_args, **_kwargs):
+        # Block forever: this ensures _run never processes any turn events,
+        # so only the synchronous initial events (written before async for)
+        # end up in list_events.
+        block = asyncio.Event()
+        await block.wait()
+        yield ("stage", {"name": "完成", "state": "done"})  # unreachable
+
+    registry = get_task_registry()
+
+    with patch(
+        "app.tasks.literature_tasks.stream_literature_turn",
+        side_effect=_blocking_turn,
+    ):
+        runner = asyncio.create_task(registry._run(record.id))
+        # Yield to the event loop so _run executes up to its first await
+        # (which is inside _blocking_turn). At that point initial events
+        # must already be on disk.
+        await asyncio.sleep(0.15)
+
+        events = store.list_events(record.id, since=0)
+        task = store.get_task(record.id)
+
+        # Clean up: cancel the blocked runner
+        runner.cancel()
+        try:
+            await runner
+        except asyncio.CancelledError:
+            pass
+
+    assert task is not None
+    assert task.progress >= 2, (
+        f"Task progress not updated after initial events: {task.progress}"
+    )
+    assert task.stage == "understanding", (
+        f"Task stage not updated after init: {task.stage}"
+    )
+    assert len(events) >= 3, (
+        f"Initial events not written before turn yields: "
+        f"expected >= 3 (session, capabilities, stage), got {len(events)}"
+    )
+
+    # Verify individual event types are present
+    assert any("session" in e for e in events), (
+        f"Missing session event. Events: {events[:3]}"
+    )
+    assert any("capabilities" in e for e in events), (
+        f"Missing capabilities event. Events: {events[:3]}"
+    )
+    assert any('"理解研究问题"' in e or '"stage"' in e for e in events), (
+        f"Missing stage event. Events: {events[:3]}"
+    )

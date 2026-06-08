@@ -1,9 +1,10 @@
-"""Unit tests for file-backed literature task store."""
+"""Unit tests for file-backed and Turso-backed literature task store."""
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from app.tasks.task_store import FileTaskStore
+from app.tasks.task_store import FileTaskStore, TursoTaskStore
 
 
 def test_file_task_store_create_claim_and_events(tmp_path: Path) -> None:
@@ -64,4 +65,82 @@ def test_file_task_store_requeue_stale_running(tmp_path: Path) -> None:
     assert refreshed is not None
     assert refreshed.status == "pending"
     assert refreshed.worker_id is None
+
+
+# ---------------------------------------------------------------------------
+# TursoTaskStore tests
+# ---------------------------------------------------------------------------
+
+
+def test_turso_task_store_append_events_batch_uses_executemany() -> None:
+    """append_events_batch must call executemany on the connection.
+
+    This test was added after a production bug where TursoHttpConnection had no
+    executemany method, causing a silent AttributeError that dropped all batched
+    events. The test verifies that TursoTaskStore delegates to executemany
+    with correct SQL and parameters.
+    """
+    mock_conn = MagicMock()
+    max_seq_result = MagicMock()
+    max_seq_result.fetchone.return_value = (0,)
+    mock_conn.execute.return_value = max_seq_result
+
+    with patch("app.storage.turso_http.get_connection", return_value=mock_conn):
+        with patch("app.storage.turso_db.apply_migrations"):
+            store = TursoTaskStore()
+
+    events = [
+        'data: {"name":"session","version":"1.0","data":{"session_id":"s1"}}\n\n',
+        'data: {"type":"capabilities"}\n\n',
+    ]
+    count = store.append_events_batch("task-1", events)
+
+    assert mock_conn.executemany.called, (
+        "TursoTaskStore.append_events_batch must delegate to "
+        "self._conn.executemany for batch INSERT"
+    )
+    assert count == 2
+
+    sql, rows = mock_conn.executemany.call_args[0]
+    assert "INSERT INTO literature_task_events" in sql
+    assert len(rows) == 2
+    # Verify each row has the correct shape: (task_id, seq, event_line, created_at)
+    assert rows[0][0] == "task-1"
+    assert rows[0][1] == 1
+    assert rows[0][2] == events[0].rstrip("\n")
+    assert rows[1][0] == "task-1"
+    assert rows[1][1] == 2
+    assert rows[1][2] == events[1].rstrip("\n")
+
+
+def test_turso_task_store_append_events_batch_empty() -> None:
+    """append_events_batch with empty list returns 0 without calling the DB."""
+    mock_conn = MagicMock()
+
+    with patch("app.storage.turso_http.get_connection", return_value=mock_conn):
+        with patch("app.storage.turso_db.apply_migrations"):
+            store = TursoTaskStore()
+
+    count = store.append_events_batch("task-1", [])
+    assert count == 0
+    mock_conn.execute.assert_not_called()
+    mock_conn.executemany.assert_not_called()
+
+
+def test_turso_task_store_append_event_delegates_to_batch() -> None:
+    """append_event delegates to append_events_batch (and therefore executemany)."""
+    mock_conn = MagicMock()
+    max_seq_result = MagicMock()
+    max_seq_result.fetchone.return_value = (0,)
+    mock_conn.execute.return_value = max_seq_result
+
+    with patch("app.storage.turso_http.get_connection", return_value=mock_conn):
+        with patch("app.storage.turso_db.apply_migrations"):
+            store = TursoTaskStore()
+
+    count = store.append_event("task-2", 'data: {"type":"stage"}\n\n')
+    assert count == 1
+    mock_conn.executemany.assert_called_once()
+    sql, rows = mock_conn.executemany.call_args[0]
+    assert len(rows) == 1  # single event → single row batch
 

@@ -1,0 +1,53 @@
+---
+description: 修改 Turso Store 时强制检查 HTTP 连接层方法完备性
+globs: backend/app/storage/turso_*.py,backend/app/tasks/task_store.py,backend/app/tasks/literature_tasks.py
+alwaysApply: false
+---
+
+# Turso Store → HTTP 连接层方法完备性
+
+## 核心原则
+
+`TursoTaskStore` / `TursoStore` / `TursoRepo` 等上层 Store 的所有 DB 操作都委托给
+`TursoHttpConnection`（`backend/app/storage/turso_http.py`）。
+
+**当 Store 层新增调用 `self._conn.xxx(...)` 时，必须验证 `TursoHttpConnection` 已经实现 `xxx` 方法。**
+
+## 已知方法清单
+
+`TursoHttpConnection` 必须实现的方法（与 Python DB-API / `sqlite3` 对标）：
+
+| 方法 | 用途 | 返回类型 |
+|------|------|----------|
+| `execute(sql, params)` | 单条 SQL 执行 | `TursoCursor`（支持 `fetchall()`, `fetchone()`） |
+| `executemany(sql, seq_of_parameters)` | 同一条 SQL 的多组参数批量执行 | `TursoCursor` |
+| `execute_many(statements)` | 多条不同 DDL/DML 的 pipeline 执行 | `None` |
+| `commit()` | HTTP pipeline 自动提交，空操作 | `None` |
+| `close()` | 关闭底层 httpx 连接 | `None` |
+
+## 变更检查清单
+
+当修改以下文件时，必须自检：
+
+1. **新增参数化方法调用** — 如 `self._conn.executemany(...)`
+   → 确认 `turso_http.py` 已实现该方法，且签名兼容。
+2. **返回类型依赖** — Store 调用 `fetchone()` / `fetchall()`
+   → 确认 `TursoCursor` 已提供这些方法。
+3. **批量写入场景** — `append_events_batch` 等批量操作
+   → 必须有对应的单元测试覆盖 pipeline 请求构造。
+
+## 测试要求
+
+- `turso_http.py` 新增方法必须有对应的 `tests/test_turso_http.py` 单元测试
+- `TursoTaskStore` 新增方法必须有对应的 `tests/test_task_store.py` 测试
+- 涉及初始事件写入的变更必须有 `tests/test_literature_tasks.py` 测试验证事件立即可读
+
+## 反例（本案）
+
+```python
+# TursoTaskStore.append_events_batch 中直接调用：
+self._conn.executemany("INSERT INTO ...", rows)  # ❌ TursoHttpConnection 无此方法
+
+# 当时 TursoHttpConnection 仅实现了 execute() 和 execute_many()，
+# 缺少 executemany()，导致 AttributeError 静默丢失批量事件。
+```
