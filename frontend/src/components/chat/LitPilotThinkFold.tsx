@@ -21,13 +21,15 @@ export function LitPilotThinkFold({
   const contentRef = useRef<HTMLDivElement>(null);
   const wasPhaseStreamingRef = useRef(streaming);
   const wasTurnStreamingRef = useRef(turnStreaming ?? streaming);
+  const userToggledRef = useRef(false);
 
   useEffect(() => {
     if (streaming && !wasPhaseStreamingRef.current) {
       setOpen(true);
     }
     const turnActive = turnStreaming ?? streaming;
-    if (!turnActive && wasTurnStreamingRef.current) {
+    // Only auto-collapse on done if the user never manually toggled
+    if (!turnActive && wasTurnStreamingRef.current && !userToggledRef.current) {
       setOpen(false);
     }
     wasPhaseStreamingRef.current = streaming;
@@ -47,24 +49,24 @@ export function LitPilotThinkFold({
 
   if (!hasContent && !streaming) return null;
 
+  const handleToggle = () => {
+    userToggledRef.current = true;
+    setOpen((o) => !o);
+  };
+
   return (
     <div className={`lp-think-fold${open ? " lp-think-fold--open" : ""}${streaming ? " lp-think-fold--streaming" : ""}`}>
       <button
         type="button"
         className="lp-think-fold__header"
-        onClick={() => setOpen((o) => !o)}
+        onClick={handleToggle}
         aria-expanded={open}
       >
         <StatusIcon status={streaming ? "running" : "done"} />
         <span className="lp-think-fold__label">{headerLabel}</span>
-        <svg
-          className={`lp-think-fold__chevron${open ? " lp-think-fold__chevron--open" : ""}`}
-          width="12" height="12" viewBox="0 0 12 12"
-          fill="none" stroke="currentColor" strokeWidth="1.5"
-          strokeLinecap="round" strokeLinejoin="round" aria-hidden
-        >
-          <polyline points="2.5,4.5 6,8 9.5,4.5" />
-        </svg>
+        <span className="lp-think-fold__chevron" aria-hidden="true">
+          {open ? " ▾" : " ▸"}
+        </span>
       </button>
       {open ? (
         <div className="lp-think-fold__body">
@@ -78,7 +80,7 @@ export function LitPilotThinkFold({
                   seg.kind === "system" ? (
                     <p key={idx} className="lp-think-fold__system">{seg.text}</p>
                   ) : (
-                    <span key={idx} className="lp-think-fold__model">{seg.text}</span>
+                    <p key={idx} className="lp-think-fold__model">{seg.text}</p>
                   ),
                 )
               : null}

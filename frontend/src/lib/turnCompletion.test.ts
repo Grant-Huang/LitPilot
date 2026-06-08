@@ -27,7 +27,7 @@ describe("formatToolLogLine", () => {
       "done",
     );
     expect(line.primary).toContain("AI MOM");
-    expect(line.outcome).toContain("命中 5 条");
+    expect(line.outcome).toContain("找到 5 篇文献");
     expect(line.outcome).toContain("21s");
     expect(line.rawDetail).toBeNull();
   });

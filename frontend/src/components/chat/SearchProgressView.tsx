@@ -5,6 +5,7 @@ import {
   buildSearchProgressTree,
   subtopicDisplayTitle,
   subtopicStatusLabel,
+  subtopicDone,
   type SubtopicProgressNode,
   type SourceNode,
   type FilterDetailItem,
@@ -86,6 +87,10 @@ function SubtopicBlock({
   const status = subtopicStatusLabel(node);
   const pending =
     node.search.status === "running" || node.filter.status === "running";
+  const headIconStatus =
+    pending ? "running"
+    : subtopicDone(node) ? "done"
+    : "pending";
 
   return (
     <div className={`litpilot-search-topic litpilot-search-topic--${pending ? "running" : "done"}`}>
@@ -96,7 +101,7 @@ function SubtopicBlock({
         aria-expanded={open}
       >
         <span className="litpilot-search-topic__marker">
-          <StatusIcon status={pending ? "running" : "done"} />
+          <StatusIcon status={headIconStatus} />
         </span>
         <span className="litpilot-search-topic__title">{title}</span>
         <span className="litpilot-search-topic__status">{status}</span>

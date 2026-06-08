@@ -76,8 +76,13 @@ function ensureSubtopic(
   return node;
 }
 
-function subtopicDone(node: SubtopicProgressNode): boolean {
+export function subtopicDone(node: SubtopicProgressNode): boolean {
   return node.search.status === "done" && node.filter.status === "done";
+}
+
+/** 已过检索阶段即为"完成检索"：用于 aggregate 计数（不含 filter 状态判断）。 */
+function subtopicSearchDone(node: SubtopicProgressNode): boolean {
+  return node.search.status === "done";
 }
 
 export function buildSearchProgressTree(
@@ -207,8 +212,8 @@ export function buildSearchProgressTree(
   }
 
   const totalSubtopics = subtopics.length;
-  const completedSubtopics = subtopics.filter(subtopicDone).length;
-  const allDone = totalSubtopics > 0 && completedSubtopics >= totalSubtopics;
+  const completedSubtopics = subtopics.filter(subtopicSearchDone).length;
+  const allDone = totalSubtopics > 0 && subtopics.filter(subtopicDone).length >= totalSubtopics;
 
   return {
     subtopics,

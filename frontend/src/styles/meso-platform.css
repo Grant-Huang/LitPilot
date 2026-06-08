@@ -4477,12 +4477,9 @@ a.library-badge--action:hover {
 }
 
 .lp-think-fold__chevron {
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.lp-think-fold__chevron--open {
-  transform: rotate(180deg);
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
 }
 
 .lp-think-fold__body {
@@ -4500,13 +4497,20 @@ a.library-badge--action:hover {
 }
 
 .lp-think-fold__system {
-  margin: 0 0 var(--lp-space-1);
+  display: block;
+  margin: 0;
   color: var(--color-text-muted);
   font-style: italic;
 }
 
 .lp-think-fold__model {
-  /* inline，跟随正常文本流 */
+  display: block;
+  margin: 0;
+}
+
+.lp-think-fold__system + .lp-think-fold__model,
+.lp-think-fold__model + .lp-think-fold__system {
+  margin-top: 6px;
 }
 
 .lp-think-fold__cursor {

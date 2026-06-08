@@ -101,8 +101,8 @@ describe("extractStreamParallelism", () => {
       },
     ] as StreamState["extensionLog"]);
     expect(formatParallelismChips(info)).toEqual([
-      "检索 3 主题并行",
-      "抓取 4 路并行",
+      "并行检索 3 个子主题",
+      "同时抓取 4 篇",
     ]);
   });
 
@@ -118,6 +118,6 @@ describe("extractStreamParallelism", () => {
         },
       },
     ] as StreamState["extensionLog"]);
-    expect(formatParallelismChips(info)).toEqual(["抓取 3 路并行"]);
+    expect(formatParallelismChips(info)).toEqual(["同时抓取 3 篇"]);
   });
 });

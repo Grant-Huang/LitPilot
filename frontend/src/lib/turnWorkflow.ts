@@ -294,12 +294,12 @@ export function buildTurnWorkflowFromTrace(
     const existing = cards.find((c) => c.type === ctype && c.state === "running");
     if (existing) {
       existing.state = stageState(stage.state);
-      existing.title = stage.name;
+      existing.title = CARD_TITLES[ctype] || stage.name;
     } else {
       cards.push({
         id: `card-${ctype}-${cards.length}`,
         type: ctype,
-        title: stage.name || CARD_TITLES[ctype],
+        title: CARD_TITLES[ctype] || stage.name,
         state: stageState(stage.state),
         steps: [...(extByPhase[ctype] ?? [])],
         locked: ctype === "clarify",
@@ -351,6 +351,17 @@ export function buildTurnWorkflowFromTrace(
             : line.title.includes("attributes") || line.title.includes("结构化")
               ? cards.find((c) => c.type === "attributes")
               : fetchCard;
+      // Skip pass-level search steps with (N/M) numbering — the
+      // SearchProgressView subtopic blocks already display this info.
+      if (target?.type === "search" && /（\d+\/\d+）/.test(step.title)) {
+        continue;
+      }
+      // Skip per-provider academic source search steps (e.g.
+      // "检索学术文献（openalex）：query") — they are already displayed
+      // as SourceRow inside each subtopic's search phase.
+      if (target?.type === "search" && step.title.includes("学术文献（")) {
+        continue;
+      }
       if (target && !target.steps.some((s) => s.key === step.key)) {
         target.steps.push(step);
       }

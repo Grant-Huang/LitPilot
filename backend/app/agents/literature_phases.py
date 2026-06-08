@@ -165,7 +165,7 @@ async def stream_search_phase(
     elif pass_total > 1:
         label = format_pass_query_label(query)
         async for ev in emit_system_think_line(
-            f"⟦sys⟧第 {pass_index}/{pass_total} 轮检索：{label}⟦/sys⟧",
+            f"第 {pass_index}/{pass_total} 轮检索：{label}",
             accumulator=think_acc,
         ):
             yield ev
@@ -309,7 +309,7 @@ async def stream_search_phase(
         )
         if filter_warning:
             async for ev in emit_system_think_line(
-                f"⟦sys⟧{filter_warning}⟦/sys⟧",
+                filter_warning,
                 accumulator=think_acc,
             ):
                 yield ev
@@ -384,14 +384,14 @@ async def stream_search_phase(
             and not upload_urls
         ):
             async for ev in emit_system_think_line(
-                "⟦sys⟧单轮检索无命中（pass_hit_counts=[0]，未进入合并阶段）。⟦/sys⟧",
+                "单轮检索无命中（pass_hit_counts=[0]，未进入合并阶段）。",
                 accumulator=think_acc,
             ):
                 yield ev
             raise ValueError("未检索到可用文献结果，本次会话已终止。")
         if pass_total > 1 and not hits and not answer:
             async for ev in emit_system_think_line(
-                f"⟦sys⟧第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。⟦/sys⟧",
+                f"第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。",
                 accumulator=think_acc,
             ):
                 yield ev
@@ -576,7 +576,7 @@ async def _stream_expanded_multi_academic_by_source(
             )
             if filter_warning:
                 async for ev in emit_system_think_line(
-                    f"⟦sys⟧{filter_warning}⟦/sys⟧",
+                    filter_warning,
                     accumulator=think_acc,
                 ):
                     yield ev
@@ -634,7 +634,7 @@ async def _stream_expanded_multi_academic_by_source(
             )
             if not hits:
                 async for ev in emit_system_think_line(
-                    f"⟦sys⟧第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。⟦/sys⟧",
+                    f"第 {pass_index}/{pass_total} 轮未命中，继续下一子主题。",
                     accumulator=think_acc,
                 ):
                     yield ev

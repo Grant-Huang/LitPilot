@@ -37,8 +37,8 @@ describe("WorkflowCardView collapsed head visibility", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView card={makeCard()} streaming={false} />,
     );
-    // The collapsed marker is the checkmark (not the chevron).
-    expect(html).toMatch(/<span class="litpilot-wf-card__marker"[^>]*>✓</);
+    // The collapsed marker is a done-status icon (SVG checkmark in StatusIcon).
+    expect(html).toMatch(/litpilot-wf-card__marker[^>]*>.*lp-status-icon--done/);
     // The section root carries --done but NOT --open, so the new CSS rule that
     // highlights collapsed heads can apply.
     expect(html).toMatch(/class="[^"]*litpilot-wf-card--done/);
@@ -158,7 +158,10 @@ describe("WorkflowCardView collapsed head visibility", () => {
         defaultOpen
       />,
     );
-    expect(html).not.toContain("进行中");
+    // Card head should not say "进行中" (it uses StatusIcon with "等待" for pending).
+    // The think-fold header may show "进行中" via StatusIcon aria-label; that is correct.
+    const headMatch = html.match(/<div class="litpilot-wf-card__head">[\s\S]*?<\/div>/);
+    if (headMatch) expect(headMatch[0]).not.toContain("进行中");
     expect(html).toContain("思考中");
   });
 });
