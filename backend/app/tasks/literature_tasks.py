@@ -45,6 +45,26 @@ LIT_PROGRESS_STAGE: dict[str, tuple[int, str, int]] = {
 
 STREAM_POLL_SEC = 0.05
 HEARTBEAT_SEC = 15.0
+
+
+def _stamp_yield_ms(line: str) -> str:
+    """[3-layer trace] 在 SSE 行 yield 前注入 _trace.yield_ms（不影响事件本体）。"""
+    if not line.startswith("data: "):
+        return line
+    suffix_idx = line.find("\n\n")
+    if suffix_idx < 0:
+        return line
+    body = line[6:suffix_idx]
+    try:
+        obj = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return line
+    trace = obj.get("_trace")
+    if not isinstance(trace, dict):
+        trace = {}
+        obj["_trace"] = trace
+    trace["yield_ms"] = time.time() * 1000.0
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 DEFAULT_SWEEP_SEC = 30
 DEFAULT_STALE_SEC = 600
 
@@ -339,7 +359,12 @@ class LiteratureTaskRegistry:
         prev_progress = record.progress
         prev_stage = record.stage
         record = self._progress_from_event(record, event_type, payload)
-        line = sse_event(event_type, payload)
+        # [3-layer trace] T1: persist 时间戳（事件落盘瞬间）
+        line = sse_event(
+            event_type,
+            payload,
+            trace={"persist_ms": time.time() * 1000.0},
+        )
         if batch is not None:
             batch.add(line)
         else:
@@ -485,7 +510,8 @@ class LiteratureTaskRegistry:
                 return
             events = self._store.list_events(task_id, since=cursor)
             for line in events:
-                yield line
+                # [3-layer trace] T2: yield 时间戳（事件从后端发出瞬间）
+                yield _stamp_yield_ms(line)
                 cursor += 1
             if events:
                 last_activity = time.monotonic()

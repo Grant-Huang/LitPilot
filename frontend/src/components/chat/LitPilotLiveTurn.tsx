@@ -1,6 +1,7 @@
 "use client";
 
 import { TurnWorkflowBlock } from "./TurnWorkflowBlock";
+import { DebugTracePanel } from "./DebugTracePanel";
 import type { StreamState } from "@meso.ai/ui";
 import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import {
@@ -51,6 +52,7 @@ export function LitPilotLiveTurn({
           renderMarkdown={renderSimpleMarkdown}
         />
       ) : null}
+      <DebugTracePanel />
     </div>
   );
 }

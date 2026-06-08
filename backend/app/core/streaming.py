@@ -25,12 +25,19 @@ STANDARD_TYPES = frozenset({
 EXTENSION_TYPES = frozenset({"session"})
 
 
-def sse_event(event_type: str, payload: dict[str, Any] | None = None) -> str:
-    body = {
+def sse_event(
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    trace: dict[str, Any] | None = None,
+) -> str:
+    body: dict[str, Any] = {
         "type": event_type,
         "schema_version": PROTOCOL_VERSION,
         "payload": payload or {},
     }
+    if trace is not None:
+        body["_trace"] = trace
     return f"data: {json.dumps(body, ensure_ascii=False)}\n\n"
 
 
