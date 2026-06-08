@@ -7,6 +7,7 @@ import { buildTurnCompletionSummary } from "@/lib/turnCompletion";
 import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext";
 import { TurnCompletionBar } from "./TurnCompletionBar";
 import { WorkflowCardView } from "./WorkflowCardView";
+import { StatusIcon } from "./StatusIcon";
 
 type Props = {
   workflow: TurnWorkflow;
@@ -50,24 +51,29 @@ export function TurnWorkflowBlock({
     if (!streaming) return null;
     return (
       <div className="litpilot-turn-log litpilot-turn-log--pending">
-        <div className="litpilot-wf-card litpilot-wf-card--running litpilot-wf-card--open litpilot-wf-card--live">
-          <div className="litpilot-wf-card__head">
-            <span className="litpilot-wf-card__title">理解研究问题</span>
-          </div>
-          <div className="litpilot-wf-card__body">
-            <div className="litpilot-log-lines" role="list">
-              <div
-                className="litpilot-log-line litpilot-log-line--running"
-                role="listitem"
-              >
-                <span className="litpilot-log-line__marker" aria-hidden="true">
-                  <span className="litpilot-log-line__spinner" />
-                </span>
-                <p className="litpilot-log-line__text">
-                  <span className="litpilot-log-line__primary">
-                    {liveProcessText.trim() || "正在连接并分析研究问题…"}
+        <div className="litpilot-turn-log__cards">
+          <div className="litpilot-wf-card litpilot-wf-card--running litpilot-wf-card--open litpilot-wf-card--live">
+            <div className="litpilot-wf-card__head">
+              <span className="litpilot-wf-card__marker">
+                <StatusIcon status="running" />
+              </span>
+              <span className="litpilot-wf-card__title">理解研究问题</span>
+            </div>
+            <div className="litpilot-wf-card__body">
+              <div className="litpilot-log-lines" role="list">
+                <div
+                  className="litpilot-log-line litpilot-log-line--running"
+                  role="listitem"
+                >
+                  <span className="litpilot-log-line__marker">
+                    <StatusIcon status="running" />
                   </span>
-                </p>
+                  <p className="litpilot-log-line__text">
+                    <span className="litpilot-log-line__primary">
+                      {liveProcessText.trim() || "正在理解你的研究问题…"}
+                    </span>
+                  </p>
+                </div>
               </div>
             </div>
           </div>

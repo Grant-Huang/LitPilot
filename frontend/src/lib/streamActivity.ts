@@ -36,7 +36,7 @@ const STAGE_LABELS: Record<string, string> = {
   cite: "引用抽取",
   generate: "综述生成",
   understand: "理解研究问题",
-  brief: "Brief 评估",
+  brief: "研究计划",
 };
 
 function latestSearchDetail(
@@ -76,7 +76,7 @@ export function extractStreamParallelism(
       if (mode === "by_source") {
         const n =
           typeof data.source_parallel === "number" ? data.source_parallel : 5;
-        searchLabel = `检索 ${n} 源并行`;
+        searchLabel = `并行检索 ${n} 个数据源`;
       } else if (mode === "by_topic") {
         const n =
           typeof data.topic_parallel === "number"
@@ -84,7 +84,7 @@ export function extractStreamParallelism(
             : typeof data.search_parallel === "number"
               ? data.search_parallel
               : 1;
-        if (n > 1) searchLabel = `检索 ${n} 主题并行`;
+        if (n > 1) searchLabel = `并行检索 ${n} 个子主题`;
       }
     }
     if (name === "literature_progress" && data.stage === "fetch") {
@@ -110,7 +110,7 @@ export function formatParallelismChips(
   const chips: string[] = [];
   if (info.searchLabel) chips.push(info.searchLabel);
   if (info.fetchParallel != null && info.fetchParallel > 1) {
-    chips.push(`抓取 ${info.fetchParallel} 路并行`);
+    chips.push(`同时抓取 ${info.fetchParallel} 篇`);
   }
   return chips;
 }
@@ -220,7 +220,7 @@ export function formatStreamActivityHint(snapshot: StreamActivitySnapshot): stri
     parts.push(`${snapshot.progress.completed}/${snapshot.progress.total}`);
   }
   if (snapshot.level === "waiting" || snapshot.level === "slow") {
-    parts.push(`已等待 ${snapshot.silenceSec}s`);
+    parts.push(`等待中 ${snapshot.silenceSec}s`);
   } else if (snapshot.elapsedSec > 0) {
     parts.push(`${snapshot.elapsedSec}s`);
   }

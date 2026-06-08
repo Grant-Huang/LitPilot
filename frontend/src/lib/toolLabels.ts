@@ -177,8 +177,8 @@ export function previewToolResult(
       if (typeof data.hits === "number") {
         const ans = String(data.answer ?? "").trim();
         line = ans
-          ? `命中 ${data.hits} 条；${ans}`
-          : `命中 ${data.hits} 条文献`;
+          ? `找到 ${data.hits} 篇；${ans}`
+          : `找到 ${data.hits} 篇文献`;
       } else if (data.answer) {
         line = String(data.answer);
       }
@@ -224,7 +224,7 @@ function parseSearchOutput(output: string | undefined): string | null {
     const data = JSON.parse(raw) as Record<string, unknown>;
     if (typeof data.hits !== "number") return null;
     const ans = String(data.answer ?? "").trim();
-    const base = ans ? `命中 ${data.hits} 条；${ans}` : `命中 ${data.hits} 条`;
+    const base = ans ? `找到 ${data.hits} 篇；${ans}` : `找到 ${data.hits} 篇文献`;
     return base.length > 120 ? `${base.slice(0, 120)}…` : base;
   } catch {
     return null;
