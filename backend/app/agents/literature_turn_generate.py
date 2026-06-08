@@ -433,15 +433,15 @@ async def _stream_review(
             if body_sections:
                 body_results: dict[str, list[tuple[str, dict[str, Any]]]] = {}
                 body_bodies: dict[str, str] = {}
+                body_errors: set[str] = set()
                 sem = asyncio.Semaphore(min(MAX_PARALLEL_SECTIONS, len(body_sections)))
                 intro_digest = (intro_body or "").strip()[:600]
 
-                async def _gen_body(sec) -> None:
+                async def _gen_body(sec: Any) -> None:
                     async with sem:
                         events: list[tuple[str, dict[str, Any]]] = []
                         body_buf: list[str] = []
                         try:
-                            sec_tokens = section_tokens
                             async for chunk in stream_section_generate(
                                 ctx.llm,
                                 outline=outline_obj,
@@ -452,19 +452,22 @@ async def _stream_review(
                                 gen_directives=gen_directives,
                                 writing_emphasis=ctx.planner_ctx.writing_emphasis,
                                 is_refine=False,
-                                max_tokens=sec_tokens,
+                                max_tokens=section_tokens,
                             ):
-                                body_buf.append(chunk)
-                                events.append(
-                                    artifact_stream_delta(review_art_id, chunk)
-                                )
+                                if chunk:
+                                    body_buf.append(chunk)
+                                    events.append(
+                                        artifact_stream_delta(review_art_id, chunk)
+                                    )
                         except Exception:
                             _log.exception("section %s streaming failed", sec.id)
+                            body_errors.add(sec.id)
                         body_results[sec.id] = events
                         body_bodies[sec.id] = "".join(body_buf)
 
                 tasks = [asyncio.create_task(_gen_body(s)) for s in body_sections]
-                # 按 outline 顺序：等到该 section 完成 → 一次性刷出其事件
+                SECTION_TIMEOUT = 180  # 每章节最长生成时间
+
                 for sec in body_sections:
                     stage_label = f"撰写：{sec.title[:24]}"
                     async for ev in sync_graph_node(
@@ -478,9 +481,20 @@ async def _stream_review(
                         yield ev
                     yield ("stage", {"name": stage_label, "state": "active"})
 
-                    # 等当前 section 任务完成
-                    target = next(t for t, s in zip(tasks, body_sections) if s.id == sec.id)
-                    await target
+                    # 等当前 section 任务完成（带超时）
+                    target = next(
+                        t for t, s in zip(tasks, body_sections) if s.id == sec.id
+                    )
+                    try:
+                        await asyncio.wait_for(target, timeout=SECTION_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        _log.warning(
+                            "section %s timed out after %ss", sec.id, SECTION_TIMEOUT
+                        )
+                        target.cancel()
+                        body_errors.add(sec.id)
+                        body_bodies.setdefault(sec.id, "")
+
                     for ev in body_results.get(sec.id, []):
                         yield ev
                     sec_body = body_bodies.get(sec.id, "")

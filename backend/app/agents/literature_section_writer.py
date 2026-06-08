@@ -21,6 +21,10 @@ def _papers_by_id(paper_index: list[dict[str, Any]]) -> dict[str, PaperRecord]:
             rec = PaperRecord.from_dict(raw)
             if rec.paper_id:
                 out[rec.paper_id] = rec
+            # Also index by URL so that mount_papers_by_subtopic_tags (which
+            # stores URLs in mounted_paper_ids) can find the record.
+            if rec.url:
+                out[rec.url] = rec
     return out
 
 
