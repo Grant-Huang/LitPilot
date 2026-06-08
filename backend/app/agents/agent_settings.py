@@ -1,24 +1,35 @@
-"""Agent settings from file store + environment."""
-
+"""Agent settings from file store + environment — with short-TTL memory cache."""
 from __future__ import annotations
 
 import os
-
+import time
 from typing import Any
-
 
 
 from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUDE_DOMAINS
 
 from app.storage.file_store import get_store
 
+# 内存 TTL 缓存：避免每次请求对 Turso / File 做多次全量设置查询
+_SETTINGS_CACHE: dict[str, Any] | None = None
+_SETTINGS_CACHE_TS: float = 0.0
+_SETTINGS_TTL_SEC = float(os.getenv("LITPILOT_SETTINGS_CACHE_SEC", "15").strip() or "15")
 
 
+def _clear_settings_cache() -> None:
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_TS
+    _SETTINGS_CACHE = None
+    _SETTINGS_CACHE_TS = 0.0
 
 
 async def get_merged_settings() -> dict[str, Any]:
-
-    return get_store().get_agent_settings_merged()
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_TS
+    now = time.monotonic()
+    if _SETTINGS_CACHE is not None and now - _SETTINGS_CACHE_TS < _SETTINGS_TTL_SEC:
+        return _SETTINGS_CACHE
+    _SETTINGS_CACHE = get_store().get_agent_settings_merged()
+    _SETTINGS_CACHE_TS = now
+    return _SETTINGS_CACHE
 
 
 

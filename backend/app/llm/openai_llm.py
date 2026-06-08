@@ -27,6 +27,22 @@ class OpenAILLM(BaseLLM):
         }
         return self.config.model or defaults.get(self.config.provider, "gpt-4o-mini")
 
+    def _deepseek_extra_body(self) -> dict | None:
+        """DeepSeek v4 默认开启思考模式，按模型自动控制：
+        - deepseek-v4-pro：保持思考模式（review 任务需要深度推理）
+        - deepseek-v4-flash / deepseek-chat：关闭思考（编排/理解等快响应场景）
+        实例 extra.thinking 可显式覆盖（"enabled" / "disabled"）。
+        """
+        model = (self.config.model or "").lower()
+        if not model.startswith("deepseek-"):
+            return None
+        extra = self.config.extra or {}
+        if "thinking" in extra:
+            return {"thinking": {"type": "disabled"}} if extra["thinking"] == "disabled" else None
+        if model in ("deepseek-v4-pro", "deepseek-reasoner"):
+            return None  # 不传 thinking → API 默认思考模式
+        return {"thinking": {"type": "disabled"}}
+
     def _build_messages(
         self,
         messages: list[LLMMessage],
@@ -52,6 +68,7 @@ class OpenAILLM(BaseLLM):
             messages=self._build_messages(messages, system),
             max_tokens=max_tokens,
             temperature=temperature,
+            extra_body=self._deepseek_extra_body(),
         )
         return LLMResponse(
             content=resp.choices[0].message.content or "",
@@ -75,8 +92,44 @@ class OpenAILLM(BaseLLM):
             max_tokens=max_tokens,
             temperature=temperature,
             stream=True,
+            extra_body=self._deepseek_extra_body(),
         )
         async for chunk in stream:
-            delta = chunk.choices[0].delta.content if chunk.choices else None
-            if delta:
-                yield delta
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
+            text = delta.content or ""
+            if text:
+                yield text
+
+    async def chat_stream_parts(
+        self,
+        messages: list[LLMMessage],
+        system: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.3,
+        *,
+        use_reasoning: bool = False,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """流式返回 (kind, piece)，DeepSeek 思考模式下 reasoning_content 也会作为 reasoning 输出。"""
+        from app.llm.base import StreamPartKind
+
+        model = self._default_model()
+        stream = await self._client.chat.completions.create(
+            model=model,
+            messages=self._build_messages(messages, system),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=True,
+            extra_body=self._deepseek_extra_body(),
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+            content = delta.content or ""
+            if reasoning:
+                yield ("reasoning", reasoning)
+            if content:
+                yield ("content", content)
