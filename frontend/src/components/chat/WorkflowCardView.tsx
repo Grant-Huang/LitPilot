@@ -50,8 +50,9 @@ function cardHeadMarker(
   card: WorkflowCard,
   open: boolean,
   isRunning: boolean,
+  hasThinkStream: boolean,
 ): string | "spinner" {
-  if (isRunning) return "spinner";
+  if (isRunning && !hasThinkStream) return "spinner";
   if (card.state === "done") return open ? "▾" : "✓";
   return open ? "▾" : "▸";
 }
@@ -90,9 +91,16 @@ export function WorkflowCardView({
     [card.steps],
   );
 
-  const statusLabel = isRunning && open ? "进行中" : null;
+  const hasThinkStream =
+    (card.type === "understand" ||
+      card.type === "brief" ||
+      card.type === "search") &&
+    Boolean(trace?.thinkContent?.trim() || (streaming && isRunning));
 
-  const marker = cardHeadMarker(card, open, isRunning);
+  const statusLabel =
+    isRunning && open && !hasThinkStream ? "进行中" : null;
+
+  const marker = cardHeadMarker(card, open, isRunning, hasThinkStream);
 
   return (
     <section
@@ -135,7 +143,6 @@ export function WorkflowCardView({
           (trace?.thinkContent || (streaming && isRunning)) ? (
             <LitPilotThinkFold
               content={trace?.thinkContent ?? ""}
-              collapsed={!(streaming && isRunning)}
               streaming={streaming && isRunning}
             />
           ) : null}

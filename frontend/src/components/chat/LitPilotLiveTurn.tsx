@@ -22,7 +22,7 @@ export function LitPilotLiveTurn({
 }: LiveTurnProps) {
   const bridge = useChatLayoutBridgeOptional();
   const trace = collectExecutionTraceFromStream(streaming);
-  const { intent, processText, chatText } = deriveLiveFieldsFromStream(streaming);
+  const { intent, liveProgressDetail, chatText } = deriveLiveFieldsFromStream(streaming);
   const workflow = buildTurnWorkflowFromStream(streaming);
   const extensions = streaming.extensionLog.map((e) => ({
     name: e.payload.name,
@@ -40,7 +40,7 @@ export function LitPilotLiveTurn({
         extensions={extensions}
         hasArtifact={hasArtifact || bridge?.hasArtifact}
         chatText={chatText}
-        liveProcessText={processText}
+        liveProcessText={liveProgressDetail}
       />
       {showChat && (chatText || streaming.status === "streaming") ? (
         <ChatBubble

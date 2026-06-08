@@ -132,7 +132,10 @@ export function workflowNeedsChat(intent: string): boolean {
 
 export function deriveLiveFieldsFromStream(stream: StreamState): {
   intent: string;
+  /** @deprecated 仅含 brief 结构化结果；勿用于 progress 心跳 */
   processText: string;
+  liveProgressDetail: string;
+  briefSummary: string;
   chatText: string;
 } {
   let intent = "new_topic";
@@ -175,12 +178,19 @@ export function deriveLiveFieldsFromStream(stream: StreamState): {
     }
   }
 
-  const processText = progressDetail || processDelta || briefParts;
+  const briefSummary = briefParts.trim();
+  const liveProgressDetail = (progressDetail || processDelta).trim();
   const chatText = workflowNeedsChat(intent)
     ? (stream.textContent ?? "").slice(0, 800)
     : "";
 
-  return { intent, processText, chatText };
+  return {
+    intent,
+    processText: briefSummary,
+    liveProgressDetail,
+    briefSummary,
+    chatText,
+  };
 }
 
 export function buildTurnWorkflowFromStream(
@@ -199,7 +209,7 @@ export function buildTurnWorkflowFromStream(
       name: e.payload.name,
       data: (e.payload.data ?? {}) as Record<string, unknown>,
     })),
-    processText: opts?.processText ?? derived.processText,
+    briefSummary: derived.briefSummary,
     chatText: opts?.chatText ?? derived.chatText,
     intent: opts?.intent ?? derived.intent,
     turnIndex: opts?.turnIndex ?? 1,
@@ -207,11 +217,19 @@ export function buildTurnWorkflowFromStream(
   });
 }
 
+const THINK_STREAM_CARD_TYPES = new Set<WorkflowCardType>([
+  "understand",
+  "brief",
+  "search",
+]);
+
 export function buildTurnWorkflowFromTrace(
   trace: ExecutionTrace,
   opts: {
     extensions?: Array<{ name: string; data: Record<string, unknown> }>;
+    /** @deprecated 使用 briefSummary */
     processText?: string;
+    briefSummary?: string;
     chatText?: string;
     intent?: string;
     turnIndex?: number;
@@ -290,6 +308,9 @@ export function buildTurnWorkflowFromTrace(
           : activeType;
     const target = cards.find((c) => c.type === targetType && c.state === "running");
     if (target && !target.body) {
+      if (opts.streaming && THINK_STREAM_CARD_TYPES.has(target.type)) {
+        continue;
+      }
       target.body = detail;
     }
   }
@@ -313,15 +334,15 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
-  const processText = (opts.processText ?? "").trim();
-  if (processText) {
+  const briefSummary = (opts.briefSummary ?? opts.processText ?? "").trim();
+  if (briefSummary) {
     cards.unshift({
       id: "card-brief",
       type: "brief",
       title: CARD_TITLES.brief,
       state: "done",
       steps: [],
-      body: processText,
+      body: briefSummary,
     });
   }
 
@@ -366,15 +387,20 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  const runningCard = enrichedCards.find((c) => c.state === "running");
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
     .map((c) => c.summary || c.title)
     .slice(0, 4);
 
+  const summary = opts.streaming
+    ? runningCard?.title || formatLiteratureIntentLabel(intent)
+    : summaryParts.join(" · ") || formatLiteratureIntentLabel(intent);
+
   return {
     turnIndex: opts.turnIndex ?? 1,
     intent,
-    summary: summaryParts.join(" · ") || formatLiteratureIntentLabel(intent),
+    summary,
     cards: enrichedCards,
   };
 }

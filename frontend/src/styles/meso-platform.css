@@ -878,6 +878,37 @@
   border-left: 2px solid var(--color-border);
 }
 
+/* 流式思考区：flatten 嵌套、可读性、限高滚动 */
+.litpilot-think--streaming {
+  margin: 4px 0 6px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  border-left: 2px solid var(--color-border);
+  padding-left: 10px;
+}
+
+.litpilot-think--streaming .litpilot-think__body {
+  padding: 0 0 4px;
+}
+
+.litpilot-think--streaming .litpilot-think__content {
+  max-height: 280px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.litpilot-think--streaming .litpilot-think__model {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+.litpilot-think--streaming .meso-think__dot,
+.litpilot-think--streaming .litpilot-think__dot {
+  background: var(--color-text-muted);
+}
+
 .litpilot-failed__list {
   margin: 0;
   padding: 0 12px 12px 28px;

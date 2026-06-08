@@ -41,8 +41,9 @@ export function TurnWorkflowBlock({
         hasReview: hasArtifact,
         hasMatrix: hasArtifact,
         chatText,
+        streaming,
       }),
-    [workflow, trace, extensions, hasArtifact, chatText],
+    [workflow, trace, extensions, hasArtifact, chatText, streaming],
   );
 
   if (!workflow.cards.length) {
@@ -50,12 +51,11 @@ export function TurnWorkflowBlock({
     return (
       <div className="litpilot-turn-log litpilot-turn-log--pending">
         <div className="litpilot-turn-complete litpilot-turn-complete--live">
-          <div className="litpilot-turn-complete__headline">理解研究问题</div>
+          <div className="litpilot-turn-complete__headline">当前：理解研究问题</div>
         </div>
         <div className="litpilot-wf-card litpilot-wf-card--running litpilot-wf-card--open litpilot-wf-card--live">
           <div className="litpilot-wf-card__head">
             <span className="litpilot-wf-card__title">理解研究问题</span>
-            <span className="litpilot-wf-card__status">进行中</span>
           </div>
           <div className="litpilot-wf-card__body">
             <div className="litpilot-log-lines" role="list">

@@ -148,4 +148,17 @@ describe("WorkflowCardView collapsed head visibility", () => {
       /<button[^>]*class="[^"]*litpilot-wf-card__title-btn[^"]*"[^>]*>[\s\S]*理解研究问题/,
     );
   });
+
+  it("hides 进行中 when think stream is active", () => {
+    const html = renderToStaticMarkup(
+      <WorkflowCardView
+        card={makeCard({ state: "running" })}
+        trace={{ stages: [], tools: [], workflows: [], thinkContent: "思考中" }}
+        streaming
+        defaultOpen
+      />,
+    );
+    expect(html).not.toContain("进行中");
+    expect(html).toContain("思考中");
+  });
 });

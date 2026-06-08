@@ -161,6 +161,7 @@ export function buildTurnCompletionSummary(
     hasMatrix?: boolean;
     failedLiterature?: number;
     chatText?: string;
+    streaming?: boolean;
   },
 ): TurnCompletionSummary {
   const extensions = opts?.extensions ?? [];
@@ -183,6 +184,14 @@ export function buildTurnCompletionSummary(
     hasMatrix,
     failedLiterature,
   };
+
+  if (opts?.streaming) {
+    const running = workflow.cards.find((c) => c.state === "running");
+    const headline = running
+      ? `当前：${running.title}`
+      : workflow.summary || "处理中…";
+    return { headline, stats, brief: "" };
+  }
 
   const parts: string[] = [];
   if (searchPasses > 0) parts.push(`检索 ${searchPasses} 轮`);
