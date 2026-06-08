@@ -92,7 +92,7 @@ export function LitPilotChatPage() {
   }, []);
 
   const liveStreaming =
-    streamPhase === "streaming"
+    streamPhase === "streaming" || streamPhase === "settling"
       ? stripWorkflowArtifacts(streamState)
       : streamPhase === "pending"
         ? pendingStreamState
