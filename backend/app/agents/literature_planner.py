@@ -56,7 +56,7 @@ async def load_planner_context() -> PlannerContext:
     return PlannerContext(
         use_llm_planner=await get_use_llm_planner(),
         use_reasoning=False,
-        max_tokens=280,
+        max_tokens=800,
     )
 
 

@@ -333,8 +333,8 @@ PROMPT_MAX_TOKENS_SUFFIX = "_max_tokens"
 # 各提示词 LLM 调用的默认 max_tokens（可被 prompts.params 中 {key}_max_tokens 覆盖）
 PROMPT_DEFAULT_MAX_TOKENS: dict[str, int] = {
     "understanding_system_template": 1200,
-    "narrate_search_after_template": 280,
-    "narrate_fetch_after_template": 280,
+    "narrate_search_after_template": 800,
+    "narrate_fetch_after_template": 800,
     "intent_router_system_template": 300,
     "search_refiner_system_template": 640,
     "assessor_system_template": 720,
