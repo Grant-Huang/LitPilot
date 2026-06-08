@@ -16,6 +16,9 @@ SYS_START = "⟦sys⟧"
 SYS_END = "⟦/sys⟧"
 
 _JSON_START = re.compile(r'\{\s*"session_title"')
+# 检测 content_acc 末尾是否有未闭合的 {（可能是 JSON 开始处），
+# 匹配 { 后没有 } 直到字符串末尾，防止 { 与其他字符合并为一个 token 时泄漏
+_JSON_OPEN_TAIL = re.compile(r'\{[^}]*$')
 
 StreamPartKind = Literal["reasoning", "content"]
 
@@ -99,13 +102,6 @@ async def emit_system_think_line(
     yield ("think", {"delta": "", "done": True})
 
 
-def _should_hide_json_delta(delta: str, buffer: str, *, hide_json: bool) -> bool:
-    if not hide_json:
-        return False
-    probe = buffer + delta
-    return bool(_JSON_START.search(probe))
-
-
 async def stream_llm_to_think(
     llm: BaseLLM,
     messages: list[LLMMessage],
@@ -119,10 +115,16 @@ async def stream_llm_to_think(
     json_hide_hint: str | None = None,
     content_buffer: list[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    """将 LLM 流式输出映射为 think SSE；reasoning 与可见叙述均进入思考区。"""
+    """将 LLM 流式输出映射为 think SSE；reasoning 与可见叙述均进入思考区。
+
+    hide_json_in_stream=True 时使用 pending buffer：当 ``content_acc`` 末尾出现未闭合
+    ``{`` 时暂存后续 token，待 ``_JSON_START`` 确认后整体丢弃，避免逐 token 检测时
+    ``{`` / ``"session_title"`` 等前缀泄漏到用户流。
+    """
     section: list[str] = []
     content_acc = ""
     json_hide_notified = False
+    _pending: list[str] = []  # 潜在 JSON 开头暂存，确认后整体丢弃
 
     async for kind, piece in llm.chat_stream_parts(
         messages,
@@ -135,22 +137,65 @@ async def stream_llm_to_think(
             if content_buffer is not None:
                 content_buffer.append(piece)
             content_acc += piece
-            if _should_hide_json_delta(
-                piece,
-                content_acc[:-len(piece)],
-                hide_json=hide_json_in_stream,
-            ):
-                if hide_json_in_stream and not json_hide_notified:
+
+            if hide_json_in_stream:
+                if json_hide_notified:
+                    continue
+
+                # 先检测完整 JSON 开头（pending 中已含 { 时最终在此处确认）
+                if _JSON_START.search(content_acc):
                     json_hide_notified = True
+                    _pending.clear()
                     hint = (json_hide_hint or "正在整理结构化检索规划…").strip()
                     wrapped = wrap_system_line(hint)
                     if wrapped:
                         if accumulator is not None:
                             accumulator.append_raw(wrapped)
                         yield ("think", {"delta": wrapped, "source": "system"})
+                    continue
+
+                # content_acc 末尾出现未闭合 { 或已在暂存模式 → 暂存等待确认
+                if _JSON_OPEN_TAIL.search(content_acc) or _pending:
+                    _pending.append(piece)
+                    continue
+
+                # 安全：flush pending（如有）并 emit 当前 piece
+                if _pending:
+                    for p in _pending:
+                        section.append(p)
+                        yield ("think", {"delta": p, "source": "model"})
+                    _pending.clear()
+                section.append(piece)
+                yield ("think", {"delta": piece, "source": "model"})
                 continue
-        section.append(piece)
-        yield ("think", {"delta": piece, "source": "model"})
+
+            section.append(piece)
+            yield ("think", {"delta": piece, "source": "model"})
+        else:
+            # reasoning 或其他 kind：先 flush pending（不是 JSON 上下文）
+            if hide_json_in_stream and _pending and not json_hide_notified:
+                for p in _pending:
+                    section.append(p)
+                    yield ("think", {"delta": p, "source": "model"})
+                _pending.clear()
+            section.append(piece)
+            yield ("think", {"delta": piece, "source": "model"})
+
+    # 流结束：处理剩余 pending（max_tokens 不足截断场景）
+    if _pending:
+        pending_str = "".join(_pending)
+        if hide_json_in_stream and pending_str.lstrip().startswith("{"):
+            if not json_hide_notified:
+                hint = (json_hide_hint or "正在整理结构化检索规划…").strip()
+                wrapped = wrap_system_line(hint)
+                if wrapped:
+                    if accumulator is not None:
+                        accumulator.append_raw(wrapped)
+                    yield ("think", {"delta": wrapped, "source": "system"})
+        else:
+            for p in _pending:
+                section.append(p)
+                yield ("think", {"delta": p, "source": "model"})
 
     if section and accumulator is not None:
         accumulator.append_raw("".join(section))
