@@ -66,9 +66,11 @@ async def _log_runtime_config() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown_task_sweeper() -> None:
+    from app.llm.http_client import aclose_all
     from app.tasks.literature_tasks import stop_task_sweeper
 
     await stop_task_sweeper()
+    await aclose_all()
 
 
 app.add_middleware(

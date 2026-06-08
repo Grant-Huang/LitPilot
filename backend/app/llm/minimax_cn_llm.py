@@ -6,9 +6,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Optional
 
-import httpx
-
 from app.llm.base import BaseLLM, LLMConfig, LLMMessage, LLMResponse, StreamPartKind
+from app.llm.http_client import get_async_client
 
 MINIMAX_CN_BASE = "https://api.minimaxi.com/v1"
 
@@ -90,10 +89,10 @@ class MinimaxCNLLM(BaseLLM):
         }
         url = f"{self._base_url()}/chat/completions"
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload, headers=self._headers())
-            resp.raise_for_status()
-            data = resp.json()
+        client = get_async_client()
+        resp = await client.post(url, json=payload, headers=self._headers())
+        resp.raise_for_status()
+        data = resp.json()
 
         if not data.get("choices"):
             raise RuntimeError(self._extract_error(data))
@@ -155,55 +154,55 @@ class MinimaxCNLLM(BaseLLM):
         in_think = False
         tag_buf = ""
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST", url, json=payload, headers=self._headers()
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data_s = line[5:].strip()
-                    if not data_s or data_s == "[DONE]":
-                        continue
-                    try:
-                        data = json.loads(data_s)
-                    except json.JSONDecodeError:
-                        continue
-                    if not data.get("choices"):
-                        continue
-                    delta = data["choices"][0].get("delta") or {}
-                    piece = delta.get("content") or ""
-                    if not piece:
-                        continue
+        client = get_async_client()
+        async with client.stream(
+            "POST", url, json=payload, headers=self._headers()
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data_s = line[5:].strip()
+                if not data_s or data_s == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(data_s)
+                except json.JSONDecodeError:
+                    continue
+                if not data.get("choices"):
+                    continue
+                delta = data["choices"][0].get("delta") or {}
+                piece = delta.get("content") or ""
+                if not piece:
+                    continue
 
-                    tag_buf += piece
-                    while tag_buf:
-                        if not in_think:
-                            low = tag_buf.lower()
-                            open_idx = low.find("<think>")
-                            if open_idx == -1:
-                                emit, tag_buf = tag_buf, ""
-                                if emit:
-                                    yield ("content", emit)
-                                break
-                            if open_idx > 0:
-                                yield ("content", tag_buf[:open_idx])
-                            tag_buf = tag_buf[open_idx + len("<think>") :]
-                            in_think = True
-                            continue
+                tag_buf += piece
+                while tag_buf:
+                    if not in_think:
                         low = tag_buf.lower()
-                        close_idx = low.find("</think>")
-                        if close_idx == -1:
-                            # 综述生成等场景：正文可能在 thinking 标签内，需流出为 content
-                            kind: StreamPartKind = (
-                                "reasoning" if use_reasoning else "content"
-                            )
-                            yield (kind, tag_buf)
-                            tag_buf = ""
+                        open_idx = low.find("<think>")
+                        if open_idx == -1:
+                            emit, tag_buf = tag_buf, ""
+                            if emit:
+                                yield ("content", emit)
                             break
-                        if close_idx > 0:
-                            kind = "reasoning" if use_reasoning else "content"
-                            yield (kind, tag_buf[:close_idx])
-                        tag_buf = tag_buf[close_idx + len("</think>") :]
-                        in_think = False
+                        if open_idx > 0:
+                            yield ("content", tag_buf[:open_idx])
+                        tag_buf = tag_buf[open_idx + len("<think>") :]
+                        in_think = True
+                        continue
+                    low = tag_buf.lower()
+                    close_idx = low.find("</think>")
+                    if close_idx == -1:
+                        # 综述生成等场景：正文可能在 thinking 标签内，需流出为 content
+                        kind: StreamPartKind = (
+                            "reasoning" if use_reasoning else "content"
+                        )
+                        yield (kind, tag_buf)
+                        tag_buf = ""
+                        break
+                    if close_idx > 0:
+                        kind = "reasoning" if use_reasoning else "content"
+                        yield (kind, tag_buf[:close_idx])
+                    tag_buf = tag_buf[close_idx + len("</think>") :]
+                    in_think = False

@@ -1,7 +1,9 @@
 export type LlmProviderSlug =
   | "openai"
+  | "deepseek"
   | "zhipu"
   | "alibaba"
+  | "qwen"
   | "minimax_intl"
   | "minimax_cn"
   | "ollama";
@@ -32,6 +34,15 @@ export const LLM_PROVIDERS: LlmProviderMeta[] = [
     notes: "API Key 来自 platform.openai.com",
   },
   {
+    slug: "deepseek",
+    label: "DeepSeek",
+    default_model: "deepseek-chat",
+    default_base_url: "https://api.deepseek.com",
+    requires_api_key: true,
+    notes:
+      "API Key 来自 platform.deepseek.com，兼容 OpenAI 接口；常用模型 deepseek-chat / deepseek-reasoner",
+  },
+  {
     slug: "zhipu",
     label: "智谱 GLM (ZhipuAI)",
     default_model: "glm-4-flash",
@@ -40,12 +51,21 @@ export const LLM_PROVIDERS: LlmProviderMeta[] = [
     notes: "API Key 来自 open.bigmodel.cn，兼容 OpenAI 接口",
   },
   {
+    slug: "qwen",
+    label: "通义千问 Qwen (DashScope)",
+    default_model: "qwen-plus",
+    default_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    requires_api_key: true,
+    notes:
+      "API Key 来自 dashscope.aliyuncs.com，兼容 OpenAI 接口；常用模型 qwen-plus / qwen-turbo / qwen-max",
+  },
+  {
     slug: "alibaba",
-    label: "阿里云百炼 (Qwen)",
+    label: "阿里云百炼 (Qwen 兼容)",
     default_model: "qwen-turbo",
     default_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     requires_api_key: true,
-    notes: "API Key 来自 dashscope.aliyuncs.com",
+    notes: "兼容旧配置（等价于 Qwen / DashScope）；API Key 来自 dashscope.aliyuncs.com",
   },
   {
     slug: "minimax_intl",

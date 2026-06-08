@@ -4,6 +4,7 @@ from typing import Optional
 from openai import AsyncOpenAI
 
 from app.llm.base import BaseLLM, LLMConfig, LLMMessage, LLMResponse
+from app.llm.http_client import get_async_client
 
 
 class OpenAILLM(BaseLLM):
@@ -12,6 +13,7 @@ class OpenAILLM(BaseLLM):
         self._client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
+            http_client=get_async_client(),
         )
 
     def _default_model(self) -> str:
@@ -19,6 +21,8 @@ class OpenAILLM(BaseLLM):
             "openai": "gpt-4o-mini",
             "zhipu": "glm-4-flash",
             "alibaba": "qwen-turbo",
+            "qwen": "qwen-plus",
+            "deepseek": "deepseek-chat",
             "minimax_intl": "MiniMax-Text-01",
         }
         return self.config.model or defaults.get(self.config.provider, "gpt-4o-mini")

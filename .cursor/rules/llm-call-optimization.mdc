@@ -1,0 +1,46 @@
+---
+description: LLM 调用与流式落库的性能最佳实践（连接复用 / 批处理 / 低延迟）
+globs: backend/app/llm/**/*.py,backend/app/tasks/**/*.py,backend/app/services/llm_service.py,backend/app/core/think_stream.py
+alwaysApply: false
+---
+
+# LLM 调用与流式性能约定
+
+目标：把系统延迟（TTFT + 流式抖动）压到最低，对齐 Cursor 级体感。
+
+## 连接复用（降 TTFT）
+
+- **禁止**每次调用新建 `httpx.AsyncClient`（重复 DNS/TCP/TLS 握手）。统一用进程级共享客户端 `app.llm.http_client.get_async_client()`。
+- 共享客户端必须开 HTTP/2 + keep-alive 连接池 + 拆分超时（`connect` 短、`read` 长）；按事件循环隔离（兼容 pytest）。
+- 单次需要更长读超时（如本地 Ollama 长生成）用 **per-request** `timeout=`，不要改全局默认。
+- OpenAI SDK 走 `AsyncOpenAI(http_client=get_async_client())` 复用同一池。
+
+```python
+# ❌ 每次握手
+async with httpx.AsyncClient(timeout=120) as client:
+    resp = await client.post(url, json=payload)
+
+# ✅ 复用连接池
+client = get_async_client()
+resp = await client.post(url, json=payload, headers=self._headers())
+```
+
+## 实例复用
+
+- LLM 实例按配置签名缓存（见 `llm_service._build_from_cfg`），配置不变复用、变更自动重建；勿在热路径重复 `build_llm`。
+
+## 流式落库（降抖动）
+
+- **禁止**逐 token 落库/抢文件锁/打 DB。连续同类增量先经 `_StreamCoalescer` 按字符阈值/边界合并，再落一次库；`done`/边界事件前必须 `flush()`，保证不丢字、顺序一致。
+- `update_task` 仅在 progress/stage 变化时写，避免每事件重写 meta。
+- 消费端优先 `asyncio.Event` 事件驱动唤醒，跨进程用短超时（≤50ms）轮询回退；`list_events` 按事件序号 + 字节偏移增量读，禁止每轮重读整个文件。
+- 长时间无事件时发送 SSE 注释心跳 `: keepalive\n\n`（前端忽略非 `data:` 行），防代理断连。
+
+## Prompt / 参数
+
+- system prompt 保持短小；非必要不开 function calling / JSON mode（增加首 token 解析延迟）。
+- 必须 `stream=True` 并逐 chunk flush，不要 buffer 到整句再发。
+
+## 变更后
+
+- 改动 LLM/任务流代码后按门禁规则跑 `./scripts/test-gates.sh`。

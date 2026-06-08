@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-import httpx
-
 from app.llm.base import BaseLLM, LLMConfig, LLMMessage, LLMResponse
+from app.llm.http_client import get_async_client
 
 
 class OllamaLLM(BaseLLM):
@@ -39,10 +38,14 @@ class OllamaLLM(BaseLLM):
             },
         }
 
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(f"{self._base_url}/api/generate", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        client = get_async_client()
+        resp = await client.post(
+            f"{self._base_url}/api/generate",
+            json=payload,
+            timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         return LLMResponse(
             content=data.get("response", "") or "",

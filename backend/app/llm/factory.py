@@ -22,6 +22,18 @@ PROVIDER_REGISTRY: dict[str, dict] = {
         "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "requires_api_key": True,
     },
+    "qwen": {
+        "label": "通义千问 Qwen (DashScope)",
+        "default_model": "qwen-plus",
+        "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "requires_api_key": True,
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "default_model": "deepseek-chat",
+        "default_base_url": "https://api.deepseek.com",
+        "requires_api_key": True,
+    },
     "minimax_intl": {
         "label": "MiniMax 国际版",
         "default_model": "MiniMax-Text-01",
@@ -57,7 +69,7 @@ def build_llm(config: LLMConfig) -> BaseLLM:
 
         return OllamaLLM(config)
 
-    if provider in ("openai", "zhipu", "alibaba", "minimax_intl"):
+    if provider in ("openai", "zhipu", "alibaba", "minimax_intl", "deepseek", "qwen"):
         meta = PROVIDER_REGISTRY.get(provider, {})
         if not config.base_url and meta.get("default_base_url"):
             config.base_url = meta["default_base_url"]
