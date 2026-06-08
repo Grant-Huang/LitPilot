@@ -1,12 +1,15 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.core.response import ok
+from app.core.response import err, ok
 from app.storage.file_store import get_store
 from app.tasks.literature_tasks import get_task_registry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -60,7 +63,11 @@ async def get_task_status(task_id: str):
 @router.delete("/{task_id}")
 async def cancel_task(task_id: str):
     registry = get_task_registry()
-    task = await registry.cancel(task_id)
+    try:
+        task = await registry.cancel(task_id)
+    except Exception:
+        logger.exception("cancel_task: unhandled error for %s", task_id)
+        raise HTTPException(status_code=500, detail="取消任务失败，请重试")
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
     return ok(task.to_status_dict())
