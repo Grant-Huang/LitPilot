@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseThinkSegments } from "@/lib/thinkContent";
+import { StatusIcon } from "./StatusIcon";
 
 type Props = {
   content: string;
@@ -11,7 +12,6 @@ type Props = {
   turnStreaming?: boolean;
 };
 
-/** 与流式输出同款的思考折叠块；系统注记（⟦sys⟧）灰色显示。 */
 export function LitPilotThinkFold({
   content,
   streaming = false,
@@ -36,16 +36,8 @@ export function LitPilotThinkFold({
 
   const segments = useMemo(() => parseThinkSegments(content), [content]);
 
-  const headerLabel = useMemo(() => {
-    if (!streaming) return "推理过程";
-    const first = content
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => l.length > 0);
-    if (!first) return "正在调用模型…";
-    return first.length > 48 ? first.slice(0, 48) + "…" : first;
-  }, [content, streaming]);
-
+  // 标题固定，不再截取模型独白首行
+  const headerLabel = streaming ? "模型推理中…" : "模型推理";
   const hasContent = content.trim().length > 0;
 
   useEffect(() => {
@@ -56,61 +48,41 @@ export function LitPilotThinkFold({
   if (!hasContent && !streaming) return null;
 
   return (
-    <div
-      className={`meso-think litpilot-think${
-        open ? " meso-think--open" : ""
-      }${streaming ? " litpilot-think--streaming" : ""}`}
-    >
+    <div className={`lp-think-fold${open ? " lp-think-fold--open" : ""}${streaming ? " lp-think-fold--streaming" : ""}`}>
       <button
         type="button"
-        className="meso-think__header"
+        className="lp-think-fold__header"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
+        <StatusIcon status={streaming ? "running" : "done"} />
+        <span className="lp-think-fold__label">{headerLabel}</span>
         <svg
-          className="meso-think__chevron"
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
+          className={`lp-think-fold__chevron${open ? " lp-think-fold__chevron--open" : ""}`}
+          width="12" height="12" viewBox="0 0 12 12"
+          fill="none" stroke="currentColor" strokeWidth="1.5"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden
         >
-          <polyline points="3,5 7,9 11,5" />
+          <polyline points="2.5,4.5 6,8 9.5,4.5" />
         </svg>
-        <span className="meso-think__label">{headerLabel}</span>
-        {streaming && open ? (
-          <span className="meso-think__dot litpilot-think__dot" aria-label="推理中" />
-        ) : null}
       </button>
       {open ? (
-        <div className="meso-think__body litpilot-think__body">
+        <div className="lp-think-fold__body">
           <div
             ref={contentRef}
-            className="meso-think__content litpilot-think__content"
+            className="lp-think-fold__content"
             aria-live={streaming ? "polite" : undefined}
           >
-            {hasContent ? (
-              segments.map((seg, idx) =>
-                seg.kind === "system" ? (
-                  <p key={idx} className="litpilot-think__system">
-                    {seg.text}
-                  </p>
-                ) : (
-                  <span key={idx} className="litpilot-think__model">
-                    {seg.text}
-                  </span>
-                ),
-              )
-            ) : null}
-            {streaming ? (
-              <span className="meso-think__cursor" aria-hidden="true">
-                ▋
-              </span>
-            ) : null}
+            {hasContent
+              ? segments.map((seg, idx) =>
+                  seg.kind === "system" ? (
+                    <p key={idx} className="lp-think-fold__system">{seg.text}</p>
+                  ) : (
+                    <span key={idx} className="lp-think-fold__model">{seg.text}</span>
+                  ),
+                )
+              : null}
+            {streaming ? <span className="lp-think-fold__cursor" aria-hidden="true">▋</span> : null}
           </div>
         </div>
       ) : null}

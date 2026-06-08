@@ -3690,7 +3690,20 @@ a.library-badge--action:hover {
 .litpilot-turn-log__cards {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
+  position: relative;
+}
+
+/* Vertical timeline spine behind the icon column */
+.litpilot-turn-log__cards::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-border-light);
+  pointer-events: none;
 }
 
 .litpilot-turn-complete {
@@ -3703,31 +3716,45 @@ a.library-badge--action:hover {
 }
 
 .litpilot-turn-complete__headline {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
   color: var(--color-text);
 }
 
 .litpilot-turn-complete__brief {
   margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
   color: var(--color-text-secondary);
 }
 
+.litpilot-turn-complete__cta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-2);
+  margin-top: var(--lp-space-2);
+}
+
+.litpilot-turn-complete__cta-hint {
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-muted);
+  line-height: var(--lp-lh-body);
+}
+
 .litpilot-turn-complete__cta {
-  margin-top: 8px;
-  padding: 4px 10px;
+  padding: 5px 14px;
   border: 1px solid var(--color-accent);
   border-radius: 6px;
-  background: transparent;
-  color: var(--color-accent);
-  font-size: 12px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--lp-fs-caption);
+  font-weight: var(--lp-fw-medium);
   cursor: pointer;
+  transition: opacity 0.12s ease;
 }
 
 .litpilot-turn-complete__cta:hover {
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  opacity: 0.88;
 }
 
 .litpilot-log-lines {
@@ -3741,8 +3768,8 @@ a.library-badge--action:hover {
   align-items: flex-start;
   gap: 8px;
   padding: 3px 0;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
   text-align: left;
 }
 
@@ -3750,8 +3777,8 @@ a.library-badge--action:hover {
   flex-shrink: 0;
   width: 14px;
   color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--lp-fs-caption);
+  line-height: var(--lp-lh-body);
   user-select: none;
 }
 
@@ -3784,7 +3811,7 @@ a.library-badge--action:hover {
 }
 
 .litpilot-log-line--error .litpilot-log-line__primary {
-  color: var(--color-danger, #c0392b);
+  color: var(--lp-status-error);
 }
 
 .litpilot-log-line__detail-toggle {
@@ -3792,7 +3819,7 @@ a.library-badge--action:hover {
   padding: 0;
   border: none;
   background: none;
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
   cursor: pointer;
   font-family: inherit;
@@ -3808,8 +3835,8 @@ a.library-badge--action:hover {
   padding: 8px 10px;
   max-height: 200px;
   overflow: auto;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--lp-fs-caption);
+  line-height: var(--lp-lh-body);
   font-family: var(--font-mono, ui-monospace, monospace);
   color: var(--color-text-secondary);
   background: var(--color-bg-elevated);
@@ -3826,36 +3853,29 @@ a.library-badge--action:hover {
 
 .litpilot-wf-card__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 4px 0 2px;
+  padding: 5px 0 3px;
   width: 100%;
   text-align: left;
 }
 
-/* 折叠态的卡片（done 且未展开）：head 自带浅背景与左侧 accent 提示条，
-   用 accent 色代替 bg-elevated，确保在任何主题下都可见。 */
+/* Done-collapsed card: subtle hover only; timeline spine provides the visual rail */
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head {
-  padding: 4px 8px 4px 6px;
-  margin: 0 0 2px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-accent, #d97706) 6%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--color-accent, #d97706) 38%, transparent);
-  transition: background 0.12s ease, border-left-color 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head:hover {
-  background: color-mix(in srgb, var(--color-accent, #d97706) 12%, transparent);
-  border-left-color: var(--color-accent, #d97706);
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
 }
 
-/* 折叠态卡片标题按钮：确保文字颜色有可靠 fallback */
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn {
-  color: var(--color-text-secondary, #555);
+  color: var(--lp-status-done);
 }
 
 .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn:focus-visible {
-  outline: 2px solid var(--color-accent, #d97706);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 3px;
 }
@@ -3865,14 +3885,18 @@ a.library-badge--action:hover {
   width: 14px;
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
+  position: relative;
+  z-index: 1;
+  background: var(--color-bg);
+  padding: 2px 0;
 }
 
 .litpilot-wf-card__title,
 .litpilot-wf-card__title-btn {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--lp-fs-body);
+  font-weight: var(--lp-fw-medium);
   color: var(--color-text-secondary);
   letter-spacing: normal;
   text-transform: none;
@@ -3881,7 +3905,7 @@ a.library-badge--action:hover {
   padding: 0;
   cursor: pointer;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-wf-card__title-btn:hover {
@@ -3892,19 +3916,19 @@ a.library-badge--action:hover {
   flex: 1;
   min-width: 0;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: var(--lp-fs-body);
   font-weight: 400;
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .litpilot-wf-card__status {
-  font-size: 13px;
+  font-size: var(--lp-fs-body);
   font-weight: 400;
   color: var(--color-accent);
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-wf-card--live .litpilot-wf-card__title {
@@ -3912,12 +3936,12 @@ a.library-badge--action:hover {
 }
 
 .litpilot-wf-card__body {
-  padding: 0 0 8px 22px;
+  padding: 0 0 10px var(--lp-indent);
 }
 
 .litpilot-wf-card__body-text {
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
   white-space: pre-wrap;
   color: var(--color-text-secondary);
   margin-bottom: 6px;
@@ -3950,7 +3974,7 @@ a.library-badge--action:hover {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--lp-fs-body);
   color: var(--color-text-secondary);
 }
 
@@ -3959,10 +3983,10 @@ a.library-badge--action:hover {
 }
 
 .litpilot-subtopic-list__query {
-  margin: 0 0 4px 12px;
-  font-size: 12px;
+  margin: 0 0 var(--lp-space-1) var(--lp-indent);
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
-  line-height: 1.45;
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-search-progress {
@@ -3974,13 +3998,13 @@ a.library-badge--action:hover {
 
 .litpilot-search-progress__aggregate {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
 }
 
 .litpilot-search-topic {
   border-left: 2px solid color-mix(in srgb, var(--color-text) 8%, transparent);
-  padding-left: 10px;
+  padding-left: var(--lp-indent);
 }
 
 .litpilot-search-topic--running {
@@ -4002,38 +4026,38 @@ a.library-badge--action:hover {
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--lp-fs-body);
   font-weight: 400;
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-search-topic__marker {
   flex-shrink: 0;
   width: 14px;
   text-align: center;
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-search-topic__title {
   flex: 1;
   color: var(--color-text-secondary);
-  font-weight: 500;
-  font-size: 13px;
-  line-height: 1.4;
+  font-weight: var(--lp-fw-medium);
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-search-topic__status {
-  font-size: 13px;
+  font-size: var(--lp-fs-body);
   font-weight: 400;
   color: var(--color-text-muted);
   white-space: nowrap;
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
 }
 
 .litpilot-search-topic__sources {
   list-style: none;
-  margin: 4px 0 0 14px;
+  margin: var(--lp-space-1) 0 0 var(--lp-indent);
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -4043,7 +4067,7 @@ a.library-badge--action:hover {
 .litpilot-search-source {
   display: flex;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-secondary);
 }
 
@@ -4061,7 +4085,7 @@ a.library-badge--action:hover {
 }
 
 .litpilot-search-source__label {
-  font-weight: 500;
+  font-weight: var(--lp-fw-medium);
   color: var(--color-text-secondary);
 }
 
@@ -4073,7 +4097,7 @@ a.library-badge--action:hover {
 .litpilot-search-source__url,
 .litpilot-search-source__urls a {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
   word-break: break-all;
 }
 
@@ -4107,13 +4131,13 @@ a.library-badge--action:hover {
 }
 
 .litpilot-search-source__hit-title {
-  font-size: 12px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-secondary);
   line-height: 1.35;
 }
 
 .litpilot-search-source__hit-url {
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
   word-break: break-all;
 }
@@ -4319,12 +4343,12 @@ a.library-badge--action:hover {
 .litpilot-composer__chip {
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
   background: color-mix(in srgb, var(--color-text) 4%, transparent);
   border: 1px solid transparent;
   cursor: pointer;
-  line-height: 1.4;
+  line-height: var(--lp-lh-body);
   transition:
     color 0.12s ease,
     border-color 0.12s ease,
@@ -4364,7 +4388,7 @@ a.library-badge--action:hover {
 
 .litpilot-composer__url-tag {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
 }
 
 .litpilot-artifact-pane__ref-btn {
@@ -4372,10 +4396,136 @@ a.library-badge--action:hover {
   background: var(--color-bg-subtle);
   border-radius: 6px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--lp-fs-caption);
   cursor: pointer;
 }
 
 .litpilot-artifact-pane__ref-btn:hover {
   border-color: var(--color-accent);
+}
+
+/* ── StatusIcon ──────────────────────────────────────────────────────────── */
+.lp-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  line-height: 1;
+}
+
+.lp-status-icon--running { color: var(--lp-status-running); }
+.lp-status-icon--done    { color: var(--lp-status-done); }
+.lp-status-icon--error   { color: var(--lp-status-error); }
+.lp-status-icon--pending { color: var(--lp-status-pending); }
+.lp-status-icon--warning { color: var(--color-warning, #b45309); }
+
+.lp-status-icon__spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border);
+  border-top-color: var(--lp-status-running);
+  animation: meso-spin 0.7s linear infinite;
+}
+
+/* ── LitPilotThinkFold (lp-think-fold) ──────────────────────────────────── */
+/* 用左侧 2px ink 线 + 内缩代替圆角实底卡片，层次更轻、不抢眼 */
+.lp-think-fold {
+  margin: 0 0 var(--lp-space-2);
+  border-left: 2px solid var(--color-border);
+  padding-left: var(--lp-indent);
+  transition: border-color 0.15s ease;
+}
+
+.lp-think-fold--streaming {
+  border-left-color: var(--lp-status-running);
+}
+
+.lp-think-fold__header {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-1);
+  width: 100%;
+  padding: var(--lp-space-1) 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-muted);
+  text-align: left;
+  line-height: var(--lp-lh-body);
+}
+
+.lp-think-fold__header:hover {
+  color: var(--color-text-secondary);
+}
+
+.lp-think-fold__label {
+  flex: 1;
+}
+
+.lp-think-fold__chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.lp-think-fold__chevron--open {
+  transform: rotate(180deg);
+}
+
+.lp-think-fold__body {
+  padding: var(--lp-space-1) 0 var(--lp-space-2);
+}
+
+.lp-think-fold__content {
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: var(--lp-fs-caption);
+  line-height: var(--lp-lh-stream);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lp-think-fold__system {
+  margin: 0 0 var(--lp-space-1);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.lp-think-fold__model {
+  /* inline，跟随正常文本流 */
+}
+
+.lp-think-fold__cursor {
+  display: inline-block;
+  animation: meso-blink 1s step-end infinite;
+  color: var(--lp-status-running);
+}
+
+/* ── SubtopicListView → lp-subtopic-plan ────────────────────────────────── */
+.lp-subtopic-plan {
+  list-style: none;
+  margin: 0 0 var(--lp-space-3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lp-space-1);
+}
+
+.lp-subtopic-plan__item {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-2);
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-secondary);
+  line-height: var(--lp-lh-body);
+}
+
+.lp-subtopic-plan__title {
+  flex: 1;
 }

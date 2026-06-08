@@ -9,28 +9,44 @@ import {
   type SourceNode,
   type FilterDetailItem,
 } from "@/lib/searchProgressTree";
+import { StatusIcon } from "./StatusIcon";
+
+type SubTopicDef = { id?: string; title?: string; search_query?: string };
 
 type Props = {
   extensions: Array<{ name: string; data: Record<string, unknown> }>;
-  subTopics?: Array<{ id?: string; title?: string; search_query?: string }>;
+  subTopics?: SubTopicDef[];
   streaming?: boolean;
+  /** 仅展示规划阶段（understand 卡）：不显示进度细节，只列子主题名 */
+  planOnly?: boolean;
 };
 
-function phaseMarker(status: string) {
-  if (status === "running") return <span className="litpilot-log-line__spinner" />;
-  if (status === "error") return "×";
-  if (status === "done") return "✓";
-  return "·";
+function phaseStatusIcon(status: SubtopicProgressNode["search"]["status"]) {
+  const s =
+    status === "running" ? "running"
+    : status === "error" ? "error"
+    : status === "done" ? "done"
+    : "pending";
+  return <StatusIcon status={s} />;
+}
+
+/** 子主题规划列表（understand 阶段：只列标题，无进度细节） */
+function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
+  const title = (st.title ?? "").trim() || `子主题 ${index + 1}`;
+  return (
+    <li className="lp-subtopic-plan__item">
+      <StatusIcon status="pending" />
+      <span className="lp-subtopic-plan__title">{title}</span>
+    </li>
+  );
 }
 
 function SourceRow({ source }: { source: SourceNode }) {
-  const detail = source.failed
-    ? "失败"
-    : "命中 " + source.hits + " 篇";
+  const detail = source.failed ? "失败" : `命中 ${source.hits} 篇`;
   return (
     <li className={`litpilot-search-source litpilot-search-source--${source.status}`}>
-      <span className="litpilot-search-source__marker" aria-hidden="true">
-        {phaseMarker(source.status)}
+      <span className="litpilot-search-source__marker">
+        {phaseStatusIcon(source.status)}
       </span>
       <div className="litpilot-search-source__body">
         <span className="litpilot-search-source__label">{source.label}</span>
@@ -46,9 +62,9 @@ function FilterDetailRow({ item }: { item: FilterDetailItem }) {
   const variant = item.keep ? "kept" : "rejected";
   const verdict = item.keep
     ? "保留"
-    : "剔除 [" + (item.score ?? "?") + "]" + (reason ? " · " + reason.slice(0, 50) : "");
+    : `剔除 [${item.score ?? "?"}]${reason ? " · " + reason.slice(0, 50) : ""}`;
   return (
-    <li className={"litpilot-filter-item litpilot-filter-item--" + variant}>
+    <li className={`litpilot-filter-item litpilot-filter-item--${variant}`}>
       <span className="litpilot-filter-item__dot" aria-hidden="true" />
       <span className="litpilot-filter-item__title" title={title}>{title}</span>
       <span className="litpilot-filter-item__verdict">{verdict}</span>
@@ -68,17 +84,19 @@ function SubtopicBlock({
   const [filterOpen, setFilterOpen] = useState(false);
   const title = subtopicDisplayTitle(node);
   const status = subtopicStatusLabel(node);
+  const pending =
+    node.search.status === "running" || node.filter.status === "running";
 
   return (
-    <div className={`litpilot-search-topic litpilot-search-topic--${node.search.status === "running" || node.filter.status === "running" ? "running" : "done"}`}>
+    <div className={`litpilot-search-topic litpilot-search-topic--${pending ? "running" : "done"}`}>
       <button
         type="button"
         className="litpilot-search-topic__head"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <span className="litpilot-search-topic__marker" aria-hidden="true">
-          {open ? "▾" : "▸"}
+        <span className="litpilot-search-topic__marker">
+          <StatusIcon status={pending ? "running" : "done"} />
         </span>
         <span className="litpilot-search-topic__title">{title}</span>
         <span className="litpilot-search-topic__status">{status}</span>
@@ -94,12 +112,15 @@ function SubtopicBlock({
                 onClick={() => setSourcesOpen((v) => !v)}
                 aria-expanded={sourcesOpen}
               >
-                <span className="litpilot-search-phase__marker" aria-hidden="true">
-                  {sourcesOpen ? "▾" : node.search.status === "running" ? <span className="litpilot-log-line__spinner" /> : "▸"}
+                <span className="litpilot-search-phase__marker">
+                  {phaseStatusIcon(node.search.status)}
                 </span>
                 <span className="litpilot-search-phase__label">检索</span>
                 <span className="litpilot-search-phase__count">
                   {node.search.detail ?? (node.search.status === "running" ? "进行中…" : "完成")}
+                  <span className="litpilot-log-line__chevron" aria-hidden="true">
+                    {sourcesOpen ? " ▾" : " ▸"}
+                  </span>
                 </span>
               </button>
               {sourcesOpen && node.sources.length > 0 ? (
@@ -121,12 +142,15 @@ function SubtopicBlock({
                 onClick={() => setFilterOpen((v) => !v)}
                 aria-expanded={filterOpen}
               >
-                <span className="litpilot-search-phase__marker" aria-hidden="true">
-                  {filterOpen ? "▾" : node.filter.status === "running" ? <span className="litpilot-log-line__spinner" /> : "▸"}
+                <span className="litpilot-search-phase__marker">
+                  {phaseStatusIcon(node.filter.status)}
                 </span>
                 <span className="litpilot-search-phase__label">过滤</span>
                 <span className="litpilot-search-phase__count">
                   {node.filter.detail ?? (node.filter.status === "running" ? "进行中…" : "完成")}
+                  <span className="litpilot-log-line__chevron" aria-hidden="true">
+                    {filterOpen ? " ▾" : " ▸"}
+                  </span>
                 </span>
               </button>
               {filterOpen && node.filterDetails.length > 0 ? (
@@ -148,7 +172,21 @@ export function SearchProgressView({
   extensions,
   subTopics,
   streaming = false,
+  planOnly = false,
 }: Props) {
+  // planOnly 模式：仅展示规划子主题列表，不构建进度树
+  if (planOnly) {
+    if (!subTopics?.length) return null;
+    return (
+      <ul className="lp-subtopic-plan">
+        {subTopics.map((st, i) => (
+          <PlanRow key={st.id ?? i} st={st} index={i} />
+        ))}
+      </ul>
+    );
+  }
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const summary = useMemo(
     () =>
       buildSearchProgressTree(
@@ -171,9 +209,9 @@ export function SearchProgressView({
   const aggregatePending =
     streaming && !summary.allDone && summary.completedSubtopics < summary.totalSubtopics;
   const aggregateLabel = summary.allDone
-    ? "检索完成 · " + summary.completedSubtopics + "/" + summary.totalSubtopics + " 子主题"
+    ? `已完成 ${summary.completedSubtopics}/${summary.totalSubtopics} 个子主题`
     : aggregatePending
-      ? "检索中 · " + summary.completedSubtopics + "/" + summary.totalSubtopics + " 子主题"
+      ? `正在检索 · ${summary.completedSubtopics}/${summary.totalSubtopics} 个子主题`
       : null;
 
   return (

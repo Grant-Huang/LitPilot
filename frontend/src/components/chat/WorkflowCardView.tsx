@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SearchProgressView } from "./SearchProgressView";
-import { SubtopicListView } from "./SubtopicListView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
 import { LitPilotThinkFold } from "./LitPilotThinkFold";
+import { StatusIcon } from "./StatusIcon";
 import { toolStepToState } from "@/lib/executionTrace";
 import { summarizeWorkflowCard } from "@/lib/turnCompletion";
 import {
@@ -25,7 +25,12 @@ type Props = {
 
 function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
   const { primary, outcome } = formatInlineLogLine(step);
-  const pending = step.status === "running" || step.status === "pending";
+  const iconStatus =
+    step.status === "running" || step.status === "pending"
+      ? "running"
+      : step.status === "error"
+        ? "error"
+        : "done";
   return (
     <div
       className={`litpilot-log-line litpilot-log-line--${step.status}${
@@ -33,28 +38,27 @@ function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
       }`}
       role="listitem"
     >
-      <span className="litpilot-log-line__marker" aria-hidden="true">
-        {pending ? <span className="litpilot-log-line__spinner" /> : "·"}
+      <span className="litpilot-log-line__marker">
+        <StatusIcon status={iconStatus} />
       </span>
       <p className="litpilot-log-line__text">
         <span className="litpilot-log-line__primary">{primary}</span>
         {outcome ? (
-          <span className="litpilot-log-line__outcome"> → {outcome}</span>
+          <span className="litpilot-log-line__outcome"> {outcome}</span>
         ) : null}
       </p>
     </div>
   );
 }
 
-function cardHeadMarker(
+function cardHeadStatus(
   card: WorkflowCard,
-  open: boolean,
   isRunning: boolean,
   hasThinkStream: boolean,
-): string | "spinner" {
-  if (isRunning && !hasThinkStream) return "spinner";
-  if (card.state === "done") return open ? "▾" : "✓";
-  return open ? "▾" : "▸";
+): "running" | "done" | "pending" {
+  if (isRunning && !hasThinkStream) return "running";
+  if (card.state === "done") return "done";
+  return "pending";
 }
 
 function renderStepLogLines(
@@ -125,10 +129,13 @@ export function WorkflowCardView({
 }: Props) {
   const locked = card.locked || card.type === "clarify";
   const isRunning = card.state === "running";
-  const [manualOpen, setManualOpen] = useState(false);
 
+  // null = 用户未操作（跟随系统默认）；true/false = 用户操作，锁定意图
+  const [userIntent, setUserIntent] = useState<boolean | null>(null);
+
+  // 流结束后清除用户意图，让下一轮 turn 回到系统默认
   useEffect(() => {
-    if (!streaming) setManualOpen(false);
+    if (!streaming) setUserIntent(null);
   }, [streaming]);
 
   const pinnedThink = card.pinnedThink?.trim() ?? "";
@@ -139,13 +146,16 @@ export function WorkflowCardView({
     (card.type === "understand" || card.type === "brief") &&
     (Boolean(pinnedThink) || hasBriefBody);
 
-  const open =
+  // 系统默认开/关
+  const systemOpen =
     forceOpen ||
     locked ||
     isRunning ||
     (streaming && defaultOpen) ||
-    manualOpen ||
     retainWhileStreaming;
+
+  // 用户意图优先；未操作时走系统默认
+  const open = userIntent !== null ? userIntent : systemOpen;
   const canToggle = !locked && !isRunning && card.state === "done";
 
   const cardSummary = useMemo(
@@ -166,10 +176,7 @@ export function WorkflowCardView({
       card.type === "search") &&
     Boolean(thinkForCard || (streaming && isRunning));
 
-  const statusLabel =
-    isRunning && open && !hasThinkStream ? "进行中" : null;
-
-  const marker = cardHeadMarker(card, open, isRunning, hasThinkStream);
+  const headStatus = cardHeadStatus(card, isRunning, hasThinkStream);
 
   return (
     <section
@@ -178,18 +185,14 @@ export function WorkflowCardView({
       }${streaming && isRunning ? " litpilot-wf-card--live" : ""}`}
     >
       <div className="litpilot-wf-card__head">
-        <span className="litpilot-wf-card__marker" aria-hidden="true">
-          {marker === "spinner" ? (
-            <span className="litpilot-log-line__spinner" />
-          ) : (
-            marker
-          )}
+        <span className="litpilot-wf-card__marker">
+          <StatusIcon status={headStatus} />
         </span>
         {canToggle ? (
           <button
             type="button"
             className="litpilot-wf-card__title-btn"
-            onClick={() => setManualOpen((o) => !o)}
+            onClick={() => setUserIntent((prev) => (prev !== null ? !prev : !systemOpen))}
             aria-expanded={open}
           >
             {card.title}
@@ -197,11 +200,8 @@ export function WorkflowCardView({
         ) : (
           <span className="litpilot-wf-card__title">{card.title}</span>
         )}
-        {!open && cardSummary ? (
+        {cardSummary ? (
           <span className="litpilot-wf-card__inline-summary">{cardSummary}</span>
-        ) : null}
-        {open && statusLabel ? (
-          <span className="litpilot-wf-card__status">{statusLabel}</span>
         ) : null}
       </div>
       {open ? (
@@ -220,7 +220,11 @@ export function WorkflowCardView({
             <div className="litpilot-wf-card__body-text">{card.body}</div>
           ) : null}
           {card.type === "understand" && card.subTopics?.length ? (
-            <SubtopicListView subTopics={card.subTopics} />
+            <SearchProgressView
+              extensions={[]}
+              subTopics={card.subTopics}
+              planOnly
+            />
           ) : null}
           {card.type === "search" ? (
             <SearchProgressView

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ToolCallState } from "@meso.ai/ui";
 import { formatToolLogLine } from "@/lib/toolLabels";
+import { StatusIcon } from "./StatusIcon";
 
 type Props = {
   toolCall: ToolCallState;
@@ -20,20 +21,14 @@ export function LitPilotToolStep({ toolCall }: Props) {
       }`}
       role="listitem"
     >
-      <span className="litpilot-log-line__marker" aria-hidden="true">
-        {line.pending ? (
-          <span className="litpilot-log-line__spinner" />
-        ) : line.error ? (
-          "×"
-        ) : (
-          "·"
-        )}
+      <span className="litpilot-log-line__marker">
+        <StatusIcon status={line.pending ? "running" : line.error ? "error" : "done"} />
       </span>
       <div className="litpilot-log-line__body">
         <p className="litpilot-log-line__text">
           <span className="litpilot-log-line__primary">{line.primary}</span>
           {line.outcome ? (
-            <span className="litpilot-log-line__outcome"> → {line.outcome}</span>
+            <span className="litpilot-log-line__outcome"> {line.outcome}</span>
           ) : null}
         </p>
         {line.rawDetail ? (
@@ -43,7 +38,7 @@ export function LitPilotToolStep({ toolCall }: Props) {
             onClick={() => setExpanded((o) => !o)}
             aria-expanded={expanded}
           >
-            {expanded ? "收起原始响应" : "原始响应"}
+            {expanded ? "收起返回内容" : "查看返回内容"}
           </button>
         ) : null}
         {expanded && line.rawDetail ? (
