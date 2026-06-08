@@ -1,9 +1,12 @@
 """Generation phase: query_corpus, synthesis matrix, and review delivery."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
+
+MAX_PARALLEL_SECTIONS = 3
 
 from app.agents.execution_trace import upsert_stage
 from app.agents.literature_intent import LiteratureIntentResult, build_query_prompt
@@ -234,6 +237,116 @@ async def _stream_synthesis_matrix(
     )
 
 
+def _build_synthesis_prior(
+    section_parts: list[tuple[Any, str]],
+    *,
+    max_chars: int = 2000,
+) -> str:
+    """从已完成章节中提炼一段「整体感」摘要，供 conclusion 使用。"""
+    bites: list[str] = []
+    for section, body in section_parts:
+        head = (body or "").strip()
+        if not head:
+            continue
+        snippet = head[:240].replace("\n", " ")
+        bites.append(f"- {section.title}：{snippet}")
+    text = "\n".join(bites)
+    return text[-max_chars:]
+
+
+async def _generate_section_streaming(
+    ctx: GenerateTurnContext,
+    *,
+    section: Any,
+    outline_obj: LiteratureOutline,
+    review_art_id: str,
+    prior_excerpt: str,
+    refine_plan: Any,
+    gen_directives: str,
+    section_tokens: int,
+    section_refine_tokens: int,
+    parent_node: str,
+    section_parts: list[tuple[Any, str]],
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """单章顺序流式生成：发图节点 + stage + 流增量 + 收尾事件。"""
+    # 复用上一版章稿
+    reuse_body = ""
+    if refine_plan and not refine_plan.should_regenerate(section.id):
+        reuse_body = refine_plan.prior_bodies.get(section.id, "")
+    if reuse_body:
+        async for ev in sync_graph_node(
+            ctx.emitter,
+            ctx.graph,
+            ctx.graph_artifact_id,
+            section.id,
+            "skipped",
+            parent_id=parent_node,
+            metadata={"reused": True},
+        ):
+            yield ev
+        section_parts.append((section, reuse_body))
+        if reuse_body.strip():
+            yield artifact_stream_delta(review_art_id, reuse_body + "\n\n")
+        return
+
+    async for ev in sync_graph_node(
+        ctx.emitter,
+        ctx.graph,
+        ctx.graph_artifact_id,
+        section.id,
+        "active",
+        parent_id=parent_node,
+    ):
+        yield ev
+    stage_label = f"撰写：{section.title[:24]}"
+    yield ("stage", {"name": stage_label, "state": "active"})
+    sec_parts: list[str] = []
+    sec_is_refine = bool(
+        refine_plan
+        and refine_plan.prior_bodies.get(section.id, "").strip()
+        and ctx.intent.intent == "review_refine"
+    )
+    sec_directives = (
+        refine_plan.revision_directives if refine_plan else gen_directives
+    )
+    sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
+    try:
+        async for chunk in stream_section_generate(
+            ctx.llm,
+            outline=outline_obj,
+            section=section,
+            paper_index=ctx.working.paper_index,
+            prior_excerpt=prior_excerpt,
+            prior_section_body=refine_plan.prior_bodies.get(section.id, "")
+            if refine_plan
+            else "",
+            gen_directives=sec_directives,
+            writing_emphasis=ctx.planner_ctx.writing_emphasis,
+            is_refine=sec_is_refine,
+            max_tokens=sec_tokens,
+        ):
+            sec_parts.append(chunk)
+            yield artifact_stream_delta(review_art_id, chunk)
+    except Exception:
+        _log.exception("section %s streaming failed", section.id)
+    sec_body = "".join(sec_parts)
+    if not sec_body.strip():
+        sec_body = f"（章节「{section.title}」生成为空。）\n"
+        yield artifact_stream_delta(review_art_id, sec_body)
+    section_parts.append((section, sec_body))
+    async for ev in sync_graph_node(
+        ctx.emitter,
+        ctx.graph,
+        ctx.graph_artifact_id,
+        section.id,
+        "done",
+        parent_id=parent_node,
+    ):
+        yield ev
+    upsert_stage(ctx.execution_trace, stage_label, "done")
+    yield ("stage", {"name": stage_label, "state": "done"})
+
+
 async def _stream_review(
     ctx: GenerateTurnContext,
     context_block: str,
@@ -266,7 +379,6 @@ async def _stream_review(
             yield ev
 
         section_parts: list[tuple[Any, str]] = []
-        prior = ""
         prev_node = "outline"
         gen_directives = ctx.intent.gen_directives or ""
         prior_review = ctx.store.get_latest_review(ctx.session_id)
@@ -282,89 +394,222 @@ async def _stream_review(
         section_tokens = await get_prompt_max_tokens("section_system_template")
         section_refine_tokens = await get_prompt_max_tokens("section_refine_system_template")
 
-        for section in outline_obj.sections:
-            reuse_body = ""
-            if refine_plan and not refine_plan.should_regenerate(section.id):
-                reuse_body = refine_plan.prior_bodies.get(section.id, "")
-            if reuse_body:
+        # 是否启用并行：refine 模式下保持顺序写作以利用 prior 链；其余情况并行。
+        parallel_mode = refine_plan is None and len(outline_obj.sections) >= 3
+
+        intro_body = ""
+        if parallel_mode:
+            intro_sec = next((s for s in outline_obj.sections if s.id == "sec-intro"), None)
+            conclusion_sec = next(
+                (s for s in outline_obj.sections if s.id == "sec-conclusion"), None
+            )
+            body_sections = [
+                s for s in outline_obj.sections
+                if s.id not in ("sec-intro", "sec-conclusion")
+            ]
+            # —— Phase A：intro 顺序生成，提供后续章节的"整体感"基底
+            if intro_sec is not None:
+                async for ev in _generate_section_streaming(
+                    ctx,
+                    section=intro_sec,
+                    outline_obj=outline_obj,
+                    review_art_id=review_art_id,
+                    prior_excerpt="",
+                    refine_plan=refine_plan,
+                    gen_directives=gen_directives,
+                    section_tokens=section_tokens,
+                    section_refine_tokens=section_refine_tokens,
+                    parent_node=prev_node,
+                    section_parts=section_parts,
+                ):
+                    yield ev
+                prev_node = intro_sec.id
+                last_wf_node = intro_sec.id
+                intro_body = next(
+                    (b for s, b in section_parts if s.id == intro_sec.id), ""
+                )
+
+            # —— Phase B：body 章节并行生成，按大纲顺序刷出
+            if body_sections:
+                body_results: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+                body_bodies: dict[str, str] = {}
+                sem = asyncio.Semaphore(min(MAX_PARALLEL_SECTIONS, len(body_sections)))
+                intro_digest = (intro_body or "").strip()[:600]
+
+                async def _gen_body(sec) -> None:
+                    async with sem:
+                        events: list[tuple[str, dict[str, Any]]] = []
+                        body_buf: list[str] = []
+                        try:
+                            sec_tokens = section_tokens
+                            async for chunk in stream_section_generate(
+                                ctx.llm,
+                                outline=outline_obj,
+                                section=sec,
+                                paper_index=ctx.working.paper_index,
+                                prior_excerpt=intro_digest,
+                                prior_section_body="",
+                                gen_directives=gen_directives,
+                                writing_emphasis=ctx.planner_ctx.writing_emphasis,
+                                is_refine=False,
+                                max_tokens=sec_tokens,
+                            ):
+                                body_buf.append(chunk)
+                                events.append(
+                                    artifact_stream_delta(review_art_id, chunk)
+                                )
+                        except Exception:
+                            _log.exception("section %s streaming failed", sec.id)
+                        body_results[sec.id] = events
+                        body_bodies[sec.id] = "".join(body_buf)
+
+                tasks = [asyncio.create_task(_gen_body(s)) for s in body_sections]
+                # 按 outline 顺序：等到该 section 完成 → 一次性刷出其事件
+                for sec in body_sections:
+                    stage_label = f"撰写：{sec.title[:24]}"
+                    async for ev in sync_graph_node(
+                        ctx.emitter,
+                        ctx.graph,
+                        ctx.graph_artifact_id,
+                        sec.id,
+                        "active",
+                        parent_id=prev_node,
+                    ):
+                        yield ev
+                    yield ("stage", {"name": stage_label, "state": "active"})
+
+                    # 等当前 section 任务完成
+                    target = next(t for t, s in zip(tasks, body_sections) if s.id == sec.id)
+                    await target
+                    for ev in body_results.get(sec.id, []):
+                        yield ev
+                    sec_body = body_bodies.get(sec.id, "")
+                    if not sec_body.strip():
+                        sec_body = f"（章节「{sec.title}」生成为空。）\n"
+                        yield artifact_stream_delta(review_art_id, sec_body)
+                    section_parts.append((sec, sec_body))
+                    async for ev in sync_graph_node(
+                        ctx.emitter,
+                        ctx.graph,
+                        ctx.graph_artifact_id,
+                        sec.id,
+                        "done",
+                        parent_id=prev_node,
+                    ):
+                        yield ev
+                    upsert_stage(ctx.execution_trace, stage_label, "done")
+                    yield ("stage", {"name": stage_label, "state": "done"})
+                    prev_node = sec.id
+                    last_wf_node = sec.id
+
+            # —— Phase C：conclusion 顺序生成；用全部章节摘要做 prior，确保收束的整体感
+            if conclusion_sec is not None:
+                synthesis_prior = _build_synthesis_prior(section_parts, max_chars=2000)
+                async for ev in _generate_section_streaming(
+                    ctx,
+                    section=conclusion_sec,
+                    outline_obj=outline_obj,
+                    review_art_id=review_art_id,
+                    prior_excerpt=synthesis_prior,
+                    refine_plan=refine_plan,
+                    gen_directives=gen_directives,
+                    section_tokens=section_tokens,
+                    section_refine_tokens=section_refine_tokens,
+                    parent_node=prev_node,
+                    section_parts=section_parts,
+                ):
+                    yield ev
+                prev_node = conclusion_sec.id
+                last_wf_node = conclusion_sec.id
+        else:
+            prior = ""
+            for section in outline_obj.sections:
+                reuse_body = ""
+                if refine_plan and not refine_plan.should_regenerate(section.id):
+                    reuse_body = refine_plan.prior_bodies.get(section.id, "")
+                if reuse_body:
+                    async for ev in sync_graph_node(
+                        ctx.emitter,
+                        ctx.graph,
+                        ctx.graph_artifact_id,
+                        section.id,
+                        "skipped",
+                        parent_id=prev_node,
+                        metadata={"reused": True},
+                    ):
+                        yield ev
+                    section_parts.append((section, reuse_body))
+                    if reuse_body.strip():
+                        yield artifact_stream_delta(review_art_id, reuse_body + "\n\n")
+                    prior = (prior + "\n" + reuse_body)[-1500:]
+                    prev_node = section.id
+                    last_wf_node = section.id
+                    continue
+
                 async for ev in sync_graph_node(
                     ctx.emitter,
                     ctx.graph,
                     ctx.graph_artifact_id,
                     section.id,
-                    "skipped",
+                    "active",
                     parent_id=prev_node,
-                    metadata={"reused": True},
                 ):
                     yield ev
-                section_parts.append((section, reuse_body))
-                if reuse_body.strip():
-                    yield artifact_stream_delta(review_art_id, reuse_body + "\n\n")
-                prior = (prior + "\n" + reuse_body)[-1500:]
+                stage_label = f"撰写：{section.title[:24]}"
+                yield ("stage", {"name": stage_label, "state": "active"})
+                sec_parts: list[str] = []
+                sec_is_refine = bool(
+                    refine_plan
+                    and refine_plan.prior_bodies.get(section.id, "").strip()
+                    and ctx.intent.intent == "review_refine"
+                )
+                sec_directives = (
+                    refine_plan.revision_directives if refine_plan else gen_directives
+                )
+                sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
+                try:
+                    async for chunk in stream_section_generate(
+                        ctx.llm,
+                        outline=outline_obj,
+                        section=section,
+                        paper_index=ctx.working.paper_index,
+                        prior_excerpt=prior,
+                        prior_section_body=refine_plan.prior_bodies.get(section.id, "")
+                        if refine_plan
+                        else "",
+                        gen_directives=sec_directives,
+                        writing_emphasis=ctx.planner_ctx.writing_emphasis,
+                        is_refine=sec_is_refine,
+                        max_tokens=sec_tokens,
+                    ):
+                        sec_parts.append(chunk)
+                        yield artifact_stream_delta(review_art_id, chunk)
+                except Exception:
+                    _log.exception("section %s streaming failed", section.id)
+                sec_body = "".join(sec_parts)
+                if not sec_body.strip():
+                    sec_body = f"（章节「{section.title}」生成为空。）\n"
+                    yield artifact_stream_delta(review_art_id, sec_body)
+                section_parts.append((section, sec_body))
+                prior = (prior + "\n" + sec_body)[-1500:]
+                async for ev in sync_graph_node(
+                    ctx.emitter,
+                    ctx.graph,
+                    ctx.graph_artifact_id,
+                    section.id,
+                    "done",
+                    parent_id=prev_node,
+                ):
+                    yield ev
+                upsert_stage(ctx.execution_trace, stage_label, "done")
+                yield ("stage", {"name": stage_label, "state": "done"})
                 prev_node = section.id
                 last_wf_node = section.id
-                continue
 
-            async for ev in sync_graph_node(
-                ctx.emitter,
-                ctx.graph,
-                ctx.graph_artifact_id,
-                section.id,
-                "active",
-                parent_id=prev_node,
-            ):
-                yield ev
-            stage_label = f"撰写：{section.title[:24]}"
-            yield ("stage", {"name": stage_label, "state": "active"})
-            sec_parts: list[str] = []
-            sec_is_refine = bool(
-                refine_plan
-                and refine_plan.prior_bodies.get(section.id, "").strip()
-                and ctx.intent.intent == "review_refine"
-            )
-            sec_directives = (
-                refine_plan.revision_directives if refine_plan else gen_directives
-            )
-            sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
-            try:
-                async for chunk in stream_section_generate(
-                    ctx.llm,
-                    outline=outline_obj,
-                    section=section,
-                    paper_index=ctx.working.paper_index,
-                    prior_excerpt=prior,
-                    prior_section_body=refine_plan.prior_bodies.get(section.id, "")
-                    if refine_plan
-                    else "",
-                    gen_directives=sec_directives,
-                    writing_emphasis=ctx.planner_ctx.writing_emphasis,
-                    is_refine=sec_is_refine,
-                    max_tokens=sec_tokens,
-                ):
-                    sec_parts.append(chunk)
-                    yield artifact_stream_delta(review_art_id, chunk)
-            except Exception:
-                _log.exception("section %s streaming failed", section.id)
-            sec_body = "".join(sec_parts)
-            if not sec_body.strip():
-                sec_body = f"（章节「{section.title}」生成为空。）\n"
-                yield artifact_stream_delta(review_art_id, sec_body)
-            section_parts.append((section, sec_body))
-            prior = (prior + "\n" + sec_body)[-1500:]
-            async for ev in sync_graph_node(
-                ctx.emitter,
-                ctx.graph,
-                ctx.graph_artifact_id,
-                section.id,
-                "done",
-                parent_id=prev_node,
-            ):
-                yield ev
-            upsert_stage(ctx.execution_trace, stage_label, "done")
-            yield ("stage", {"name": stage_label, "state": "done"})
-            prev_node = section.id
-            last_wf_node = section.id
-
+        # 按 outline 顺序重排（并行模式下可能 intro→body→conclusion 已正确序，
+        # 这里保险按 outline.sections 索引排序）
+        order = {s.id: i for i, s in enumerate(outline_obj.sections)}
+        section_parts.sort(key=lambda sb: order.get(sb[0].id, 1_000_000))
         raw_main = stitch_review_sections(section_parts)
         upsert_stage(ctx.execution_trace, "综述生成", "done")
         yield ("stage", {"name": "综述生成", "state": "done"})

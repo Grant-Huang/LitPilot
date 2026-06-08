@@ -1,9 +1,12 @@
 """v2 per-subtopic retrieval: search → filter → fetch → cite → enrich."""
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
+
+MAX_PARALLEL_SUBTOPICS = 3
 
 from app.agents.enrich_lite import extract_enrich_lite_from_text
 from app.agents.execution_trace import record_literature_stats, upsert_stage
@@ -421,23 +424,55 @@ async def run_subtopic_retrieval(
 
     upsert_stage(ctx.execution_trace, "文献检索", "active")
     yield ("stage", {"name": "文献检索", "state": "active"})
-    for i, st in enumerate(subtopics, start=1):
-        async for ev in _run_subtopic(
-            ctx,
-            st,
-            pass_index=i,
-            pass_total=len(subtopics),
-            seen_url_keys=seen_keys,
-            fetch_slots_left=fetch_left,
-            corpus_base=corpus_base,
-        ):
-            yield ev
-            if ev[0] == "literature_subtopic_search_done":
-                total_raw += int(ev[1].get("raw_count") or 0)
-            if ev[0] == "literature_subtopic_filter_done":
-                total_kept += int(ev[1].get("kept_count") or 0)
-            if ev[0] == "literature_subtopic_fetch_done":
-                fetch_left -= int(ev[1].get("ok") or 0) + int(ev[1].get("failed") or 0)
+
+    # 并行检索每个子主题：预分配抓取额度，sem 限并发避免冲击 API
+    n = len(subtopics)
+    per_st_fetch = max(2, ctx.max_fetch_urls // max(1, n))
+    queue: asyncio.Queue = asyncio.Queue()
+    sem = asyncio.Semaphore(min(MAX_PARALLEL_SUBTOPICS, n))
+
+    async def _runner(idx: int, st: ResearchSubTopic) -> None:
+        async with sem:
+            try:
+                async for ev in _run_subtopic(
+                    ctx,
+                    st,
+                    pass_index=idx,
+                    pass_total=n,
+                    seen_url_keys=seen_keys,
+                    fetch_slots_left=per_st_fetch,
+                    corpus_base=corpus_base,
+                ):
+                    await queue.put(ev)
+            except Exception as exc:
+                await queue.put(("_subtopic_error", {"subtopic_id": st.id, "error": str(exc)}))
+            finally:
+                await queue.put(("_subtopic_done", {"subtopic_id": st.id}))
+
+    tasks = [asyncio.create_task(_runner(i, st)) for i, st in enumerate(subtopics, start=1)]
+    pending = n
+    while pending > 0:
+        ev = await queue.get()
+        if ev[0] == "_subtopic_done":
+            pending -= 1
+            continue
+        if ev[0] == "_subtopic_error":
+            pending -= 1
+            continue
+        yield ev
+        if ev[0] == "literature_subtopic_search_done":
+            total_raw += int(ev[1].get("raw_count") or 0)
+        if ev[0] == "literature_subtopic_filter_done":
+            total_kept += int(ev[1].get("kept_count") or 0)
+        if ev[0] == "literature_subtopic_fetch_done":
+            fetch_left -= int(ev[1].get("ok") or 0) + int(ev[1].get("failed") or 0)
+    # 保证所有任务结束
+    for t in tasks:
+        if not t.done():
+            try:
+                await t
+            except Exception:
+                pass
 
     upsert_stage(ctx.execution_trace, "文献检索", "done")
     yield ("stage", {"name": "文献检索", "state": "done"})
