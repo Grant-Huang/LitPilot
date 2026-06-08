@@ -19,7 +19,9 @@ export async function loadLibraryItems(options?: {
       try {
         const data = await libraryApi.items();
         return data.items || [];
-      } catch {
+      } catch (primaryErr) {
+        // 关键修复：先回退 legacy refs；若 legacy 也失败，向上抛真实异常，
+        // 让调用方区分 "空库" 和 "后端宕机"，避免静默把后端故障展示成空列表。
         try {
           const legacy = await libraryApi.refs();
           const raw =
@@ -28,7 +30,7 @@ export async function loadLibraryItems(options?: {
             [];
           return raw.map((r) => normalizeLibraryItem(r));
         } catch {
-          return [];
+          throw primaryErr;
         }
       }
     },

@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,11 +30,57 @@ async def api_health():
     return _health_payload()
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """启动 / 关闭钩子（替代已弃用的 on_event）。
+
+    关键修复：
+    - 先启动 task sweeper，即便日志读取失败也不会卡住后续接口；
+    - 配置读取放到线程池避免阻塞事件循环；
+    - 全程 try/except 保证启动幂等，异常仅记录日志。
+    """
+    import asyncio
+
+    from app.core.config import DATA_DIR
+    from app.llm.http_client import aclose_all
+    from app.storage.file_store import get_store
+    from app.tasks.literature_tasks import start_task_sweeper, stop_task_sweeper
+
+    try:
+        await start_task_sweeper()
+    except Exception:
+        logger.exception("lifespan: start_task_sweeper failed")
+
+    try:
+        merged = await asyncio.to_thread(get_store().get_agent_settings_merged)
+        logger.info(
+            "LitPilot data_dir=%s fetch_provider=%s max_fetch_urls=%s",
+            DATA_DIR,
+            merged.get("fetch_provider"),
+            merged.get("max_fetch_urls"),
+        )
+    except Exception:
+        logger.exception("lifespan: failed to load agent settings at startup")
+
+    try:
+        yield
+    finally:
+        try:
+            await stop_task_sweeper()
+        except Exception:
+            logger.exception("lifespan: stop_task_sweeper failed")
+        try:
+            await aclose_all()
+        except Exception:
+            logger.exception("lifespan: aclose_all failed")
+
+
 app = FastAPI(
     title="LitPilot API",
     description="Literature review assistant for researchers",
     version="0.1.0",
     redirect_slashes=False,
+    lifespan=_lifespan,
 )
 
 def _cors_allow_origins() -> list[str]:
@@ -46,31 +93,6 @@ def _cors_allow_origins() -> list[str]:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
-
-
-@app.on_event("startup")
-async def _log_runtime_config() -> None:
-    from app.core.config import DATA_DIR
-    from app.storage.file_store import get_store
-    from app.tasks.literature_tasks import start_task_sweeper
-
-    merged = get_store().get_agent_settings_merged()
-    logger.info(
-        "LitPilot data_dir=%s fetch_provider=%s max_fetch_urls=%s",
-        DATA_DIR,
-        merged.get("fetch_provider"),
-        merged.get("max_fetch_urls"),
-    )
-    await start_task_sweeper()
-
-
-@app.on_event("shutdown")
-async def _shutdown_task_sweeper() -> None:
-    from app.llm.http_client import aclose_all
-    from app.tasks.literature_tasks import stop_task_sweeper
-
-    await stop_task_sweeper()
-    await aclose_all()
 
 
 app.add_middleware(

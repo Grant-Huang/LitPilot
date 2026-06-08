@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.response import err, ok
@@ -16,19 +16,20 @@ class UpdateSessionBody(BaseModel):
     pinned: bool | None = None
 
 
+# 所有 handler 都是同步文件 I/O，声明为 def 走 FastAPI 线程池，避免占用事件循环。
 @router.get("")
-async def list_sessions():
+def list_sessions():
     return ok(get_store().list_sessions())
 
 
 @router.post("")
-async def create_session(body: CreateSessionBody):
+def create_session(body: CreateSessionBody):
     meta = get_store().create_session(title=body.title)
     return ok(meta)
 
 
 @router.get("/{session_id}")
-async def get_session(session_id: str):
+def get_session(session_id: str):
     meta = get_store().get_session(session_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -36,7 +37,7 @@ async def get_session(session_id: str):
 
 
 @router.patch("/{session_id}")
-async def update_session(session_id: str, body: UpdateSessionBody):
+def update_session(session_id: str, body: UpdateSessionBody):
     if body.title is None and body.pinned is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     meta = get_store().update_session(
@@ -50,20 +51,26 @@ async def update_session(session_id: str, body: UpdateSessionBody):
 
 
 @router.delete("/{session_id}")
-async def delete_session(session_id: str):
-    get_store().delete_session(session_id)
+def delete_session(session_id: str):
+    # 删除不存在的 session 必须显式 404，避免掩盖客户端 bug / 重放。
+    if not get_store().delete_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
     return ok({"deleted": session_id})
 
 
 @router.get("/{session_id}/messages")
-async def get_messages(session_id: str, limit: int = 50):
+def get_messages(
+    session_id: str,
+    # limit 必须有上界，否则攻击者一行就能让存储层加载巨量 JSON。
+    limit: int = Query(50, ge=1, le=500),
+):
     if not get_store().get_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     return ok(get_store().load_messages(session_id, limit=limit))
 
 
 @router.get("/{session_id}/review")
-async def get_session_review(session_id: str):
+def get_session_review(session_id: str):
     if not get_store().get_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     review = get_store().get_latest_review(session_id)
@@ -73,7 +80,7 @@ async def get_session_review(session_id: str):
 
 
 @router.get("/{session_id}/review/{filename}")
-async def get_session_review_version(session_id: str, filename: str):
+def get_session_review_version(session_id: str, filename: str):
     if not get_store().get_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     review = get_store().get_review_by_filename(session_id, filename)
@@ -83,7 +90,7 @@ async def get_session_review_version(session_id: str, filename: str):
 
 
 @router.get("/{session_id}/matrix")
-async def get_session_matrix(session_id: str):
+def get_session_matrix(session_id: str):
     if not get_store().get_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     matrix = get_store().get_latest_matrix(session_id)

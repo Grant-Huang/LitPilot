@@ -63,14 +63,25 @@ export async function apiRequestData<T>(
   timeoutMs = DEFAULT_API_TIMEOUT_MS,
 ): Promise<T> {
   const res = await apiFetch(path, init, timeoutMs);
+  // 关键修复：CDN / 网关返回 502/504 时通常是 HTML，res.json() 会抛错。
+  // 之前的实现把 body 置 null，前端只看到 "HTTP 500"，丢掉了真实错误。
+  // 这里先用 text() 读出全文，再尝试 JSON 解析，解析失败时把文本截断后作为错误消息。
+  const rawText = await res.text();
   let body: ApiEnvelope<T> | null = null;
-  try {
-    body = (await res.json()) as ApiEnvelope<T>;
-  } catch {
-    body = null;
+  if (rawText) {
+    try {
+      body = JSON.parse(rawText) as ApiEnvelope<T>;
+    } catch {
+      body = null;
+    }
   }
   if (!res.ok || body?.status === "error") {
-    const msg = body?.message || `HTTP ${res.status}`;
+    const fallback = rawText
+      ? rawText.length > 200
+        ? rawText.slice(0, 200) + "..."
+        : rawText
+      : `HTTP ${res.status}`;
+    const msg = body?.message || fallback;
     throw new ApiError(res.status, msg, body?.data);
   }
   return (body?.data ?? (undefined as unknown)) as T;

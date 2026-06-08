@@ -15,11 +15,17 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   let upstream: Response;
   try {
+    // 透传客户端断开信号：浏览器关闭标签页时，上游 FastAPI 会立刻收到 cancel，
+    // 避免任务流协程 + DB 轮询泄漏。
     upstream = await fetch(target, {
       method: "GET",
       cache: "no-store",
+      signal: req.signal,
     });
   } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return new Response(null, { status: 499 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     return new Response(JSON.stringify({ detail: `无法连接后端 ${backendBase}: ${msg}` }), {
       status: 502,
