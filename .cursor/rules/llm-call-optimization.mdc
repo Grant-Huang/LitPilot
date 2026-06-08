@@ -1,12 +1,12 @@
 ---
-description: LLM 调用与流式落库的性能最佳实践（连接复用 / 批处理 / 低延迟）
-globs: backend/app/llm/**/*.py,backend/app/tasks/**/*.py,backend/app/services/llm_service.py,backend/app/core/think_stream.py
+description: LLM 调用与流式落库的性能最佳实践（连接复用 / 批处理 / 低延迟 / 设置缓存 / Serverless）
+globs: backend/app/llm/**/*.py,backend/app/tasks/**/*.py,backend/app/services/llm_service.py,backend/app/core/think_stream.py,backend/app/agents/agent_settings.py,backend/app/api/settings.py
 alwaysApply: false
 ---
 
 # LLM 调用与流式性能约定
 
-目标：把系统延迟（TTFT + 流式抖动）压到最低，对齐 Cursor 级体感。
+目标：把系统延迟（TTFT + 流式抖动 + 预调用 I/O 排队）压到最低。
 
 ## 连接复用（降 TTFT）
 
@@ -25,21 +25,66 @@ client = get_async_client()
 resp = await client.post(url, json=payload, headers=self._headers())
 ```
 
-## 实例复用
+## 设置缓存（降预调用延迟）
+
+- `get_merged_settings()` 每次调 Turso / DB 可能 8~15s，**必须缓存**。
+- 使用 **进程级内存 TTL 缓存**（`_SETTINGS_CACHE`，默认 15s），适合本地/持续运行场景。
+- 在 **Vercel serverless 冷启动**场景下，内存缓存不存活，需要配合 **文件级 fallback 缓存**：首次冷启动从 `/tmp/litpilot_settings_cache.json` 读取，DB 查询后再异步刷新；文件缓存 TTL 可设 300s（5 分钟），大幅减少冷启动 Turso 命中。
+- 保存设置的 API 端点必须同时清除内存缓存和删除文件缓存文件。
+
+```python
+# 进程级内存缓存（L14-16）
+_SETTINGS_CACHE: dict[str, Any] | None = None
+_SETTINGS_CACHE_TS: float = 0.0
+_SETTINGS_TTL_SEC = float(os.getenv("LITPILOT_SETTINGS_CACHE_SEC", "15"))
+
+# 文件级 fallback（serverless 冷启动）
+_SETTINGS_FILE = "/tmp/litpilot_settings_cache.json"
+_SETTINGS_FILE_TTL = float(os.getenv("LITPILOT_SETTINGS_FILE_TTL_SEC", "300"))
+```
+
+## 预调用 I/O 并行化
+
+- **禁止**在 LLM 调用前串行执行 5~8 次 Turso 读操作（session / messages / corpus / outline / settings）。每次 Turso 读在 serverless 环境下耗时 2~5s，串行累计可达 15~40s。
+- **必须**将所有前置只读 I/O 用 `asyncio.gather()` 并发执行。
+- 设置缓存优先命中内存，再尝试文件 fallback，最后才调 Turso。
+
+```python
+# ❌ 串行 I/O（每个 2~5s，累计 ~30s）
+session = await store.get_session(id)
+msgs = await store.load_messages(id)
+corpus = await resolve_session_corpus(store, id)
+
+# ✅ 并行 I/O（并发完成，总耗时 = 最慢的一个 ~5s）
+session_task = store.get_session(id)
+msgs_task = store.load_messages(id)
+corpus_task = resolve_session_corpus(store, id)
+session, msgs, corpus = await asyncio.gather(session_task, msgs_task, corpus_task)
+```
+
+## LLM 实例复用
 
 - LLM 实例按配置签名缓存（见 `llm_service._build_from_cfg`），配置不变复用、变更自动重建；勿在热路径重复 `build_llm`。
+
+## DeepSeek 思考模式控制
+
+- DeepSeek v4 默认 `thinking: enabled`（先输出 `reasoning_content` 再输出 `content`），导致 TTFT 极高（6s+ 才出首 token）。
+- **按模型自动控制**：`deepseek-v4-flash` / `deepseek-chat` → `thinking: disabled`（直接出 content）；`deepseek-v4-pro` / `deepseek-reasoner` → 不传 thinking，走默认思考模式（综述撰写等质量优先场景）。
+- 通过 `extra_body={"thinking": {"type": "disabled"}}` 实现；走 `_deepseek_extra_body()` 方法统一控制。
+- `chat_stream_parts` 需同时处理 `reasoning_content` 和 `content` 兜底。
 
 ## 流式落库（降抖动）
 
 - **禁止**逐 token 落库/抢文件锁/打 DB。连续同类增量先经 `_StreamCoalescer` 按字符阈值/边界合并，再落一次库；`done`/边界事件前必须 `flush()`，保证不丢字、顺序一致。
 - `update_task` 仅在 progress/stage 变化时写，避免每事件重写 meta。
-- 消费端优先 `asyncio.Event` 事件驱动唤醒，跨进程用短超时（≤50ms）轮询回退；`list_events` 按事件序号 + 字节偏移增量读，禁止每轮重读整个文件。
+- 消费端优先 `asyncio.Event` 事件驱动唤醒，跨进程用短超时（≤50ms）轮询回退；`list_events` 按事件序号增量读，禁止每轮重读整个文件。
 - 长时间无事件时发送 SSE 注释心跳 `: keepalive\n\n`（前端忽略非 `data:` 行），防代理断连。
 
 ## Prompt / 参数
 
 - system prompt 保持短小；非必要不开 function calling / JSON mode（增加首 token 解析延迟）。
 - 必须 `stream=True` 并逐 chunk flush，不要 buffer 到整句再发。
+- 非流式 `chat()` 调用（如 intent router、assessor）确认 `thinking: disabled` 同样生效，避免首 token 等待。
 
 ## 变更后
 

@@ -126,7 +126,7 @@ async def get_agent_settings():
 
 @router.post("/agent")
 async def save_agent_settings(body: AgentSettingsBody):
-    from app.agents.agent_settings import _clear_settings_cache
+    from app.agents.agent_settings import _clear_all_caches
 
     partial = body.model_dump(exclude_none=True)
 
@@ -167,7 +167,7 @@ async def save_agent_settings(body: AgentSettingsBody):
         )
 
     saved = get_store().save_agent_settings(partial)
-    _clear_settings_cache()
+    _clear_all_caches()
     return ok(_agent_settings_response(saved), message="设置已保存")
 
 

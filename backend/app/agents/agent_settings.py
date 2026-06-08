@@ -1,6 +1,8 @@
-"""Agent settings from file store + environment — with short-TTL memory cache."""
+"""Agent settings from file store + environment — with short-TTL memory cache and
+serverless cold-start file fallback."""
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any
@@ -10,10 +12,19 @@ from app.agents.tools.search_hits import ACADEMIC_SEARCH_DOMAINS, DEFAULT_EXCLUD
 
 from app.storage.file_store import get_store
 
-# 内存 TTL 缓存：避免每次请求对 Turso / File 做多次全量设置查询
+# 内存 TTL 缓存：避免同一进程/请求内重复 Turso 调用
 _SETTINGS_CACHE: dict[str, Any] | None = None
 _SETTINGS_CACHE_TS: float = 0.0
 _SETTINGS_TTL_SEC = float(os.getenv("LITPILOT_SETTINGS_CACHE_SEC", "15").strip() or "15")
+
+# 文件级 fallback 缓存：Vercel serverless 冷启动时 /tmp 可能存活 5~15 分钟
+_SETTINGS_FILE = os.getenv(
+    "LITPILOT_SETTINGS_CACHE_FILE",
+    "/tmp/litpilot_settings_cache.json",
+)
+_SETTINGS_FILE_TTL_SEC = float(
+    os.getenv("LITPILOT_SETTINGS_FILE_TTL_SEC", "300").strip() or "300"
+)
 
 
 def _clear_settings_cache() -> None:
@@ -22,13 +33,61 @@ def _clear_settings_cache() -> None:
     _SETTINGS_CACHE_TS = 0.0
 
 
+def _clear_all_caches() -> None:
+    """清空内存缓存 + 删除文件缓存（保存设置时调用）。"""
+    _clear_settings_cache()
+    _remove_file_cache()
+
+
+def _remove_file_cache() -> None:
+    try:
+        if os.path.isfile(_SETTINGS_FILE):
+            os.remove(_SETTINGS_FILE)
+    except OSError:
+        pass
+
+
+def _load_file_cache() -> dict[str, Any] | None:
+    try:
+        if not os.path.isfile(_SETTINGS_FILE):
+            return None
+        mtime = os.path.getmtime(_SETTINGS_FILE)
+        if time.time() - mtime >= _SETTINGS_FILE_TTL_SEC:
+            _remove_file_cache()
+            return None
+        with open(_SETTINGS_FILE, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _write_file_cache(data: dict[str, Any]) -> None:
+    try:
+        with open(_SETTINGS_FILE, "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
 async def get_merged_settings() -> dict[str, Any]:
     global _SETTINGS_CACHE, _SETTINGS_CACHE_TS
     now = time.monotonic()
+    # 1) 进程级内存缓存（命中即返回）
     if _SETTINGS_CACHE is not None and now - _SETTINGS_CACHE_TS < _SETTINGS_TTL_SEC:
         return _SETTINGS_CACHE
+    # 2) 文件级 fallback 缓存（serverless 冷启动存活）
+    file_data = _load_file_cache()
+    if file_data is not None:
+        _SETTINGS_CACHE = file_data
+        _SETTINGS_CACHE_TS = now
+        return _SETTINGS_CACHE
+    # 3) 真实 Turso / File store 查询
     _SETTINGS_CACHE = get_store().get_agent_settings_merged()
     _SETTINGS_CACHE_TS = now
+    _write_file_cache(_SETTINGS_CACHE)
     return _SETTINGS_CACHE
 
 

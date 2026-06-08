@@ -88,16 +88,27 @@ async def stream_literature_turn(
     if persist_user_message:
         store.append_message(session_id, "user", user_message)
 
-    citation_format = await get_citation_format()
+    # 将独立 Turso/DB 读操作并行化
+    import asyncio
+
+    citation_task = asyncio.ensure_future(get_citation_format())
+    session_task = asyncio.to_thread(store.get_session, session_id)
+    msgs_task = asyncio.to_thread(lambda: store.load_messages(session_id, limit=50))
+    review_task = asyncio.to_thread(store.get_latest_review, session_id)
+    corpus_task = asyncio.to_thread(resolve_session_corpus, store, session_id)
+
+    session_meta, msgs, has_review, corpus = await asyncio.gather(
+        session_task, msgs_task, review_task, corpus_task,
+    )
+    citation_format = await citation_task
     fmt_label = citation_format_label(citation_format)
     yield skill_active_event("literature-review")
 
-    session_meta = store.get_session(session_id) or {}
-    msgs = store.load_messages(session_id, limit=50)
+    session_meta = session_meta or {}
+    corpus = corpus or SessionCorpus()
     user_turns = sum(1 for m in msgs if m.get("role") == "user")
     last_failed = _last_assistant_failed(msgs)
-    has_review = bool(store.get_latest_review(session_id))
-    corpus = resolve_session_corpus(store, session_id) or SessionCorpus()
+    has_review = bool(has_review)
 
     turn_ctx = build_session_turn_context(
         session_id=session_id,
