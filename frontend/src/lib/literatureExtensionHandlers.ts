@@ -2,6 +2,7 @@ type ExtensionData = Record<string, unknown> | undefined;
 
 type HandlerContext = {
   isChat: boolean;
+  activeSessionId: string | null;
   setActiveSessionId: (id: string) => void;
   loadSessions: () => Promise<void>;
   persistActiveSession: (id: string) => void;
@@ -17,6 +18,7 @@ const HANDLERS: Record<string, ExtensionHandler> = {
   session: (data, ctx) => {
     const sid = data?.session_id;
     if (typeof sid !== "string" || !sid) return;
+    if (sid === ctx.activeSessionId) return;
     ctx.setActiveSessionId(sid);
     ctx.persistActiveSession(sid);
     void ctx.loadSessions();
