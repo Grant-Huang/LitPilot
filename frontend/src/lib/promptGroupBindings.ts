@@ -1,10 +1,12 @@
 import type { PromptTemplateMeta, SystemCapability } from "@/lib/settingsApiV2";
 
-/** 提示词分组 ↔ 模型实例绑定（orchestrator/review_main 走能力 primary_ref，其余走 prompts.params） */
-export const PROMPT_GROUP_INSTANCE_PARAM: Partial<Record<string, string>> = {
+/** 提示词分组 ↔ 模型实例 ID 在 prompts.params 中的参数名（全部 6 组统一存储） */
+export const PROMPT_GROUP_INSTANCE_PARAM: Record<string, string> = {
+  orchestrator: "orchestrator_instance_id",
   router: "router_instance_id",
   search: "search_instance_id",
   assessor: "assessor_instance_id",
+  generation: "generation_instance_id",
   pipeline: "pipeline_instance_id",
 };
 
@@ -24,13 +26,13 @@ export const PROMPT_GROUP_ORDER = [
 
 export const PROMPT_GROUP_INSTANCE_TIPS: Partial<Record<string, string>> = {
   orchestrator:
-    "阶段解说与 Checkpoint A 理解；未绑定时编排流程不可用。组内各提示词共享此实例，Token 可逐条覆盖。",
-  router: "续聊意图路由；默认与编排实例相同，可单独指定更快模型。",
-  search: "检索式消歧、扩展与规范化；默认与编排实例相同。",
-  assessor: "首轮 brief 评估与澄清；默认与编排实例相同。",
+    "阶段解说与 Checkpoint A 理解；未绑定时编排流程不可用。组内各提示词共享此实例。",
+  router: "续聊意图路由，可独立指定模型实例。",
+  search: "检索式消歧、扩展与规范化。",
+  assessor: "首轮 brief 评估与澄清。",
   generation:
     "综述撰写、分章、矩阵与语料问答；通常选更强、上下文更大的模型。",
-  pipeline: "网页分块摘要与文献结构化；默认与编排实例相同。",
+  pipeline: "网页分块摘要与文献结构化提取。",
 };
 
 export function promptMaxTokensParam(key: string): string {
@@ -76,11 +78,13 @@ export function resolveGroupInstanceId(
   params: Record<string, unknown>,
   capRefs: Record<string, string>,
 ): string {
+  // 优先从 prompts.params 读取，再回退到 capability primary_ref（向后兼容已存数据）
+  const paramKey = PROMPT_GROUP_INSTANCE_PARAM[groupId];
+  const fromParams = paramKey ? String(params[paramKey] || "") : "";
+  if (fromParams) return fromParams;
   const capId = PROMPT_GROUP_CAPABILITY[groupId];
   if (capId) return capRefs[capId] || "";
-  const paramKey = PROMPT_GROUP_INSTANCE_PARAM[groupId];
-  if (!paramKey) return "";
-  return String(params[paramKey] || "");
+  return "";
 }
 
 export function loadGroupInstances(
@@ -124,6 +128,7 @@ export function isPromptTemplateCustomized(
   return promptTemplateForSave(displayed, builtInDefault) !== "";
 }
 
+/** 将分组实例 ID 写入 prompts.params（全部组统一存储）。 */
 export function applyGroupInstanceToParams(
   groupId: string,
   instanceId: string,
@@ -131,10 +136,8 @@ export function applyGroupInstanceToParams(
 ): Record<string, unknown> {
   const next = { ...params };
   const paramKey = PROMPT_GROUP_INSTANCE_PARAM[groupId];
-  if (paramKey) {
-    if (instanceId) next[paramKey] = instanceId;
-    else delete next[paramKey];
-  }
+  if (instanceId) next[paramKey] = instanceId;
+  else delete next[paramKey];
   return next;
 }
 

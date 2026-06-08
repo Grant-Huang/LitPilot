@@ -444,12 +444,12 @@ def prompt_registry_metadata() -> list[dict[str, Any]]:
         "pipeline": "流水线",
     }
     group_instance_binding = {
-        "orchestrator": "orchestrator",
-        "router": "router",
-        "search": "search",
-        "assessor": "assessor",
-        "generation": "review_main",
-        "pipeline": "pipeline",
+        "orchestrator": "orchestrator_instance_id",
+        "router": "router_instance_id",
+        "search": "search_instance_id",
+        "assessor": "assessor_instance_id",
+        "generation": "generation_instance_id",
+        "pipeline": "pipeline_instance_id",
     }
     items: list[dict[str, Any]] = []
     for key, spec in PROMPT_SPECS.items():

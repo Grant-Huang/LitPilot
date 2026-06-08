@@ -76,12 +76,19 @@ ORCHESTRATOR_PARAM_DEFAULTS: dict[str, Any] = {
 
 
 
+# 全部 6 个提示词分组各自的独立模型实例 ID（统一在 prompts.params 中存储）
+_PROMPT_GROUP_INSTANCE_PARAMS: list[str] = [
+    "orchestrator_instance_id",
+    "generation_instance_id",
+    "router_instance_id",
+    "search_instance_id",
+    "assessor_instance_id",
+    "pipeline_instance_id",
+]
+
 PROMPTS_PARAM_DEFAULTS: dict[str, Any] = {
     **PROMPT_TEMPLATE_PARAM_DEFAULTS,
-    "router_instance_id": "",
-    "search_instance_id": "",
-    "assessor_instance_id": "",
-    "pipeline_instance_id": "",
+    **{k: "" for k in _PROMPT_GROUP_INSTANCE_PARAMS},
 }
 
 
@@ -249,10 +256,11 @@ def _prefixed_llm_fields(prefix: str, llm: dict[str, Any], *, fallback: dict[str
 def _resolve_group_instance_id(
     prompts: dict[str, Any],
     param_key: str,
-    default_inst_id: str,
+    *,
+    fallback: str = "",
 ) -> str:
-    override = str(prompts.get(param_key) or "").strip()
-    return override or default_inst_id
+    """Read a group instance ID from ``prompts.params``, with optional fallback."""
+    return str(prompts.get(param_key) or "").strip() or fallback
 
 
 
@@ -355,19 +363,21 @@ def build_runtime_settings(
 
     planner_llm = orch_llm if orch_llm.get("llm_model") else llm
 
-    router_inst_id = _resolve_group_instance_id(
-        prompts, "router_instance_id", orch_inst_id
+    # 全部 6 个分组独立解析实例 ID，移除回退到 orchestrator 的逻辑
+    orchestrator_inst_id = _resolve_group_instance_id(
+        prompts, "orchestrator_instance_id", fallback=orch_inst_id
     )
-    search_inst_id = _resolve_group_instance_id(
-        prompts, "search_instance_id", orch_inst_id
+    generation_inst_id = _resolve_group_instance_id(
+        prompts, "generation_instance_id", fallback=review_inst_id
     )
-    assessor_inst_id = _resolve_group_instance_id(
-        prompts, "assessor_instance_id", orch_inst_id
-    )
-    pipeline_inst_id = _resolve_group_instance_id(
-        prompts, "pipeline_instance_id", orch_inst_id
-    )
+    router_inst_id = _resolve_group_instance_id(prompts, "router_instance_id")
+    search_inst_id = _resolve_group_instance_id(prompts, "search_instance_id")
+    assessor_inst_id = _resolve_group_instance_id(prompts, "assessor_instance_id")
+    pipeline_inst_id = _resolve_group_instance_id(prompts, "pipeline_instance_id")
 
+    # 解析 LLM 配置：orchestrator 和 generation 支持 primary_ref 回退，其余仅从 prompts.params 读取
+    resolved_orch_llm = _resolve_instance_llm(instances, credentials, orchestrator_inst_id) or planner_llm
+    resolved_gen_llm = _resolve_instance_llm(instances, credentials, generation_inst_id) or llm
     router_llm = _resolve_instance_llm(instances, credentials, router_inst_id) or planner_llm
     search_llm = _resolve_instance_llm(instances, credentials, search_inst_id) or planner_llm
     assessor_llm = _resolve_instance_llm(instances, credentials, assessor_inst_id) or planner_llm
@@ -447,32 +457,35 @@ def build_runtime_settings(
             fetch.get("pdf_extract_backend") or "pymupdf4llm"
         ).strip().lower(),
 
-        "llm_provider": llm.get("llm_provider") or "openai",
+        "llm_provider": resolved_gen_llm.get("llm_provider") or "openai",
 
-        "llm_api_key": llm.get("llm_api_key") or "",
+        "llm_api_key": resolved_gen_llm.get("llm_api_key") or "",
 
-        "llm_model": llm.get("llm_model") or "gpt-4o-mini",
+        "llm_model": resolved_gen_llm.get("llm_model") or "gpt-4o-mini",
 
-        "llm_base_url": llm.get("llm_base_url") or "",
+        "llm_base_url": resolved_gen_llm.get("llm_base_url") or "",
 
-        "llm_group_id": llm.get("llm_group_id") or "",
+        "llm_group_id": resolved_gen_llm.get("llm_group_id") or "",
 
-        "orchestrator_model": planner_llm.get("llm_model") or "",
+        "orchestrator_model": resolved_orch_llm.get("llm_model") or "",
 
-        "planner_llm_provider": planner_llm.get("llm_provider") or llm.get("llm_provider") or "openai",
+        "planner_llm_provider": resolved_orch_llm.get("llm_provider") or llm.get("llm_provider") or "openai",
 
-        "planner_llm_api_key": planner_llm.get("llm_api_key") or llm.get("llm_api_key") or "",
+        "planner_llm_api_key": resolved_orch_llm.get("llm_api_key") or llm.get("llm_api_key") or "",
 
-        "planner_llm_model": planner_llm.get("llm_model") or llm.get("llm_model") or "gpt-4o-mini",
+        "planner_llm_model": resolved_orch_llm.get("llm_model") or llm.get("llm_model") or "gpt-4o-mini",
 
-        "planner_llm_base_url": planner_llm.get("llm_base_url") or llm.get("llm_base_url") or "",
+        "planner_llm_base_url": resolved_orch_llm.get("llm_base_url") or llm.get("llm_base_url") or "",
 
-        "planner_llm_group_id": planner_llm.get("llm_group_id") or llm.get("llm_group_id") or "",
+        "planner_llm_group_id": resolved_orch_llm.get("llm_group_id") or llm.get("llm_group_id") or "",
 
-        **_prefixed_llm_fields("router_llm", router_llm, fallback=planner_llm),
-        **_prefixed_llm_fields("search_llm", search_llm, fallback=planner_llm),
-        **_prefixed_llm_fields("assessor_llm", assessor_llm, fallback=planner_llm),
-        **_prefixed_llm_fields("pipeline_llm", pipeline_llm, fallback=planner_llm),
+        **_prefixed_llm_fields("router_llm", router_llm, fallback=resolved_orch_llm),
+
+        **_prefixed_llm_fields("search_llm", search_llm, fallback=resolved_orch_llm),
+
+        **_prefixed_llm_fields("assessor_llm", assessor_llm, fallback=resolved_orch_llm),
+
+        **_prefixed_llm_fields("pipeline_llm", pipeline_llm, fallback=resolved_orch_llm),
 
         "fetch_parallel": int(fetch.get("fetch_parallel") or 3),
 
