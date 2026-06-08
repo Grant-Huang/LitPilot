@@ -616,9 +616,25 @@ async def _stream_review(
 
     deliver_parent = last_wf_node
 
-    main_text = append_compliance_footer(raw_main)
-    if main_text != raw_main:
-        tail = main_text[len(raw_main) :]
+    # —— 引用后置校验：把已 OpenAlex/Crossref 验证过的元数据与正文 [n] 对照 ——
+    from app.agents.citation_audit import audit_review_citations
+
+    audit_report = audit_review_citations(raw_main, ctx.cite_records)
+    audit_payload = audit_report.to_dict()
+    yield (
+        "extension",
+        {"name": "literature_citation_audit", "version": "1.0", "data": audit_payload},
+    )
+    audit_footer_lines = audit_report.footer_lines()
+    audited_main = raw_main
+    if audit_footer_lines:
+        footer_block = "\n".join(audit_footer_lines) + "\n"
+        audited_main = raw_main.rstrip() + "\n\n" + footer_block
+        yield artifact_stream_delta(review_art_id, "\n\n" + footer_block)
+
+    main_text = append_compliance_footer(audited_main)
+    if main_text != audited_main:
+        tail = main_text[len(audited_main) :]
         if tail:
             yield artifact_stream_delta(review_art_id, tail)
 
