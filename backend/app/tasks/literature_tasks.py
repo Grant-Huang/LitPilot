@@ -243,6 +243,22 @@ class LiteratureTaskRegistry:
             fetch_urls=fetch_urls,
         )
         get_store().append_message(session_id, "user", message)
+        # 在启动 _run 之前，同步写入初始事件（session + capabilities + stage），
+        # 避免 Vercel serverless 在 _run 执行 batch.flush 前终止进程导致
+        # 前端 SSE 永远等不到 stage 事件、一直显示"正在连接…"
+        self._store.append_event(
+            record.id,
+            sse_event("extension", {"name": "session", "version": "1.0", "data": {"session_id": session_id}}),
+        )
+        self._store.append_event(record.id, sse_event("capabilities", capabilities_payload()))
+        self._store.append_event(
+            record.id, sse_event("stage", {"name": "理解研究问题", "state": "active"})
+        )
+        self._store.update_task(
+            record.id,
+            progress=2,
+            stage="understanding",
+        )
         await self._maybe_start_runner(record.id)
         refreshed = self._store.get_task(record.id)
         return refreshed or record
@@ -380,26 +396,6 @@ class LiteratureTaskRegistry:
             lambda t, p: self._persist_event(task_id, t, p, batch=batch)
         )
         try:
-            self._persist_event(
-                task_id,
-                "extension",
-                {
-                    "name": "session",
-                    "version": "1.0",
-                    "data": {"session_id": record.session_id},
-                },
-                batch=batch,
-            )
-            self._persist_event(
-                task_id, "capabilities", capabilities_payload(), batch=batch
-            )
-            # 在 stream_literature_turn 调用前即发射 stage，
-            # 确保前端在阻塞 I/O / LLM 调用前就有 card，不显示"正在连接…"
-            self._persist_event(
-                task_id, "stage", {"name": "理解研究问题", "state": "active"}, batch=batch
-            )
-            batch.flush()
-
             async for ev_type, payload in stream_literature_turn(
                 record.session_id,
                 record.message,
