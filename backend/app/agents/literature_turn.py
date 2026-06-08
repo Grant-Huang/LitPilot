@@ -217,7 +217,7 @@ async def stream_literature_turn(
         planner_ctx.narration_focus = router_result.narration_focus
         planner_ctx.writing_emphasis = router_result.writing_emphasis
 
-        if should_auto_rename_session(session_meta, route_message, user_turns):
+        if should_auto_rename_session(session_meta, route_message, user_message_count=user_turns):
             new_title = await resolve_auto_session_title(
                 primary_title=router_result.session_title or "",
                 user_message=route_message,
