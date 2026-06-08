@@ -901,7 +901,7 @@
 .litpilot-think--streaming .litpilot-think__model {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
 }
 
 .litpilot-think--streaming .meso-think__dot,

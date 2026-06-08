@@ -50,9 +50,6 @@ export function TurnWorkflowBlock({
     if (!streaming) return null;
     return (
       <div className="litpilot-turn-log litpilot-turn-log--pending">
-        <div className="litpilot-turn-complete litpilot-turn-complete--live">
-          <div className="litpilot-turn-complete__headline">当前：理解研究问题</div>
-        </div>
         <div className="litpilot-wf-card litpilot-wf-card--running litpilot-wf-card--open litpilot-wf-card--live">
           <div className="litpilot-wf-card__head">
             <span className="litpilot-wf-card__title">理解研究问题</span>
@@ -79,14 +76,12 @@ export function TurnWorkflowBlock({
     );
   }
 
-  const showCompletionBar = true;
-
   return (
     <div className="litpilot-turn-log">
-      {showCompletionBar ? (
+      {!streaming ? (
         <TurnCompletionBar
           summary={completion}
-          streaming={streaming}
+          streaming={false}
           hasArtifact={hasArtifact || bridge?.hasArtifact}
           artifactVisible={bridge?.artifactPanelVisible}
           onOpenArtifact={bridge?.openArtifactPanel}

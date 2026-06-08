@@ -11,14 +11,13 @@ alwaysApply: false
 ## 信息架构
 
 - **进度文案只出现一处**：动态 `literature_progress.detail` 仅服务于当前 running 卡片内的思考流；不得同时写入顶部 headline、已完成卡片摘要、Brief 伪卡片 body。
-- **流式 headline**：`TurnCompletionBar` 在 streaming 时只显示 `当前：{阶段名}`，完成后才切换为统计摘要。
+- **流式 headline**：`TurnCompletionBar` 仅在回合完成后显示统计摘要，streaming 时不渲染。
 - **Brief 卡片**：仅在有 `literature_brief_assessment` 结构化结果（RQ / 关键词 / hint）时创建；禁止用心跳 progress 文案伪造「Brief 评估 · 已完成」。
-- **workflow.summary**：streaming 时取 running 卡片 title，不用已完成卡片 summary 拼接。
 
 ## 思考区（LitPilotThinkFold）
 
 - **流式 flatten**：`litpilot-think--streaming` 时无 border/背景，仅左侧 2px 边线，避免 workflow 卡片内「盒中盒」。
-- **可读性**：流式正文 14px / 1.6 行高 / 主文本色；系统注记（⟦sys⟧）保持 11–12px 灰色。
+- **可读性**：流式正文 14px / 1.6 行高 / 次要文本色（灰一点）；系统注记（⟦sys⟧）保持 11–12px 灰色。
 - **滚动**：流式区 `max-height: 280px`，内容增长时自动滚到底；容器加 `aria-live="polite"`。
 - **标签**：streaming 时 header 文案为「思考中」，完成后为「推理过程」。
 - **折叠**：步骤进行中默认展开，允许用户手动收起；步骤完成或 streaming 结束自动折叠。
