@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { dropStaleSysSegments, parseThinkSegments } from "@/lib/thinkContent";
+import {
+  dropStaleSysSegments,
+  parseThinkSegments,
+  splitModelByEnum,
+} from "@/lib/thinkContent";
 import { StatusIcon } from "./StatusIcon";
 
 type Props = {
@@ -98,13 +102,18 @@ export function LitPilotThinkFold({
             aria-live={streaming ? "polite" : undefined}
           >
             {hasContent
-              ? segments.map((seg, idx) =>
-                  seg.kind === "system" ? (
-                    <p key={idx} className="lp-think-fold__system">{seg.text}</p>
-                  ) : (
-                    <p key={idx} className="lp-think-fold__model">{seg.text}</p>
-                  ),
-                )
+              ? segments.map((seg, idx) => {
+                  if (seg.kind === "system") {
+                    return (
+                      <p key={idx} className="lp-think-fold__system">{seg.text}</p>
+                    );
+                  }
+                  // 长 block 按"其一/其二/首先/核心挑战"等枚举词拆段，让段间有自然层级（#G）
+                  const chunks = splitModelByEnum(seg.text);
+                  return chunks.map((chunk, ci) => (
+                    <p key={`${idx}-${ci}`} className="lp-think-fold__model">{chunk}</p>
+                  ));
+                })
               : null}
             {streaming ? <span className="lp-think-fold__cursor" aria-hidden="true">▋</span> : null}
           </div>

@@ -50,6 +50,19 @@ function _strip_markers(t: string): string {
     .trim();
 }
 
+/** 把单条 model 段按中文枚举词（其一/其二/.../首先/其次/再者/最后/核心挑战）切分成多段，
+ *  让长 block 在排版上有自然的小标题分隔（round 3 审查 #G）。后端如果直接发 markdown
+ *  其实更好，但在前端兜底拆分能立刻改善阅读体验。 */
+const ENUM_SPLIT_RE = /(?=其[一二三四五六七八九十]、?|首先[，,]|其次[，,]|再者[，,]|最后[，,]|核心挑战)/g;
+
+export function splitModelByEnum(text: string): string[] {
+  if (!text || !ENUM_SPLIT_RE.test(text)) return [text];
+  // RegExp /g state needs reset after .test()
+  ENUM_SPLIT_RE.lastIndex = 0;
+  const parts = text.split(ENUM_SPLIT_RE).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : [text];
+}
+
 /** 把"瞬时状态 sys 段"过滤掉：sys 段是 backend 用来告诉用户"正在做什么"的 live hint，
  *  一旦其后已经产生了正式 model 输出，前面的 sys 段就过期了，应该不再显示。
  *  只保留最末尾、还没有被 model 段覆盖的那条 sys hint（round 3 审查 #1）。 */

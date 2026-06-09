@@ -212,6 +212,15 @@ export function buildTurnCompletionSummary(
   }
 
   const parts: string[] = [];
+  // 本回合工具总耗时（round 3 审查 #I）。后端尚未发 turn_start/turn_end timestamp，
+  // 这里用 sum(tool.duration_ms) 作为近似——会低估纯 LLM 推理时间，但对"有多少
+  // 计算量"有直觉指示。后端补齐之后改用真实 turn 耗时。
+  const toolElapsedMs = (opts?.trace?.tools ?? []).reduce(
+    (acc, t) => acc + (t.duration_ms ?? 0),
+    0,
+  );
+  const elapsed = humanizeDurationMs(toolElapsedMs);
+  if (elapsed && toolElapsedMs >= 1000) parts.push(`耗时 ${elapsed}`);
   if (searchPasses > 0) parts.push(`检索 ${searchPasses} 轮`);
   if (merged != null) parts.push(`纳入 ${merged} 篇`);
   if (fetch.ok > 0) parts.push(`抓取 ${fetch.ok} 篇`);

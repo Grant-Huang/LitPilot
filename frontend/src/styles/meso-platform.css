@@ -4519,7 +4519,8 @@ a.library-badge--action:hover {
 }
 
 .lp-think-fold__system + .lp-think-fold__model,
-.lp-think-fold__model + .lp-think-fold__system {
+.lp-think-fold__model + .lp-think-fold__system,
+.lp-think-fold__model + .lp-think-fold__model {
   margin-top: 6px;
 }
 
@@ -4541,13 +4542,32 @@ a.library-badge--action:hover {
 
 .lp-subtopic-plan__item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--lp-space-2);
   font-size: var(--lp-fs-caption);
   color: var(--color-text-secondary);
   line-height: var(--lp-lh-body);
 }
 
-.lp-subtopic-plan__title {
+.lp-subtopic-plan__marker {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.lp-subtopic-plan__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
   flex: 1;
+}
+
+.lp-subtopic-plan__title {
+  color: var(--color-text);
+  font-weight: var(--lp-fw-medium);
+}
+
+.lp-subtopic-plan__query {
+  color: var(--color-text-muted);
+  word-break: break-word;
 }

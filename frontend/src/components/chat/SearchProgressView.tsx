@@ -31,13 +31,26 @@ function phaseStatusIcon(status: SubtopicProgressNode["search"]["status"]) {
   return <StatusIcon status={s} />;
 }
 
-/** 子主题规划列表（understand 阶段：只列标题，无进度细节） */
+/** 子主题规划行（understand 阶段：标题 + 关键词，作为"研究计划"的呈现）。
+ *  search 阶段同一份 subTopics 会通过 SubtopicBlock 显示"进度"，两边不再重复——
+ *  规划用 query/keywords 体现"想检索什么"，进度用源/命中数体现"实际检索到什么"
+ *  （round 3 审查 #H）。 */
 function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
   const title = (st.title ?? "").trim() || `子主题 ${index + 1}`;
+  const query = (st.search_query ?? "").trim();
   return (
     <li className="lp-subtopic-plan__item">
-      <StatusIcon status="pending" />
-      <span className="lp-subtopic-plan__title">{title}</span>
+      <span className="lp-subtopic-plan__marker">
+        <StatusIcon status="pending" />
+      </span>
+      <div className="lp-subtopic-plan__body">
+        <span className="lp-subtopic-plan__title">
+          子主题 {index + 1}：{title}
+        </span>
+        {query ? (
+          <span className="lp-subtopic-plan__query">关键词：{query}</span>
+        ) : null}
+      </div>
     </li>
   );
 }
