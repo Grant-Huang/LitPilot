@@ -311,19 +311,20 @@ async def stream_literature_turn(
                 # 目前为演示，自动选择第一个选项
                 if clarify_result.options:
                     selected_option = clarify_result.options[0]
-                    # 如果用户自由输入（这里简化处理），则重新进入 Understand
-                    # 否则使用澄清选项的 search_aspects
-                    if not selected_option.search_aspects:
-                        # 用户自由输入情况（目前未实现）
-                        _log.info("User provided custom input, re-entering Understand")
-                        # 在真实场景中，current_message 会被更新为用户的新输入
-                        # current_message = user_custom_input
-                        break  # 临时：不实现用户交互循环
-                    else:
-                        # 使用澄清选项：直接构建 router_result，跳过后续 Understand
+                    # 使用澄清选项的 search_aspects
+                    if selected_option.search_aspects:
+                        # 澄清选项有效：使用其 search_aspects
                         router_result.search_aspects = selected_option.search_aspects
                         router_result.narration_focus = selected_option.narration
                         break
+                    else:
+                        # 澄清选项无效（search_aspects 为空）：仍使用当前理解
+                        _log.warning("Clarify option has empty search_aspects, using current understanding")
+                        break
+                else:
+                    # 澄清生成失败（无选项）：使用当前理解
+                    _log.warning("No clarify options generated, using current understanding")
+                    break
             except Exception as e:
                 _log.exception("Clarification failed: %s, proceeding with current understanding", e)
                 yield (
