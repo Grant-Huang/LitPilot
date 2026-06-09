@@ -374,19 +374,10 @@ async def stream_literature_turn(
             router_result.search_query.strip()
             or route_message.strip()
         )
-        if search_aspects_plan_ready(router_result.search_aspects):
-            brief = brief_assessment_from_router(router_result)
-            rq_msg = format_brief_assessment_message(brief)
-            if rq_msg:
-                finalize_ctx.assistant_prefix = rq_msg
-                finalize_ctx.process_text = rq_msg
-                yield literature_brief_assessment(brief.to_dict())
-                for para in rq_msg.split("\n\n"):
-                    if para.strip():
-                        chunk = para.strip() + "\n\n"
-                        yield process_text(chunk)
-                        yield process_text_extension(chunk)
-
+        
+        # 新设计：Brief 评估已移到 Understand 阶段，通过 clarify 选项处理
+        # 此处不再生成 Brief 消息，直接进入大纲规划
+        
         outline_obj, sub_topics = build_subtopic_plan(
             user_message=route_message,
             search_query=search_query_for_plan,
