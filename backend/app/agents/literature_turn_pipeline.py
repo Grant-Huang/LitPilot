@@ -148,6 +148,7 @@ async def run_retrieval_pipeline(
     async for ev in run_subtopic_retrieval(sub):
         yield ev
     ctx.working = sub.working
+    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_turn_pipeline.py:151","message":"retrieval pipeline end","data":{"sources_md":len(ctx.working.sources_md),"fetch_hits":len(ctx.working.fetch_hits),"fetch_results":len(ctx.fetch_results),"papers":len(ctx.working.papers),"fetch_ok":ctx.fetch_ok,"fetch_failed":ctx.fetch_failed,"working_id":id(ctx.working)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
     ctx.fetch_results = sub.fetch_results
     ctx.cite_records = sub.cite_records
     ctx.failed_literature = sub.failed_literature

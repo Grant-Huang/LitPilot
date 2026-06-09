@@ -364,6 +364,7 @@ async def stream_literature_turn(
 
     working = pipe_ctx.working
     outline_obj = pipe_ctx.outline_obj or outline_obj
+    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_turn.py:366","message":"after pipeline, before gate","data":{"working_sources_md":len(working.sources_md),"working_fetch_hits":len(working.fetch_hits),"working_fetch_results":len(pipe_ctx.fetch_results),"working_papers":len(working.papers),"working_id":id(working),"pipe_ctx.fetch_ok":pipe_ctx.fetch_ok,"pipe_ctx.fetch_failed":pipe_ctx.fetch_failed},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
 
     if intent.intent == "query_corpus":
         if not working.sources_md and not working.fetch_hits:
@@ -396,6 +397,7 @@ async def stream_literature_turn(
         # round 4 #5 诊断：UI 已显示 "抓取 N 篇" 但 working corpus 为空——
         # 把关键计数全部打出来，下次复现时直接看日志定位是 fetch / merge / reset
         # 哪一环掉链子。
+        import json, os as _os, traceback as _tb; _stack = "".join(_tb.format_stack()[-8:-2]); _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_turn.py:395","message":"GATE FAILED corpus empty","data":{"intent":intent.intent,"fetch_ok":pipe_ctx.fetch_ok,"fetch_failed":pipe_ctx.fetch_failed,"fetch_results":len(pipe_ctx.fetch_results),"papers":len(working.papers),"working_sources_md":len(working.sources_md),"working_fetch_hits":len(working.fetch_hits),"working_id":id(working),"corpus_id":id(corpus),"working_is_corpus":working is corpus,"stack":_stack},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
         _log.warning(
             "[round4-#5] corpus empty at generate gate session=%s intent=%s "
             "fetch_ok=%d fetch_failed=%d fetch_results=%d papers=%d "
