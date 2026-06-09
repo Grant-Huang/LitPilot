@@ -38,7 +38,7 @@ describe("buildSearchProgressTree", () => {
 
     const st1 = tree.subtopics.find((s) => s.id === "st1");
     expect(st1?.title).toBe("AI-native MOM 定义");
-    expect(st1?.search.detail).toBe("命中 30 篇");
+    expect(st1?.search.detail).toBe("(30)");
     expect(st1?.filter.detail).toBe("(5/30)");
     expect(st1?.sources).toEqual([]);
     expect(st1?.filterDetails).toHaveLength(1);

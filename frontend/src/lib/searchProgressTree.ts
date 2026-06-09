@@ -159,7 +159,7 @@ export function buildSearchProgressTree(
 
     if (ext.name === "literature_subtopic_search_done") {
       const raw = typeof data.raw_count === "number" ? data.raw_count : 0;
-      node.search = phase("done", "检索", "命中 " + raw + " 篇");
+      node.search = phase("done", "检索", "(" + raw + ")");
       node.filter = phase("running", "过滤");
       // 保存 raw_count 供后续 filter_done 使用
       (node as Record<string, unknown>).rawCount = raw;

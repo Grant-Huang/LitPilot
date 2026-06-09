@@ -149,6 +149,7 @@ export function summarizeWorkflowCard(
     return `${card.subTopics.length} 个子主题`;
   }
   if (toolDone) return `${toolDone} 步`;
+  if (card.state === "running") return "";
   return "已完成";
 }
 

@@ -1,6 +1,10 @@
 """Tests for v2 literature intent routing."""
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from app.agents.literature_intent import (
     CORPUS_GUIDANCE_FOOTER,
     LiteratureIntentResult,
@@ -11,6 +15,7 @@ from app.agents.literature_intent import (
     detect_intent_rules,
     merge_gen_constraints,
     normalize_intent,
+    route_literature_intent,
 )
 from app.agents.session_corpus import SessionCorpus, filter_new_urls
 
@@ -25,14 +30,18 @@ def _make_corpus() -> SessionCorpus:
 
 def _turn_ctx(*, has_corpus: bool = True, user_turns: int = 2, failed: int = 0):
     corpus = _make_corpus() if has_corpus else None
-    return build_session_turn_context(
-        session_id="s1",
-        session_meta={"initial_query": "LLM survey", "gen_constraints": []},
-        user_turns=user_turns,
-        corpus=corpus,
-        last_failed=[{"url": "https://fail.example/x"}] if failed else [],
-        has_review=True,
-    )
+    with patch(
+        "app.agents.literature_intent.list_session_library_items",
+        return_value=[],
+    ):
+        return build_session_turn_context(
+            session_id="s1",
+            session_meta={"initial_query": "LLM survey", "gen_constraints": []},
+            user_turns=user_turns,
+            corpus=corpus,
+            last_failed=[{"url": "https://fail.example/x"}] if failed else [],
+            has_review=True,
+        )
 
 
 def test_first_turn_is_new_topic_ignores_urls() -> None:
@@ -176,3 +185,51 @@ def test_build_generation_prompt_materials_only() -> None:
         context_block="materials",
     )
     assert "materials" in prompt
+
+
+@pytest.mark.asyncio
+async def test_second_turn_calls_router_llm() -> None:
+    """2nd+ turn with ambiguous message should call LLM router (intent_router_system_template)."""
+    ctx = _turn_ctx(has_corpus=True, user_turns=2)
+
+    mock_llm = AsyncMock()
+    mock_llm.chat = AsyncMock(
+        return_value=type("Resp", (), {"content": '{"intent": "review_refine", "gen_directives": "focus on methodology"}'})()
+    )
+
+    with patch(
+        "app.agents.literature_intent.get_router_llm",
+        return_value=mock_llm,
+    ):
+        result = await route_literature_intent(
+            "请着重讨论方法论方面的内容",
+            turn_ctx=ctx,
+            corpus=_make_corpus(),
+        )
+
+    mock_llm.chat.assert_called_once()
+    assert result.intent == "review_refine"
+    assert "methodology" in result.gen_directives
+
+
+@pytest.mark.asyncio
+async def test_second_turn_llm_fallback_on_failure() -> None:
+    """2nd+ turn should not crash when LLM fails; fallback to short_answer."""
+    ctx = _turn_ctx(has_corpus=True, user_turns=2)
+
+    mock_llm = AsyncMock()
+    mock_llm.chat = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+
+    with patch(
+        "app.agents.literature_intent.get_router_llm",
+        return_value=mock_llm,
+    ):
+        result = await route_literature_intent(
+            "请着重讨论方法论方面的内容",
+            turn_ctx=ctx,
+            corpus=_make_corpus(),
+        )
+
+    mock_llm.chat.assert_called_once()
+    # On failure, falls back to short_answer
+    assert result.intent in ("short_answer", "review_refine")
