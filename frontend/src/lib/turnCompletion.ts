@@ -95,6 +95,9 @@ export function summarizeWorkflowCard(
   card: WorkflowCard,
   ctx?: SummarizeCardContext,
 ): string {
+  // pending / running 卡片不显示 summary：避免出现 "抓取全文 4 篇" 配 ○ 待开始
+  // 这种"数字摆在 pending 状态旁边"的矛盾视觉（round 3 审查 #E）。
+  if (card.state === "pending") return "";
   if (card.summary?.trim()) return card.summary.trim();
   if (card.state === "error") return "失败";
   const toolDone = card.steps.filter(
@@ -138,6 +141,20 @@ export function summarizeWorkflowCard(
   }
   if (card.type === "matrix") return "矩阵已生成";
   if (card.type === "brief" && card.body) {
+    // 用 "N RQ · M 关键词" 紧凑摘要替代截断的 "RQ：xxx…"（round 3 审查 #D）。
+    // 完整 RQ + 关键词列表展开后在 body 里看。
+    const rqMatch = /RQ：([^\n]+)/.exec(card.body);
+    const kwMatch = /关键词：([^\n]+)/.exec(card.body);
+    const rqCount = rqMatch
+      ? rqMatch[1].split(/；|;/).filter((s) => s.trim()).length
+      : 0;
+    const kwCount = kwMatch
+      ? kwMatch[1].split(/、|,/).filter((s) => s.trim()).length
+      : 0;
+    const parts: string[] = [];
+    if (rqCount) parts.push(`${rqCount} RQ`);
+    if (kwCount) parts.push(`${kwCount} 关键词`);
+    if (parts.length) return parts.join(" · ");
     const first = card.body.split(/\r?\n/).find((l) => l.trim());
     return first ? first.slice(0, 48) : "已完成";
   }
@@ -195,6 +212,15 @@ export function buildTurnCompletionSummary(
   }
 
   const parts: string[] = [];
+  // 本回合工具总耗时（round 3 审查 #I）。后端尚未发 turn_start/turn_end timestamp，
+  // 这里用 sum(tool.duration_ms) 作为近似——会低估纯 LLM 推理时间，但对"有多少
+  // 计算量"有直觉指示。后端补齐之后改用真实 turn 耗时。
+  const toolElapsedMs = (opts?.trace?.tools ?? []).reduce(
+    (acc, t) => acc + (t.duration_ms ?? 0),
+    0,
+  );
+  const elapsed = humanizeDurationMs(toolElapsedMs);
+  if (elapsed && toolElapsedMs >= 1000) parts.push(`耗时 ${elapsed}`);
   if (searchPasses > 0) parts.push(`检索 ${searchPasses} 轮`);
   if (merged != null) parts.push(`纳入 ${merged} 篇`);
   if (fetch.ok > 0) parts.push(`抓取 ${fetch.ok} 篇`);

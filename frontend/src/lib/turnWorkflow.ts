@@ -58,7 +58,7 @@ export type TurnWorkflow = {
 
 const CARD_TITLES: Record<WorkflowCardType, string> = {
   understand: "理解研究问题",
-  brief: "Brief 评估",
+  brief: "研究计划",
   search: "文献检索",
   fetch: "抓取全文",
   cite: "引用抽取",
@@ -358,15 +358,11 @@ export function buildTurnWorkflowFromTrace(
             : line.title.includes("attributes") || line.title.includes("结构化")
               ? cards.find((c) => c.type === "attributes")
               : fetchCard;
-      // Skip pass-level search steps with (N/M) numbering — the
-      // SearchProgressView subtopic blocks already display this info.
-      if (target?.type === "search" && /（\d+\/\d+）/.test(step.title)) {
-        continue;
-      }
-      // Skip per-provider academic source search steps (e.g.
-      // "检索学术文献（openalex）：query") — they are already displayed
-      // as SourceRow inside each subtopic's search phase.
-      if (target?.type === "search" && step.title.includes("学术文献（")) {
+      // Search card 永远不挂任何 tool step：SubtopicBlock 的 SourceRow / 过滤详情
+      // 已经完整呈现"哪一轮查了哪个源、命中多少篇、为何被剔除"。再在 card 顶层
+      // 重复一行 raw tool log 只会孤立飘在子主题列表之外（round 2/3 审查 #6/#7）。
+      // 后端如果在 tool meta 里加上 subtopic_id，可以恢复"按子主题挂步骤"的能力。
+      if (target?.type === "search") {
         continue;
       }
       if (target && !target.steps.some((s) => s.key === step.key)) {
@@ -417,6 +413,18 @@ export function buildTurnWorkflowFromTrace(
     }
     return c;
   });
+
+  // Canonical 阶段顺序：后端 stage emit 顺序若被打乱，前端兜底排序。
+  // 例如曾出现 "抓取全文" 显示在 "文献检索" 之前的 bug（round 3 审查 #3）。
+  const CANONICAL_ORDER: WorkflowCardType[] = [
+    "understand", "brief", "search", "fetch", "cite", "attributes",
+    "outline", "matrix", "generate", "revise", "corpus_qa", "clarify", "manage",
+  ];
+  const orderIdx = (c: WorkflowCard) => {
+    const i = CANONICAL_ORDER.indexOf(c.type);
+    return i < 0 ? 999 : i;
+  };
+  enrichedCards.sort((a, b) => orderIdx(a) - orderIdx(b));
 
   // Merge "cite" card into "fetch" card as subsection (引用抽取)
   const citedFetchCard = enrichedCards.find((c) => c.type === "fetch");

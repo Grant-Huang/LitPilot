@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { parseThinkSegments } from "@/lib/thinkContent";
+import {
+  dropStaleSysSegments,
+  parseThinkSegments,
+  splitModelByEnum,
+} from "@/lib/thinkContent";
 import { StatusIcon } from "./StatusIcon";
 
 type Props = {
@@ -27,8 +31,13 @@ export function LitPilotThinkFold({
     if (streaming && !wasPhaseStreamingRef.current) {
       setOpen(true);
     }
+    // Phase 结束 → 自动折叠（round 3 审查 #7）。原先只在整轮结束时折叠，但用户希望
+    // 二级标题（同"模型推理"层级）在所属 stage 完成时就收起，避免做完一阶段还要
+    // 手动收。userToggledRef 保护手动展开的意图。
+    if (!streaming && wasPhaseStreamingRef.current && !userToggledRef.current) {
+      setOpen(false);
+    }
     const turnActive = turnStreaming ?? streaming;
-    // Only auto-collapse on done if the user never manually toggled
     if (!turnActive && wasTurnStreamingRef.current && !userToggledRef.current) {
       setOpen(false);
     }
@@ -36,10 +45,27 @@ export function LitPilotThinkFold({
     wasTurnStreamingRef.current = turnActive;
   }, [streaming, turnStreaming]);
 
-  const segments = useMemo(() => parseThinkSegments(content), [content]);
+  const allSegments = useMemo(() => parseThinkSegments(content), [content]);
+  const segments = useMemo(() => dropStaleSysSegments(allSegments), [allSegments]);
 
-  // 标题固定，不再截取模型独白首行
-  const headerLabel = streaming ? "模型推理中…" : "模型推理";
+  // 用第一条 sys 段作为 stage-specific 标题（round 3 审查 #2）。后端通常用 sys 段
+  // 携带"正在 X…" 形式的阶段标签，剥离前缀和省略号后即得到稳定的 section 标题。
+  // 找不到 sys 段时回落到通用的 "模型推理"。
+  const stageLabel = useMemo(() => {
+    const firstSys = allSegments.find((s) => s.kind === "system");
+    const text = firstSys?.text?.trim();
+    if (!text) return null;
+    const cleaned = text
+      .replace(/^正在/, "")
+      .replace(/[…\.]+$/, "")
+      .trim();
+    if (!cleaned) return null;
+    return cleaned.length > 24 ? cleaned.slice(0, 24) : cleaned;
+  }, [allSegments]);
+
+  const headerLabel = stageLabel
+    ? (streaming ? `${stageLabel}…` : stageLabel)
+    : (streaming ? "模型推理中…" : "模型推理");
   const hasContent = content.trim().length > 0;
 
   useEffect(() => {
@@ -76,13 +102,18 @@ export function LitPilotThinkFold({
             aria-live={streaming ? "polite" : undefined}
           >
             {hasContent
-              ? segments.map((seg, idx) =>
-                  seg.kind === "system" ? (
-                    <p key={idx} className="lp-think-fold__system">{seg.text}</p>
-                  ) : (
-                    <p key={idx} className="lp-think-fold__model">{seg.text}</p>
-                  ),
-                )
+              ? segments.map((seg, idx) => {
+                  if (seg.kind === "system") {
+                    return (
+                      <p key={idx} className="lp-think-fold__system">{seg.text}</p>
+                    );
+                  }
+                  // 长 block 按"其一/其二/首先/核心挑战"等枚举词拆段，让段间有自然层级（#G）
+                  const chunks = splitModelByEnum(seg.text);
+                  return chunks.map((chunk, ci) => (
+                    <p key={`${idx}-${ci}`} className="lp-think-fold__model">{chunk}</p>
+                  ));
+                })
               : null}
             {streaming ? <span className="lp-think-fold__cursor" aria-hidden="true">▋</span> : null}
           </div>
