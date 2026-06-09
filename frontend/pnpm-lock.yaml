@@ -21,8 +21,8 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       '@meso.ai/ui':
-        specifier: ^2.1.0
-        version: 2.1.0(@meso.ai/types@1.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: ^2.1.1
+        version: 2.1.1(@meso.ai/types@1.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       antd:
         specifier: ^6.4.2
         version: 6.4.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -477,8 +477,8 @@ packages:
   '@meso.ai/types@1.2.0':
     resolution: {integrity: sha512-+Ovp2Htsn7fQwKXJJiy9+P80XoBJ8xJFEP/pFBSlmagD6Nva9K4IdCoOoxMlpE+ld59bPJpFKH7AbVyUTwf+AA==}
 
-  '@meso.ai/ui@2.1.0':
-    resolution: {integrity: sha512-qk0KGKREurBawydk+Zz5uU5sVbAoKjUMKvRWziHPi0miNYhnULXwXVtj8jhD8O5IzBAB1/DDOUn0rf/ztvr1Rg==}
+  '@meso.ai/ui@2.1.1':
+    resolution: {integrity: sha512-nJGTPF5FwdsvmMXLkRuZGsyLo526Eab1d33cGgf1KnnfVqUmhJONcy6TfQoZFwBduXObnL24iZxTk54JFAPyKg==}
     peerDependencies:
       '@meso.ai/types': ^1.0.0
       react: '>=18.0.0'
@@ -3007,7 +3007,7 @@ snapshots:
 
   '@meso.ai/types@1.2.0': {}
 
-  '@meso.ai/ui@2.1.0(@meso.ai/types@1.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@meso.ai/ui@2.1.1(@meso.ai/types@1.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@meso.ai/types': 1.2.0
       react: 19.2.7

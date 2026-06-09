@@ -119,8 +119,7 @@ function SubtopicBlock({
         <span className="litpilot-search-topic__marker">
           <StatusIcon status={headIconStatus} />
         </span>
-        <span className="litpilot-search-topic__title">{title}</span>
-        <span className="litpilot-search-topic__status">{status}</span>
+        <span className="litpilot-search-topic__title">{title} <span className="litpilot-search-topic__status">{status}</span></span>
       </button>
       {open ? (
         <ul className="litpilot-search-topic__sources">
