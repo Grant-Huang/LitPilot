@@ -357,6 +357,21 @@ async def stream_literature_turn(
             return
 
     if not runs_generate(intent):
+        # append_urls / query_corpus 等非生成意图：如果有新抓取的数据，仍需要落库
+        if working is not corpus and (working.fetch_hits or working.sources_md):
+            finalize_ctx.corpus = working
+            finalize_ctx.fetch_results = pipe_ctx.fetch_results
+            finalize_ctx.cite_records = pipe_ctx.cite_records
+            finalize_ctx.failed_literature = pipe_ctx.failed_literature
+            if intent.intent == "append_urls":
+                n = len(working.fetch_hits) - (len(corpus.fetch_hits) if corpus else 0)
+                msg = f"已追加 {max(0, n)} 篇文献。"
+                finalize_ctx.chat_text = msg
+                yield chat_text(msg)
+                _, end_ev = await finalize_turn(finalize_ctx, main_text=msg)
+            else:
+                _, end_ev = await finalize_turn(finalize_ctx, main_text=finalize_ctx.chat_text or "")
+            yield end_ev
         return
 
     if not working.sources_md and not working.fetch_hits:
