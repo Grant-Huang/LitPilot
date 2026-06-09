@@ -157,6 +157,23 @@ describe("buildTurnWorkflowFromTrace canonical card order", () => {
     expect(fetchIdx).toBeGreaterThan(searchIdx);
   });
 
+  it("promotes lingering running cards to done when streaming=false", () => {
+    const wf = buildTurnWorkflowFromTrace(
+      {
+        stages: [
+          { name: "理解研究问题", state: "done" },
+          { name: "文献检索", state: "active" },
+          { name: "抓取全文", state: "done" },
+        ],
+        tools: [],
+        workflows: [],
+      },
+      { streaming: false },
+    );
+    const search = wf.cards.find((c) => c.type === "search");
+    expect(search?.state).toBe("done");
+  });
+
   it("uses 研究计划 as the brief card title (not Brief 评估)", () => {
     const wf = buildTurnWorkflowFromTrace(
       {
