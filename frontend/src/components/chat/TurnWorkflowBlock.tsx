@@ -87,15 +87,6 @@ export function TurnWorkflowBlock({
 
   return (
     <div className="litpilot-turn-log">
-      {!streaming ? (
-        <TurnCompletionBar
-          summary={completion}
-          streaming={false}
-          hasArtifact={hasArtifact || bridge?.hasArtifact}
-          artifactVisible={bridge?.artifactPanelVisible}
-          onOpenArtifact={bridge?.openArtifactPanel}
-        />
-      ) : null}
       <div className="litpilot-turn-log__cards">
         {workflow.cards.map((card) => (
           <WorkflowCardView
@@ -109,6 +100,15 @@ export function TurnWorkflowBlock({
           />
         ))}
       </div>
+      {!streaming ? (
+        <TurnCompletionBar
+          summary={completion}
+          streaming={false}
+          hasArtifact={hasArtifact || bridge?.hasArtifact}
+          artifactVisible={bridge?.artifactPanelVisible}
+          onOpenArtifact={bridge?.openArtifactPanel}
+        />
+      ) : null}
     </div>
   );
 }

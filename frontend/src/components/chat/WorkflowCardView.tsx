@@ -197,15 +197,13 @@ export function WorkflowCardView({
   );
 
   const liveThink = trace?.thinkContent?.trim() ?? "";
-  // 不要在 isRunning 变化的瞬间从 liveThink 切到 pinnedThink，否则用户会看到内容
-  // "刷新"一下。pinnedThink 是 backend 在 stage 结束时下发的快照，理论上 >= liveThink；
-  // 取两者中"信息量更大"的那个，保证流式过程到结束的内容不闪烁、不回退。
-  const thinkForCard = pinnedThink && pinnedThink.length >= liveThink.length
-    ? pinnedThink
-    : liveThink;
+  // trace.thinkContent 是一个全局累积的 buffer——三张 think-stream 卡 (understand /
+  // brief / search) 都读同一个 ref，导致流式中三卡显示一模一样的长文（round 4 #3）。
+  // 仅 currently-running 的卡用 liveThink，其它卡只用各自的 pinnedThink 快照。
+  // 长期方案：后端按 stage 分发 think_stream（已记录到 meso 平台建议 3.1）。
+  const thinkForCard = isRunning ? liveThink : pinnedThink;
   // brief / search 卡的 thinkfold 不再 hard-filter 掉（曾在 b5c36e6 收窄到只在
-  // understand 渲染——见 round-3 review 比较）。real fix 是后端把 think_stream
-  // 按 stage 分发，前端按 pinnedThink 分别落到对应卡；当前用 THINK_STREAM_CARD_TYPES
+  // understand 渲染——见 round-3 review 比较）。当前用 THINK_STREAM_CARD_TYPES
   // 准入，stage-specific 标题来自 thinkfold 内的第一条 sys 段（round 3 #2）。
   const hasThinkStream =
     (card.type === "understand" ||

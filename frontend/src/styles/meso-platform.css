@@ -4026,6 +4026,7 @@ a.library-badge--action:hover {
 .litpilot-search-topic__head {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
   width: 100%;
   padding: 2px 0;
@@ -4048,14 +4049,15 @@ a.library-badge--action:hover {
 }
 
 .litpilot-search-topic__title {
-  flex: 1;
   color: var(--color-text-secondary);
   font-weight: var(--lp-fw-medium);
   font-size: var(--lp-fs-body);
   line-height: var(--lp-lh-body);
 }
 
+/* status 紧随 title 而非右浮（round 4 #4）。head 容器加 flex-wrap 防溢出。 */
 .litpilot-search-topic__status {
+  margin-left: var(--lp-space-2);
   font-size: var(--lp-fs-body);
   font-weight: 400;
   color: var(--color-text-muted);
