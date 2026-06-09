@@ -314,6 +314,16 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  // Turn complete: promote any lingering "running" cards to "done" (round 4 #4).
+  // Backend sometimes emits stage "active" without a paired "done" before the next
+  // stage starts (e.g. search→fetch), leaving the card stuck "running" after
+  // streaming ends. That makes canToggle=false so the title isn't clickable.
+  if (!opts.streaming) {
+    for (const card of cards) {
+      if (card.state === "running") card.state = "done";
+    }
+  }
+
   for (const ext of opts.extensions ?? []) {
     if (ext.name === "literature_phase_think") {
       const content = String(ext.data.content ?? "").trim();

@@ -197,19 +197,20 @@ export function WorkflowCardView({
   );
 
   const liveThink = trace?.thinkContent?.trim() ?? "";
-  // trace.thinkContent 是一个全局累积的 buffer——三张 think-stream 卡 (understand /
-  // brief / search) 都读同一个 ref，导致流式中三卡显示一模一样的长文（round 4 #3）。
-  // 仅 currently-running 的卡用 liveThink，其它卡只用各自的 pinnedThink 快照。
-  // 长期方案：后端按 stage 分发 think_stream（已记录到 meso 平台建议 3.1）。
-  const thinkForCard = isRunning ? liveThink : pinnedThink;
-  // brief / search 卡的 thinkfold 不再 hard-filter 掉（曾在 b5c36e6 收窄到只在
-  // understand 渲染——见 round-3 review 比较）。当前用 THINK_STREAM_CARD_TYPES
-  // 准入，stage-specific 标题来自 thinkfold 内的第一条 sys 段（round 3 #2）。
-  const hasThinkStream =
-    (card.type === "understand" ||
-      card.type === "brief" ||
-      card.type === "search") &&
-    Boolean(thinkForCard || (streaming && isRunning));
+  // Search card: ONLY use pinnedThink (per-stage snapshot from literature_phase_think).
+  // The live buffer accumulates ALL stages from the turn start, so using it for search
+  // would show understand/brief stage content ("整理结构化检索规划…") in the search card
+  // (round 4 #1).
+  // understand/brief: keep current behavior — liveThink while running, pinnedThink when done.
+  const thinkForCard = card.type === "search"
+    ? pinnedThink
+    : isRunning ? liveThink : pinnedThink;
+  // Search card shows thinkfold only when it has its own per-stage snapshot (pinnedThink).
+  // understand/brief show thinkfold live during streaming.
+  const hasThinkStream = card.type === "search"
+    ? Boolean(pinnedThink)
+    : (card.type === "understand" || card.type === "brief") &&
+      Boolean(thinkForCard || (streaming && isRunning));
 
   const headStatus = cardHeadStatus(card, isRunning, hasThinkStream);
 
