@@ -5,6 +5,7 @@ export type StageSnapshot = { name: string; state: string };
 /** 不在右侧 DAG 中、但在 stream.stages 里推进的前置阶段 */
 const PRE_PIPELINE_STAGE_NAMES = new Set([
   "理解研究问题",
+  "分析用户意图",
   "文献检索",
   "等待澄清",
   "继续撰写",

@@ -147,6 +147,13 @@ async def stream_search_phase(
         out["answer"] = answer
         return
 
+    label = format_pass_query_label(query)
+    if pass_total > 1:
+        async for ev in emit_system_think_line(
+            f"第 {pass_index}/{pass_total} 轮检索：{label}",
+            accumulator=think_acc,
+        ):
+            yield ev
     if pass_index == 1:
         search_before_ctx = format_search_before_context(
             query=query,
@@ -162,13 +169,6 @@ async def stream_search_phase(
             search_before_ctx,
             think_acc=think_acc,
             ctx=planner_ctx,
-        ):
-            yield ev
-    elif pass_total > 1:
-        label = format_pass_query_label(query)
-        async for ev in emit_system_think_line(
-            f"第 {pass_index}/{pass_total} 轮检索：{label}",
-            accumulator=think_acc,
         ):
             yield ev
 

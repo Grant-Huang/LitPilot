@@ -129,6 +129,7 @@ async def stream_literature_turn(
     route_message = user_message
     think_acc = ThinkAccumulator()
     yield turn_start(turn_index=user_turns, intent="new_topic")
+    understand_stage_name = "分析用户意图" if user_turns > 1 else "理解研究问题"
     # 前置 I/O 完成后立即告知前端当前阶段，避免长时间显示"正在连接…"
     yield (
         "literature_progress",
@@ -211,7 +212,7 @@ async def stream_literature_turn(
     )
 
     if intent.intent == "short_answer":
-        yield ("stage", {"name": "理解研究问题", "state": "done"})
+        yield ("stage", {"name": understand_stage_name, "state": "done"})
         msg = (
             "如需调整文献综述，请明确说明操作，例如：\n"
             "• 「增加子主题：XXX」—— 新增检索方向与章节\n"
@@ -250,8 +251,8 @@ async def stream_literature_turn(
                 session_title = new_title
                 yield ("session_title", {"session_id": session_id, "title": new_title})
 
-        yield ("stage", {"name": "理解研究问题", "state": "done"})
-        upsert_stage(execution_trace, "理解研究问题", "done")
+        yield ("stage", {"name": understand_stage_name, "state": "done"})
+        upsert_stage(execution_trace, understand_stage_name, "done")
 
         understand_think = think_acc.finalize()
         if understand_think:
@@ -283,8 +284,8 @@ async def stream_literature_turn(
             intent=intent.intent,
         )
     else:
-        yield ("stage", {"name": "理解研究问题", "state": "done"})
-        upsert_stage(execution_trace, "理解研究问题", "done")
+        yield ("stage", {"name": understand_stage_name, "state": "done"})
+        upsert_stage(execution_trace, understand_stage_name, "done")
 
     g = build_literature_graph(
         _section_specs_for_graph(outline_obj) if outline_obj else None

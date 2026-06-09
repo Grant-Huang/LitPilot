@@ -349,6 +349,24 @@ async def _run_subtopic(
     fetch_failed = int(fetch_out.get("fetch_failed") or 0)
     ctx.fetch_ok += fetch_ok
     ctx.fetch_failed += fetch_failed
+
+    # 如果 fetch 完全没有产出数据（全部失败或未完成），但 batch 有应请求条目，
+    # 将基础元数据写入 working，避免下游因 working.fetch_hits 为空而误判为"无可用文献"。
+    if not fetch_delta.fetch_hits and not fetch_delta.sources_md and batch:
+        for hit in batch:
+            h = dict(hit) if not isinstance(hit, dict) else dict(hit)
+            url = str(h.get("url") or "")
+            key = canonical_key(url=url) or url
+            if key and key in ctx.working.known_url_keys:
+                continue
+            ctx.working.fetch_hits.append(h)
+            if key:
+                ctx.working.known_url_keys.add(key)
+        _log.warning(
+            "subtopic %s fetch produced no data for %d items; fallback metadata added",
+            subtopic_id, len(batch),
+        )
+
     try:
         ctx.working.merge(fetch_delta)
         ctx.fetch_results.extend(fetch_delta.fetch_results)
@@ -539,15 +557,11 @@ async def run_subtopic_retrieval(
             yield ("stage", {"name": "完成", "state": "done"})
             return
         if not working.fetch_hits and not working.sources_md:
-            msg = "检索到文献，但抓取网页时全部失败。可重试，或补充网页链接。"
-            yield chat_text(msg)
-            ctx.early_return = True
-            ctx.finalize_ctx.corpus = working
-            ctx.finalize_ctx.chat_text = msg
-            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
-            yield end_ev
-            yield ("stage", {"name": "完成", "state": "done"})
-            return
+            async for ev in emit_system_think_line(
+                "检索到文献，但抓取网页时全部失败（可能为网络环境问题）。将继续尝试基于检索元数据生成。",
+                accumulator=ctx.think_acc,
+            ):
+                yield ev
 
     if ctx.fetch_results:
         cite_out: dict[str, Any] = {}

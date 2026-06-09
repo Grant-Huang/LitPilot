@@ -49,6 +49,9 @@ export function TurnWorkflowBlock({
 
   if (!workflow.cards.length) {
     if (!streaming) return null;
+    const isSubsequentTurn = (workflow.turnIndex ?? 1) > 1;
+    const pendingTitle = isSubsequentTurn ? "分析用户意图" : "理解研究问题";
+    const pendingText = isSubsequentTurn ? "正在分析你的意图…" : "正在理解你的研究问题…";
     return (
       <div className="litpilot-turn-log litpilot-turn-log--pending">
         <div className="litpilot-turn-log__cards">
@@ -57,7 +60,7 @@ export function TurnWorkflowBlock({
               <span className="litpilot-wf-card__marker">
                 <StatusIcon status="running" />
               </span>
-              <span className="litpilot-wf-card__title">理解研究问题</span>
+              <span className="litpilot-wf-card__title">{pendingTitle}</span>
             </div>
             <div className="litpilot-wf-card__body">
               <div className="litpilot-log-lines" role="list">
@@ -70,7 +73,7 @@ export function TurnWorkflowBlock({
                   </span>
                   <p className="litpilot-log-line__text">
                     <span className="litpilot-log-line__primary">
-                      {liveProcessText.trim() || "正在理解你的研究问题…"}
+                      {liveProcessText.trim() || pendingText}
                     </span>
                   </p>
                 </div>

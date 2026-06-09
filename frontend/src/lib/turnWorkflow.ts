@@ -83,7 +83,7 @@ function phaseThinkStageToCardType(stageKey: string): WorkflowCardType | null {
 function stageToCardType(name: string): WorkflowCardType | null {
   const n = name.trim();
   if (!n || n === "完成" || n === "继续撰写") return null;
-  if (n.includes("理解")) return "understand";
+  if (n.includes("理解") || n.includes("意图")) return "understand";
   if (n.includes("澄清") || n.includes("等待")) return "clarify";
   if (n.includes("检索")) return "search";
   if (n.includes("抓取")) return "fetch";
@@ -235,6 +235,12 @@ const THINK_STREAM_CARD_TYPES = new Set<WorkflowCardType>([
   "search",
 ]);
 
+/** Pick the card title: for "分析用户意图" stage use it directly instead of the fixed CARD_TITLES.understand. */
+function _cardTitle(ctype: WorkflowCardType, stageName: string): string {
+  if (ctype === "understand" && stageName.includes("意图")) return stageName;
+  return CARD_TITLES[ctype] || stageName;
+}
+
 export function buildTurnWorkflowFromTrace(
   trace: ExecutionTrace,
   opts: {
@@ -294,12 +300,12 @@ export function buildTurnWorkflowFromTrace(
     const existing = cards.find((c) => c.type === ctype && c.state === "running");
     if (existing) {
       existing.state = stageState(stage.state);
-      existing.title = CARD_TITLES[ctype] || stage.name;
+      existing.title = _cardTitle(ctype, stage.name);
     } else {
       cards.push({
         id: `card-${ctype}-${cards.length}`,
         type: ctype,
-        title: CARD_TITLES[ctype] || stage.name,
+        title: _cardTitle(ctype, stage.name),
         state: stageState(stage.state),
         steps: [...(extByPhase[ctype] ?? [])],
         locked: ctype === "clarify",
