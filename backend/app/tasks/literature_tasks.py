@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 STAGE_PROGRESS: dict[str, tuple[int, str]] = {
     "理解研究问题": (8, "understanding"),
-    "Brief 评估": (12, "understanding"),
+    "Brief": (12, "understanding"),
     "文献检索": (28, "searching"),
     "抓取网页": (42, "fetching"),
     "引用抽取": (52, "analyzing"),

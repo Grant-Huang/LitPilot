@@ -84,7 +84,7 @@ function stageToCardType(name: string): WorkflowCardType | null {
   const n = name.trim();
   if (!n || n === "完成" || n === "继续撰写") return null;
   if (n.includes("理解") || n.includes("意图")) return "understand";
-  if (n.includes("评估") || n.includes("规划") || n.includes("brief") || n.includes("Brief")) return "brief";
+  if (n === "Brief" || n.includes("brief") || n.includes("Brief")) return "brief";
   if (n.includes("澄清") || n.includes("等待")) return "clarify";
   if (n.includes("检索")) return "search";
   if (n.includes("抓取")) return "fetch";

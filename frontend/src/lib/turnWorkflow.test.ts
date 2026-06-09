@@ -101,7 +101,7 @@ describe("buildTurnWorkflowFromTrace streaming layout", () => {
   it("creates brief card only from structured assessment", () => {
     const wf = buildTurnWorkflowFromTrace(
       {
-        stages: [{ name: "Brief 评估", state: "done" }],
+        stages: [{ name: "Brief", state: "done" }],
         tools: [],
         workflows: [],
       },
@@ -138,7 +138,7 @@ describe("buildTurnWorkflowFromTrace canonical card order", () => {
         stages: [
           { name: "理解研究问题", state: "done" },
           { name: "抓取全文", state: "done" },
-          { name: "评估", state: "done" },
+          { name: "Brief", state: "done" },
           { name: "文献检索", state: "done" },
         ],
         tools: [],
@@ -174,10 +174,10 @@ describe("buildTurnWorkflowFromTrace canonical card order", () => {
     expect(search?.state).toBe("done");
   });
 
-  it("uses 研究计划 as the brief card title (not Brief 评估)", () => {
+  it("uses 研究计划 as the brief card title (not Brief)", () => {
     const wf = buildTurnWorkflowFromTrace(
       {
-        stages: [{ name: "Brief 评估", state: "done" }],
+        stages: [{ name: "Brief", state: "done" }],
         tools: [],
         workflows: [],
       },

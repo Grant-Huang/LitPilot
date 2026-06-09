@@ -5,7 +5,7 @@ from typing import Any
 
 PHASE_LABELS: dict[str, str] = {
     "understand": "理解研究问题",
-    "brief": "Brief 评估",
+    "brief": "Brief",
     "search": "子主题检索",
     "filter": "子主题过滤",
     "fetch": "抓取全文",
