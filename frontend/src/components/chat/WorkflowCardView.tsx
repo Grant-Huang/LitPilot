@@ -264,7 +264,11 @@ export function WorkflowCardView({
           ) : null}
           {card.type === "search" ? (
             <SearchProgressView
-              extensions={extensions}
+              extensions={
+                extensions.length > 0
+                  ? extensions
+                  : (card.progressExtensions ?? [])
+              }
               subTopics={card.subTopics}
               streaming={streaming && isRunning}
             />

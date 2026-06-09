@@ -47,6 +47,12 @@ export type WorkflowCard = {
   subTopics?: Array<{ id: string; title: string; search_query: string }>;
   /** Sub-section steps for merge card types (e.g. citation in fetch). */
   subsectionSteps?: WorkflowStep[];
+  /**
+   * Cached extension data for search subtopic progress (search_done / filter_done
+   * / source_done). Used by SearchProgressView when live extensions are unavailable
+   * (e.g. completed turn view).
+   */
+  progressExtensions?: Array<{ name: string; data: Record<string, unknown> }>;
 };
 
 export type TurnWorkflow = {
@@ -463,6 +469,23 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  // Cache search progress extensions into the search card so that the completed
+  // turn view (LitPilotAssistantTurn, which has no access to raw streaming
+  // extensionLog) can still render subtopic search/filter details.
+  const searchCard = enrichedCards.find((c) => c.type === "search");
+  if (searchCard && opts.extensions?.length) {
+    const progressExts = opts.extensions.filter(
+      (ext) =>
+        ext.name === "literature_search_source_done" ||
+        ext.name === "literature_subtopic_search_done" ||
+        ext.name === "literature_subtopic_filter_done" ||
+        ext.name === "literature_subtopic_fetch_done",
+    );
+    if (progressExts.length > 0) {
+      searchCard.progressExtensions = progressExts;
+    }
+  }
+
   const runningCard = enrichedCards.find((c) => c.state === "running");
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
@@ -507,6 +530,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       locked: c.locked ?? false,
       subTopics: c.subTopics,
       subsectionSteps: c.subsectionSteps,
+      progressExtensions: c.progressExtensions,
     })),
   };
 }
