@@ -297,6 +297,7 @@ async def _run_subtopic(
     )
 
     if not deduped_kept or fetch_slots_left <= 0:
+        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:299","message":"fetch skipped","data":{"subtopic_id":subtopic_id,"deduped_kept":len(deduped_kept),"fetch_slots_left":fetch_slots_left},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
         yield (
             "literature_subtopic_fetch_done",
             {
@@ -310,6 +311,7 @@ async def _run_subtopic(
 
     batch = deduped_kept[:fetch_slots_left]
     fetch_out: dict[str, Any] = {}
+    _fetch_exc = None
     try:
         async for ev in stream_fetch_phase(
             user_message=ctx.user_message,
@@ -336,6 +338,7 @@ async def _run_subtopic(
             if _forward_event(ev):
                 yield ev
     except Exception:
+        _fetch_exc = True
         _log.exception(
             "subtopic %s fetch_phase raised; attempting partial merge",
             subtopic_id,
@@ -347,12 +350,14 @@ async def _run_subtopic(
     fetch_delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
     fetch_ok = int(fetch_out.get("fetch_ok") or 0)
     fetch_failed = int(fetch_out.get("fetch_failed") or 0)
+    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:347","message":"fetch_delta after phase","data":{"subtopic_id":subtopic_id,"sources_md":len(fetch_delta.sources_md),"fetch_hits":len(fetch_delta.fetch_hits),"fetch_results":len(fetch_delta.fetch_results),"fetch_ok":fetch_ok,"fetch_failed":fetch_failed,"batch_len":len(batch),"has_exception":bool(_fetch_exc)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
     ctx.fetch_ok += fetch_ok
     ctx.fetch_failed += fetch_failed
 
     # 如果 fetch 完全没有产出数据（全部失败或未完成），但 batch 有应请求条目，
     # 将基础元数据写入 working，避免下游因 working.fetch_hits 为空而误判为"无可用文献"。
     if not fetch_delta.fetch_hits and not fetch_delta.sources_md and batch:
+        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:357","message":"fetch_delta empty fallback","data":{"subtopic_id":subtopic_id,"batch_len":len(batch)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
         for hit in batch:
             h = dict(hit) if not isinstance(hit, dict) else dict(hit)
             url = str(h.get("url") or "")
@@ -369,6 +374,7 @@ async def _run_subtopic(
 
     try:
         ctx.working.merge(fetch_delta)
+        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:372","message":"after working.merge","data":{"subtopic_id":subtopic_id,"working_sources_md":len(ctx.working.sources_md),"working_fetch_hits":len(ctx.working.fetch_hits),"working_fetch_results":len(ctx.working.fetch_results),"working_papers":len(ctx.working.papers)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
         ctx.fetch_results.extend(fetch_delta.fetch_results)
         ctx.failed_literature.extend(fetch_delta.failed_literature)
 
@@ -598,6 +604,7 @@ async def run_subtopic_retrieval(
 
     ctx.store.save_outline(ctx.session_id, ctx.outline.to_dict())
     ctx.working = working
+    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:602","message":"run_subtopic_retrieval end","data":{"sources_md":len(working.sources_md),"fetch_hits":len(working.fetch_hits),"fetch_results":len(ctx.fetch_results),"papers":len(working.papers),"fetch_ok":ctx.fetch_ok,"fetch_failed":ctx.fetch_failed,"working_id":id(working)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
 
 
 def _subtopics_for_run(ctx: SubtopicPipelineContext) -> list[ResearchSubTopic]:
