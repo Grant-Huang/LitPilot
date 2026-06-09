@@ -38,10 +38,32 @@ export function parseThinkSegments(content: string): ThinkSegment[] {
   return segments;
 }
 
-/** Strip any residual structural markers from extracted segment text. */
+/** Strip any residual structural markers from extracted segment text.
+ *  后端历史上发送过两种 sys 标记：⟦sys⟧（数学方括号）与 【sys】（中文方括号）/[sys]
+ *  （ASCII）。解析时都要兜底剥离，否则它们会作为字面字符出现在 UI 里（round 3 审查 #1）。 */
 function _strip_markers(t: string): string {
   return t
     .replace(new RegExp(THINK_SYS_START, "g"), "")
     .replace(new RegExp(THINK_SYS_END, "g"), "")
+    .replace(/【\/?sys】/g, "")
+    .replace(/\[\/?sys\]/g, "")
     .trim();
+}
+
+/** 把"瞬时状态 sys 段"过滤掉：sys 段是 backend 用来告诉用户"正在做什么"的 live hint，
+ *  一旦其后已经产生了正式 model 输出，前面的 sys 段就过期了，应该不再显示。
+ *  只保留最末尾、还没有被 model 段覆盖的那条 sys hint（round 3 审查 #1）。 */
+export function dropStaleSysSegments(segments: ThinkSegment[]): ThinkSegment[] {
+  const result: ThinkSegment[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg.kind === "system") {
+      const hasModelAfter = segments
+        .slice(i + 1)
+        .some((s) => s.kind === "model" && s.text.trim());
+      if (hasModelAfter) continue;
+    }
+    result.push(seg);
+  }
+  return result;
 }

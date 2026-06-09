@@ -95,6 +95,9 @@ export function summarizeWorkflowCard(
   card: WorkflowCard,
   ctx?: SummarizeCardContext,
 ): string {
+  // pending / running 卡片不显示 summary：避免出现 "抓取全文 4 篇" 配 ○ 待开始
+  // 这种"数字摆在 pending 状态旁边"的矛盾视觉（round 3 审查 #E）。
+  if (card.state === "pending") return "";
   if (card.summary?.trim()) return card.summary.trim();
   if (card.state === "error") return "失败";
   const toolDone = card.steps.filter(
@@ -138,6 +141,20 @@ export function summarizeWorkflowCard(
   }
   if (card.type === "matrix") return "矩阵已生成";
   if (card.type === "brief" && card.body) {
+    // 用 "N RQ · M 关键词" 紧凑摘要替代截断的 "RQ：xxx…"（round 3 审查 #D）。
+    // 完整 RQ + 关键词列表展开后在 body 里看。
+    const rqMatch = /RQ：([^\n]+)/.exec(card.body);
+    const kwMatch = /关键词：([^\n]+)/.exec(card.body);
+    const rqCount = rqMatch
+      ? rqMatch[1].split(/；|;/).filter((s) => s.trim()).length
+      : 0;
+    const kwCount = kwMatch
+      ? kwMatch[1].split(/、|,/).filter((s) => s.trim()).length
+      : 0;
+    const parts: string[] = [];
+    if (rqCount) parts.push(`${rqCount} RQ`);
+    if (kwCount) parts.push(`${kwCount} 关键词`);
+    if (parts.length) return parts.join(" · ");
     const first = card.body.split(/\r?\n/).find((l) => l.trim());
     return first ? first.slice(0, 48) : "已完成";
   }
