@@ -139,8 +139,13 @@ export function LitPilotAppShell({ children }: Props) {
       sessions={sessions}
       activeId={activeSessionId}
       onSelect={(id) => {
-        if (!isChat) navigate("/chat");
+        // Update localStorage before navigation so the chat page always
+        // mounts with the correct session, even if context update is delayed.
+        if (typeof window !== "undefined") {
+          localStorage.setItem("litpilot:active-session", id);
+        }
         void handleSelectSession(id);
+        if (!isChat) navigate("/chat");
       }}
       onNewSession={() => {
         if (!isChat) navigate("/chat");

@@ -39,13 +39,13 @@ describe("buildSearchProgressTree", () => {
     const st1 = tree.subtopics.find((s) => s.id === "st1");
     expect(st1?.title).toBe("AI-native MOM 定义");
     expect(st1?.search.detail).toBe("命中 30 篇");
-    expect(st1?.filter.detail).toBe("保留 5 篇");
+    expect(st1?.filter.detail).toBe("(5/30)");
     expect(st1?.sources).toEqual([]);
     expect(st1?.filterDetails).toHaveLength(1);
     expect(st1?.filterDetails[0].title).toBe("Paper A");
     expect(st1?.filterDetails[0].keep).toBe(true);
     expect(subtopicDisplayTitle(st1!)).toBe("AI-native MOM 定义");
-    expect(subtopicStatusLabel(st1!)).toBe("完成 · 保留 5 篇");
+    expect(subtopicStatusLabel(st1!)).toBe("完成 · (5/30)");
   });
 
   it("marks all done when every subtopic completes search+filter", () => {

@@ -207,8 +207,16 @@ async def iter_search_events(
     s2_api_key: str = "",
     source_queries: Mapping[str, str] | None = None,
     skip_sources: frozenset[str] | None = None,
+    source_locks: dict[str, asyncio.Lock] | None = None,
+    seen_source_hits: set[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    """Single pass: parallel across sources (each source at most one slot)."""
+    """Single pass: parallel across sources (each source at most one slot).
+
+    When *source_locks* and *seen_source_hits* are provided, each source
+    acquires a per-source lock before searching. After the lock is acquired
+    it double-checks *seen_source_hits* — if another subtopic already found
+    hits for this source, the search is skipped (no redundant query).
+    """
     _ = exclude_domains
     q = (query or "").strip()
     if len(q) < 2:
@@ -225,13 +233,32 @@ async def iter_search_events(
         source_q = query_for_source(name, source_queries=sq, fallback=q)
         if len(source_q) < 2:
             return name, [], False
-        _name, rows, failed = await _search_one_source(
-            name,
-            source_q,
-            max_results=max_results,
-            min_year=min_year,
-            s2_api_key=s2_api_key,
-        )
+        # Per-source lock: if this source is being searched concurrently by
+        # another subtopic, wait for it; then double-check seen_source_hits.
+        lock = (source_locks or {}).setdefault(name, asyncio.Lock()) if source_locks is not None else None
+        if lock:
+            async with lock:
+                if seen_source_hits and name in seen_source_hits:
+                    return name, [], False
+                _name, rows, failed = await _search_one_source(
+                    name,
+                    source_q,
+                    max_results=max_results,
+                    min_year=min_year,
+                    s2_api_key=s2_api_key,
+                )
+                # Record result into seen_source_hits *inside* the lock so that
+                # another subtopic waiting on this lock immediately sees it.
+                if seen_source_hits is not None and rows:
+                    seen_source_hits.add(name)
+        else:
+            _name, rows, failed = await _search_one_source(
+                name,
+                source_q,
+                max_results=max_results,
+                min_year=min_year,
+                s2_api_key=s2_api_key,
+            )
         return _name, rows, failed
 
     tasks: dict[str, asyncio.Task[tuple[str, list[dict[str, str]], bool]]] = {}

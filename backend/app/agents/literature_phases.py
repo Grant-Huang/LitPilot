@@ -114,6 +114,8 @@ async def stream_search_phase(
     emit_pass_hits: bool = False,
     source_queries: dict[str, str] | None = None,
     skip_sources: frozenset[str] | None = None,
+    source_locks: dict[str, asyncio.Lock] | None = None,
+    seen_source_hits: set[str] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     from app.agents.tools.web_providers import normalize_search_provider
 
@@ -207,6 +209,8 @@ async def stream_search_phase(
                     s2_api_key=s2_key or "",
                     source_queries=source_queries,
                     skip_sources=skip_sources,
+                    source_locks=source_locks,
+                    seen_source_hits=seen_source_hits,
                 ):
                     if kind == "source_start":
                         await ma_queue.put(
@@ -677,6 +681,8 @@ async def stream_fetch_phase(
     delta = SessionCorpus()
     if search_answer:
         delta.append_search_answer(search_answer)
+    # Capture delta reference before fetch loop so partial data survives exceptions
+    out["delta"] = delta
 
     yield ("stage", {"name": "抓取网页", "state": "active"})
     upload_n = sum(1 for h in fetch_hits if str(h.get("source") or "") == "upload")

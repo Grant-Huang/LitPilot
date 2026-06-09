@@ -174,6 +174,7 @@ async def _run_subtopic(
     fetch_slots_left: int,
     corpus_base: SessionCorpus | None,
     seen_source_hits: set[str] | None = None,
+    source_locks: dict[str, asyncio.Lock] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     subtopic_id = normalize_subtopic_id(st.id)
     query = str(st.search_query or ctx.search_query_for_plan)
@@ -219,6 +220,8 @@ async def _run_subtopic(
         emit_pass_hits=False,
         source_queries=source_queries or None,
         skip_sources=skip_sources or None,
+        source_locks=source_locks,
+        seen_source_hits=seen_source_hits,
     ):
         if ev[0] == "literature_search_source_done":
             hits = int(ev[1].get("hits") or 0)
@@ -307,30 +310,36 @@ async def _run_subtopic(
 
     batch = deduped_kept[:fetch_slots_left]
     fetch_out: dict[str, Any] = {}
-    async for ev in stream_fetch_phase(
-        user_message=ctx.user_message,
-        fetch_hits=batch,
-        fetch_cap=len(batch),
-        fetch_api_key=ctx.fetch_api_key,
-        fetch_provider=ctx.fetch_provider,
-        llm=ctx.pipeline_llm,
-        parallel=ctx.parallel,
-        timeout_sec=ctx.timeout_sec,
-        fetch_retry_count=ctx.fetch_retry_count,
-        fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
-        think_acc=ctx.think_acc,
-        planner_ctx=ctx.planner_ctx,
-        execution_trace=ctx.execution_trace,
-        emitter=ctx.emitter,
-        graph=ctx.graph,
-        graph_artifact_id=ctx.graph_artifact_id,
-        sync_graph_node=sync_graph_node,
-        search_answer=str(search_out.get("answer") or ""),
-        result=fetch_out,
-        max_source_chars=ctx.max_source_chars,
-    ):
-        if _forward_event(ev):
-            yield ev
+    try:
+        async for ev in stream_fetch_phase(
+            user_message=ctx.user_message,
+            fetch_hits=batch,
+            fetch_cap=len(batch),
+            fetch_api_key=ctx.fetch_api_key,
+            fetch_provider=ctx.fetch_provider,
+            llm=ctx.pipeline_llm,
+            parallel=ctx.parallel,
+            timeout_sec=ctx.timeout_sec,
+            fetch_retry_count=ctx.fetch_retry_count,
+            fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
+            think_acc=ctx.think_acc,
+            planner_ctx=ctx.planner_ctx,
+            execution_trace=ctx.execution_trace,
+            emitter=ctx.emitter,
+            graph=ctx.graph,
+            graph_artifact_id=ctx.graph_artifact_id,
+            sync_graph_node=sync_graph_node,
+            search_answer=str(search_out.get("answer") or ""),
+            result=fetch_out,
+            max_source_chars=ctx.max_source_chars,
+        ):
+            if _forward_event(ev):
+                yield ev
+    except Exception:
+        _log.exception(
+            "subtopic %s fetch_phase raised; attempting partial merge",
+            subtopic_id,
+        )
 
     # 即使后续处理抛出异常，也先确保 fetch 获取的数据不丢失。
     # stream_fetch_phase 执行完成后，fetch_out["delta"] 已经被赋值。
@@ -464,6 +473,7 @@ async def run_subtopic_retrieval(
     per_st_fetch = max(2, ctx.max_fetch_urls // max(1, n))
     queue: asyncio.Queue = asyncio.Queue()
     sem = asyncio.Semaphore(min(MAX_PARALLEL_SUBTOPICS, n))
+    source_locks: dict[str, asyncio.Lock] = {}
 
     async def _runner(idx: int, st: ResearchSubTopic) -> None:
         async with sem:
@@ -477,6 +487,7 @@ async def run_subtopic_retrieval(
                     fetch_slots_left=per_st_fetch,
                     corpus_base=corpus_base,
                     seen_source_hits=seen_source_hits,
+                    source_locks=source_locks,
                 ):
                     await queue.put(ev)
             except Exception as exc:
@@ -516,16 +527,27 @@ async def run_subtopic_retrieval(
         searchMerged=total_kept,
     )
 
-    if total_kept == 0 and runs_search(intent):
-        msg = "本轮各子主题均未纳入文献。下轮可明确说明「增加/修改子主题」以调整检索。"
-        yield chat_text(msg)
-        ctx.early_return = True
-        ctx.finalize_ctx.corpus = working
-        ctx.finalize_ctx.chat_text = msg
-        _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
-        yield end_ev
-        yield ("stage", {"name": "完成", "state": "done"})
-        return
+    if runs_search(intent):
+        if total_kept == 0:
+            msg = "本轮各子主题均未纳入文献。下轮可明确说明「增加/修改子主题」以调整检索。"
+            yield chat_text(msg)
+            ctx.early_return = True
+            ctx.finalize_ctx.corpus = working
+            ctx.finalize_ctx.chat_text = msg
+            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
+            yield end_ev
+            yield ("stage", {"name": "完成", "state": "done"})
+            return
+        if not working.fetch_hits and not working.sources_md:
+            msg = "检索到文献，但抓取网页时全部失败。可重试，或补充网页链接。"
+            yield chat_text(msg)
+            ctx.early_return = True
+            ctx.finalize_ctx.corpus = working
+            ctx.finalize_ctx.chat_text = msg
+            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
+            yield end_ev
+            yield ("stage", {"name": "完成", "state": "done"})
+            return
 
     if ctx.fetch_results:
         cite_out: dict[str, Any] = {}

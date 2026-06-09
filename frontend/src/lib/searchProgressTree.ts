@@ -132,18 +132,18 @@ export function buildSearchProgressTree(
 
       if (subtopicId) {
         const node = ensureSubtopic(map, subtopicId);
-        node.sources.push({
-          label,
-          hits,
-          hits_taken: hitsTaken,
-          status: failed ? "error" : "done",
-          failed,
-        });
+        const existingIdx = node.sources.findIndex((s) => s.label === label);
+        const entry: SourceNode = { label, hits, hits_taken: hitsTaken, status: failed ? "error" as const : "done" as const, failed };
+        if (existingIdx >= 0) {
+          node.sources[existingIdx] = entry;
+        } else {
+          node.sources.push(entry);
+        }
       } else if (passIndex != null) {
         // Fallback: track by pass index
         if (!passSources.has(passIndex)) passSources.set(passIndex, new Map());
         const srcMap = passSources.get(passIndex)!;
-        srcMap.set(label, { label, hits, hits_taken: hitsTaken, status: failed ? "error" : "done", failed });
+        srcMap.set(label, { label, hits, hits_taken: hitsTaken, status: failed ? "error" as const : "done" as const, failed });
       }
       continue;
     }
@@ -161,6 +161,8 @@ export function buildSearchProgressTree(
       const raw = typeof data.raw_count === "number" ? data.raw_count : 0;
       node.search = phase("done", "检索", "命中 " + raw + " 篇");
       node.filter = phase("running", "过滤");
+      // 保存 raw_count 供后续 filter_done 使用
+      (node as Record<string, unknown>).rawCount = raw;
       if (typeof data.duration_ms === "number") node.durationMs = data.duration_ms;
       continue;
     }
@@ -168,7 +170,8 @@ export function buildSearchProgressTree(
     if (ext.name === "literature_subtopic_filter_done") {
       const kept =
         typeof data.kept_count === "number" ? data.kept_count : 0;
-      node.filter = phase("done", "过滤", "保留 " + kept + " 篇");
+      const raw = ((node as Record<string, unknown>).rawCount as number) || 0;
+      node.filter = phase("done", "过滤", `(${kept}/${raw})`);
 
       // Parse kept items
       const keptItems = Array.isArray(data.kept) ? data.kept : [];
