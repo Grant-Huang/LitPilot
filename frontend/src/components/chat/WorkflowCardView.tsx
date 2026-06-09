@@ -204,9 +204,7 @@ export function WorkflowCardView({
     ? pinnedThink
     : liveThink;
   const hasThinkStream =
-    (card.type === "understand" ||
-      card.type === "brief" ||
-      card.type === "search") &&
+    card.type === "understand" &&
     Boolean(thinkForCard || (streaming && isRunning));
 
   const headStatus = cardHeadStatus(card, isRunning, hasThinkStream);
@@ -239,10 +237,7 @@ export function WorkflowCardView({
       </div>
       {open ? (
         <div className="litpilot-wf-card__body">
-          {(card.type === "understand" ||
-            card.type === "brief" ||
-            card.type === "search") &&
-          (thinkForCard || (streaming && isRunning)) ? (
+          {hasThinkStream ? (
             <LitPilotThinkFold
               content={thinkForCard}
               streaming={streaming && isRunning}
