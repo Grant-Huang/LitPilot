@@ -240,10 +240,28 @@ async def stream_literature_turn(
         planner_ctx.narration_focus = router_result.narration_focus
         planner_ctx.writing_emphasis = router_result.writing_emphasis
 
-        if should_auto_rename_session(session_meta, route_message, user_message_count=user_turns):
+        # round 4 #7 诊断：title 不更新——三种可能：
+        #   (a) should_auto_rename_session 返回 False（meta/title_auto_set/默认 title 不匹配）
+        #   (b) router_result.session_title 为空（LLM 输出被截断 / JSON 字段缺失）
+        #   (c) resolve_auto_session_title 兜底后仍返回空字符串
+        rename_ok = should_auto_rename_session(
+            session_meta, route_message, user_message_count=user_turns
+        )
+        _log.info(
+            "[round4-#7] auto-rename session=%s turn=%d should_rename=%s "
+            "current_title=%r title_auto_set=%s primary_from_llm=%r",
+            session_id, user_turns, rename_ok,
+            (session_meta or {}).get("title"),
+            (session_meta or {}).get("title_auto_set"),
+            router_result.session_title,
+        )
+        if rename_ok:
             new_title = await resolve_auto_session_title(
                 primary_title=router_result.session_title or "",
                 user_message=route_message,
+            )
+            _log.info(
+                "[round4-#7] resolved new_title=%r (empty → no update)", new_title,
             )
             if new_title:
                 store.update_session(session_id, title=new_title, title_auto_set=True)
@@ -375,6 +393,19 @@ async def stream_literature_turn(
         return
 
     if not working.sources_md and not working.fetch_hits:
+        # round 4 #5 诊断：UI 已显示 "抓取 N 篇" 但 working corpus 为空——
+        # 把关键计数全部打出来，下次复现时直接看日志定位是 fetch / merge / reset
+        # 哪一环掉链子。
+        _log.warning(
+            "[round4-#5] corpus empty at generate gate session=%s intent=%s "
+            "fetch_ok=%d fetch_failed=%d fetch_results=%d papers=%d "
+            "working_id=%d corpus_id=%d working_is_corpus=%s",
+            session_id, intent.intent,
+            pipe_ctx.fetch_ok, pipe_ctx.fetch_failed,
+            len(pipe_ctx.fetch_results),
+            len(working.papers),
+            id(working), id(corpus), working is corpus,
+        )
         fail_msg = "没有可用的文献材料。"
         yield chat_text(fail_msg)
         finalize_ctx.chat_text = fail_msg
