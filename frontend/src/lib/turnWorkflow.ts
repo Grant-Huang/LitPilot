@@ -330,10 +330,11 @@ export function buildTurnWorkflowFromTrace(
           ? "understand"
           : activeType;
     const target = cards.find((c) => c.type === targetType && c.state === "running");
-    if (target && !target.body) {
-      if (opts.streaming && THINK_STREAM_CARD_TYPES.has(target.type)) {
-        continue;
-      }
+    // THINK_STREAM 类卡片（understand / brief / search）的内容由 thinkfold 全权渲染，
+    // 不要再把 progress.detail 写入 body 制造与 thinkfold 内容重复、并在 stage 结束
+    // 那一刻"刷一下"出现的格式跳变。brief 卡的结构化 RQ+关键词由 briefSummary
+    // 合并块单独负责（见下方）。
+    if (target && !target.body && !THINK_STREAM_CARD_TYPES.has(target.type)) {
       target.body = detail;
     }
   }
@@ -368,16 +369,23 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  // 结构化 RQ + 关键词：优先合并到已有的 brief 卡（来自 stage emit），没有时再新增。
+  // 避免出现两张 brief 卡片（一张来自 stage，一张来自 briefSummary）。
   const briefSummary = (opts.briefSummary ?? opts.processText ?? "").trim();
   if (briefSummary) {
-    cards.splice(cards.length === 0 ? 0 : 1, 0, {
-      id: "card-brief",
-      type: "brief",
-      title: CARD_TITLES.brief,
-      state: "done",
-      steps: [],
-      body: briefSummary,
-    });
+    const existingBrief = cards.find((c) => c.type === "brief");
+    if (existingBrief) {
+      existingBrief.body = briefSummary;
+    } else {
+      cards.splice(cards.length === 0 ? 0 : 1, 0, {
+        id: "card-brief",
+        type: "brief",
+        title: CARD_TITLES.brief,
+        state: "done",
+        steps: [],
+        body: briefSummary,
+      });
+    }
   }
 
   const chatText = (opts.chatText ?? "").trim();

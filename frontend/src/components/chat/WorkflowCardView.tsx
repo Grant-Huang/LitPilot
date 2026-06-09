@@ -197,7 +197,12 @@ export function WorkflowCardView({
   );
 
   const liveThink = trace?.thinkContent?.trim() ?? "";
-  const thinkForCard = isRunning ? liveThink : pinnedThink || liveThink;
+  // 不要在 isRunning 变化的瞬间从 liveThink 切到 pinnedThink，否则用户会看到内容
+  // "刷新"一下。pinnedThink 是 backend 在 stage 结束时下发的快照，理论上 >= liveThink；
+  // 取两者中"信息量更大"的那个，保证流式过程到结束的内容不闪烁、不回退。
+  const thinkForCard = pinnedThink && pinnedThink.length >= liveThink.length
+    ? pinnedThink
+    : liveThink;
   const hasThinkStream =
     (card.type === "understand" ||
       card.type === "brief" ||
@@ -244,7 +249,10 @@ export function WorkflowCardView({
               turnStreaming={streaming}
             />
           ) : null}
-          {card.body ? (
+          {/* understand / search 的全部内容由上方 thinkfold 渲染；只有 brief 在
+              thinkfold 之外保留结构化 RQ+关键词 body。其它非 think-stream 卡片
+              （如 outline / generate）的 body 正常渲染。 */}
+          {card.body && card.type !== "understand" && card.type !== "search" ? (
             <div className="litpilot-wf-card__body-text">{card.body}</div>
           ) : null}
           {card.type === "understand" && card.subTopics?.length ? (
