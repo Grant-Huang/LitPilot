@@ -203,8 +203,14 @@ export function WorkflowCardView({
   const thinkForCard = pinnedThink && pinnedThink.length >= liveThink.length
     ? pinnedThink
     : liveThink;
+  // brief / search 卡的 thinkfold 不再 hard-filter 掉（曾在 b5c36e6 收窄到只在
+  // understand 渲染——见 round-3 review 比较）。real fix 是后端把 think_stream
+  // 按 stage 分发，前端按 pinnedThink 分别落到对应卡；当前用 THINK_STREAM_CARD_TYPES
+  // 准入，stage-specific 标题来自 thinkfold 内的第一条 sys 段（round 3 #2）。
   const hasThinkStream =
-    card.type === "understand" &&
+    (card.type === "understand" ||
+      card.type === "brief" ||
+      card.type === "search") &&
     Boolean(thinkForCard || (streaming && isRunning));
 
   const headStatus = cardHeadStatus(card, isRunning, hasThinkStream);

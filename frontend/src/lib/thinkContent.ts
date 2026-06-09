@@ -10,7 +10,10 @@ export type ThinkSegment = {
 export function parseThinkSegments(content: string): ThinkSegment[] {
   const raw = content || "";
   if (!raw.includes(THINK_SYS_START)) {
-    return raw.trim() ? [{ kind: "model", text: raw }] : [];
+    // 即便没有 ⟦sys⟧ 标记，文本里仍可能含 backend 发送过的另两种 sys 变体
+    // （【sys】或 [sys]），同样要 strip——否则它们会作为字面字符出现在 UI。
+    const stripped = _strip_markers(raw);
+    return stripped ? [{ kind: "model", text: stripped }] : [];
   }
   const segments: ThinkSegment[] = [];
   let i = 0;

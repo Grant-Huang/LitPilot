@@ -129,3 +129,44 @@ describe("buildTurnCompletionSummary streaming headline", () => {
     expect(summary.headline).not.toContain("分析研究问题并生成检索规划");
   });
 });
+
+describe("buildTurnWorkflowFromTrace canonical card order", () => {
+  it("sorts cards into understand → brief → search → fetch order even if backend stages arrive shuffled", () => {
+    const wf = buildTurnWorkflowFromTrace(
+      {
+        // Intentionally out-of-order: fetch arrives before search and brief
+        stages: [
+          { name: "理解研究问题", state: "done" },
+          { name: "抓取全文", state: "done" },
+          { name: "评估", state: "done" },
+          { name: "文献检索", state: "done" },
+        ],
+        tools: [],
+        workflows: [],
+      },
+      { streaming: false },
+    );
+    const types = wf.cards.map((c) => c.type);
+    const understandIdx = types.indexOf("understand");
+    const briefIdx = types.indexOf("brief");
+    const searchIdx = types.indexOf("search");
+    const fetchIdx = types.indexOf("fetch");
+    expect(understandIdx).toBeGreaterThanOrEqual(0);
+    expect(briefIdx).toBeGreaterThan(understandIdx);
+    expect(searchIdx).toBeGreaterThan(briefIdx);
+    expect(fetchIdx).toBeGreaterThan(searchIdx);
+  });
+
+  it("uses 研究计划 as the brief card title (not Brief 评估)", () => {
+    const wf = buildTurnWorkflowFromTrace(
+      {
+        stages: [{ name: "Brief 评估", state: "done" }],
+        tools: [],
+        workflows: [],
+      },
+      { streaming: false },
+    );
+    const brief = wf.cards.find((c) => c.type === "brief");
+    expect(brief?.title).toBe("研究计划");
+  });
+});
