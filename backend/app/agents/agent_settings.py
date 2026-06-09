@@ -471,3 +471,25 @@ async def get_llm_config() -> dict[str, Any]:
 
     return await get_review_llm_config()
 
+
+# --- Understanding & Clarification Settings ---
+
+async def get_confidence_threshold() -> float:
+    """Understand 阶段的置信度阈值 [0.0, 1.0]。
+    置信度 ≥ 此阈值时直接进入搜索，否则进入澄清阶段。"""
+    val = os.getenv("LITPILOT_UNDERSTANDING_CONFIDENCE_THRESHOLD", "0.7").strip()
+    try:
+        threshold = float(val)
+        return max(0.0, min(1.0, threshold))  # Clamp to [0.0, 1.0]
+    except ValueError:
+        return 0.7
+
+
+async def get_max_clarification_rounds() -> int:
+    """最多澄清轮数，避免死循环。"""
+    val = os.getenv("LITPILOT_UNDERSTANDING_MAX_CLARIFICATION_ROUNDS", "2").strip()
+    try:
+        return max(1, int(val))
+    except ValueError:
+        return 2
+

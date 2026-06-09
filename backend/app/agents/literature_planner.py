@@ -77,7 +77,20 @@ def _extract_router_from_text(text: str, user_message: str) -> LiteratureRouterR
         data = parse_router_json(raw)
     except (ValueError, json.JSONDecodeError):
         return fallback
-    return build_router_result(data, msg)
+    result = build_router_result(data, msg)
+    
+    # 提取 confidence（如果 LLM 返回了）
+    if isinstance(data, dict):
+        confidence = data.get("confidence")
+        if confidence is not None:
+            try:
+                result.confidence = float(confidence)
+                # Clamp to [0.0, 1.0]
+                result.confidence = max(0.0, min(1.0, result.confidence))
+            except (ValueError, TypeError):
+                pass  # Keep default
+    
+    return result
 
 
 async def stream_understanding_and_route(

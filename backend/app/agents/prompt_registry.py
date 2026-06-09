@@ -22,6 +22,8 @@ _SHARED_SEARCH_QUERY_RULES = (
 
 UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown 代码块）：
 {
+  "narration": "3-5句中文解说：研究主题全景、子方向逻辑关系、检索核心挑战",
+  "confidence": 0.85,
   "session_title": "8-24字，禁止「综述」「新综述」等泛称",
   "search_query": "≤120字首条英文检索线索（单主题 brief 时使用）",
   "narration_focus": "1-2句，后续解说侧重",
@@ -40,6 +42,11 @@ UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown
   ]
 }
 规则：
+- **confidence 评分** [0.0, 1.0]：
+  * 0.9–1.0：用户意图明确、术语规范、无歧义
+  * 0.7–0.8：用户意图清晰但可能有不精确之处
+  * 0.5–0.6：用户表述模糊、有多种理解方向、可能需澄清
+  * 0.0–0.4：用户意图模糊或明显需要澄清
 - 用户 brief 含「其一…其二…」等多 aspect 时：search_aspects 须与用户子方向 **一一对应**（≥2 项），各方向填写 **分源检索式**；search_query 可为首方向摘要
 - 单主题 brief：search_aspects 可为 []，仅填 search_query
 - **所有检索式必须为英文**（arXiv/Semantic Scholar/OpenAlex/CrossRef 对中文查询支持很差，系统会自动剥离中文字符）
@@ -50,7 +57,7 @@ UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown
 {_SHARED_SEARCH_QUERY_RULES}
 - exclude_terms：列出该方向常见噪声（跨域歧义词、市政/医疗等非目标领域词等）
 - pubmed_query 仅在 brief 明确生物医学/健康方向时填写；工业/CS/工程方向留空
-- 澄清需求由下游「首轮评估」处理，此处不向用户提问"""
+- **澄清需求不在此处生成选项**，由下游澄清阶段独立处理"""
 
 ROUTER_JSON_CONTRACT = f"""{{
   "session_title": "简短会话标题，8-24 字，概括研究主题，不用引号，禁止「新综述」「文献综述」等泛称",
@@ -135,7 +142,13 @@ DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与
 【任务】
 1. 用 3–5 句中文说明：研究主题全景、子方向逻辑关系、检索核心挑战（术语歧义、跨学科边界）。
    不要编造论文标题/作者/DOI；不要写综述正文；不要向用户提问。
-2. 末行输出 JSON（无 markdown 代码块）：
+2. 评估用户意图的置信度（confidence）[0.0, 1.0]：
+   - 0.9–1.0：用户意图明确、术语规范、无歧义
+   - 0.7–0.8：用户意图清晰但可能有不精确之处
+   - 0.5–0.6：用户表述模糊、有多种理解方向
+   - 0.0–0.4：用户意图模糊或明显需要澄清
+3. 生成完整的检索规划（search_aspects）。
+4. 末行输出 JSON（无 markdown 代码块）：
 {UNDERSTANDING_JSON_CONTRACT}"""
 
 DEFAULT_NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 **1–2 句** 简洁说明：
@@ -163,6 +176,53 @@ DEFAULT_ASSESSOR_SYSTEM = f"""你是学术文献综述助手（首轮 brief 评�
 不要生成多条检索式；仅在路由草案明显不足时输出一条 search_query_hint。
 输出唯一 JSON（无 markdown 代码块）：
 {ASSESSOR_JSON_CONTRACT}"""
+
+# Clarify JSON contract
+CLARIFY_JSON_CONTRACT = f"""{{
+  "clarification_prompt": "请选择最符合您研究意图的方向：",
+  "options": [
+    {{
+      "option_id": "opt_1",
+      "narration": "该选项的3-5句解说",
+      "search_aspects": [
+        {{
+          "aspect_id": 1,
+          "aspect_label": "子主题标题",
+          "core_concepts": ["概念1", "Concept2"],
+          "arxiv_query": "...",
+          "semantic_scholar_query": "...",
+          "openalex_crossref_query": "...",
+          "pubmed_query": "",
+          "exclude_terms": []
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+DEFAULT_CLARIFY_SYSTEM = f"""你是学术文献综述助手的澄清与推荐器。
+
+【背景】
+- 用户的初始表述模糊、多义或不够专业
+- 系统对用户意图的初步理解（Understand 阶段）信心度不足（< 0.7）
+- 需要帮助用户明确研究方向，以便进行准确的文献检索
+
+【任务】
+生成 2–3 个具体的研究方向选项，帮助用户明确意图。
+每个选项需包含：
+1. option_id：选项标识（opt_1, opt_2, opt_3）
+2. narration：1–2句简短解说（帮助用户快速理解该选项的区别）
+3. search_aspects：完整的检索规划（格式与 Understand 阶段一致，可直接进入搜索）
+
+【约束】
+- 选项间应有明显区别（不重复、不过度相似，各代表不同研究角度或深度）
+- 每个选项自成一体，用户选择后可直接进入文献检索
+- **所有检索式必须为英文**
+- 不要在此处生成澄清选择题；该步骤本身就是澄清方式
+
+【输出】
+JSON（无 markdown 代码块）：
+{CLARIFY_JSON_CONTRACT}"""
 
 DEFAULT_QUERY_CORPUS_SYSTEM = (
     "你是学术文献助手。仅根据用户消息中【多源材料】回答用户问题，不得撰写完整综述，"
@@ -290,6 +350,14 @@ PROMPT_SPECS: dict[str, dict[str, Any]] = {
         "default": DEFAULT_ASSESSOR_SYSTEM,
         "contract": ASSESSOR_JSON_CONTRACT,
         "contract_marker": "clarification",
+    },
+    "clarify_system_template": {
+        "label": "澄清与推荐 · 生成备选方案",
+        "group": "orchestrator",
+        "max_len": 6_000,
+        "default": DEFAULT_CLARIFY_SYSTEM,
+        "contract": CLARIFY_JSON_CONTRACT,
+        "contract_marker": "options",
     },
     "query_corpus_system_template": {
         "label": "语料问答",

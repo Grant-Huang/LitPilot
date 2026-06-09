@@ -30,12 +30,25 @@ class LiteratureRouterResult:
     narration_focus: str = ""
     writing_emphasis: str = ""
     search_aspects: list[SearchAspect] = field(default_factory=list)
+    confidence: float = 0.8  # [0.0, 1.0] Understand 阶段的置信度
+
+
+@dataclass
+class UnderstandingResult:
+    """Understand 阶段的输出结构。"""
+    narration: str                           # 3-5 句解说
+    search_aspects: list[SearchAspect]       # 子主题规划
+    confidence: float                        # [0.0, 1.0] 置信度
+    session_title: str = ""                  # 可选：会话标题
+    narration_focus: str = ""                # 可选：解说重点
+    writing_emphasis: str = ""               # 可选：写作重点
 
 
 # Re-export for backward-compatible imports from literature_router.
 __all__ = [
     "FOCUS_MAX",
     "LiteratureRouterResult",
+    "UnderstandingResult",
     "SEARCH_QUERY_MAX",
     "TOPIC_LABEL_MAX",
     "build_router_result",

@@ -1,16 +1,26 @@
 """Multi-turn literature session orchestration (v2)."""
 from __future__ import annotations
 
+import json
 import logging
+import os
+import time
 from typing import Any, AsyncIterator
+
+_DBG_LOG = os.path.join(os.path.dirname(__file__), "../../.cursor/debug-d10a07.log")
+def _dbg(location, message, data):
+    with open(_DBG_LOG, "a") as f:
+        f.write(json.dumps({"sessionId": "d10a07", "location": location, "message": message, "data": data, "timestamp": time.time() * 1000, "runId": "run1"}) + "\n")
 
 from app.agents.agent_settings import (
     get_citation_format,
+    get_confidence_threshold,
     get_fetch_api_key,
     get_fetch_parallel,
     get_fetch_retry_count,
     get_fetch_retry_delay_ms,
     get_fetch_timeout_sec,
+    get_max_clarification_rounds,
     get_max_fetch_urls,
     get_max_source_chars,
     get_search_depth,
@@ -25,6 +35,7 @@ from app.agents.agent_settings import (
     get_web_search_provider,
 )
 from app.agents.agent_skills import skill_active_event
+from app.agents.clarify_planner import stream_clarify_user_intent
 from app.agents.execution_trace import new_trace, upsert_stage
 from app.agents.first_turn_assessor import (
     brief_assessment_from_router,
@@ -228,17 +239,100 @@ async def stream_literature_turn(
 
     needs_understanding = intent.intent in ("new_topic", "subtopic_change", "append_urls")
     if needs_understanding:
-        async for ev in stream_understanding_and_route(
-            route_message,
-            think_acc=think_acc,
-            ctx=planner_ctx,
-        ):
-            if ev[0] == "__router_result__":
-                router_result = ev[1]["result"]
-            else:
-                yield ev
-        planner_ctx.narration_focus = router_result.narration_focus
-        planner_ctx.writing_emphasis = router_result.writing_emphasis
+        confidence_threshold = await get_confidence_threshold()
+        max_clarification_rounds = await get_max_clarification_rounds()
+        clarification_round = 0
+        current_message = route_message  # 用于澄清轮次的消息更新
+        
+        while True:
+            # Understand 阶段
+            async for ev in stream_understanding_and_route(
+                current_message,
+                think_acc=think_acc,
+                ctx=planner_ctx,
+            ):
+                if ev[0] == "__router_result__":
+                    router_result = ev[1]["result"]
+                else:
+                    yield ev
+            
+            planner_ctx.narration_focus = router_result.narration_focus
+            planner_ctx.writing_emphasis = router_result.writing_emphasis
+            
+            # 检查 confidence 是否足够
+            if router_result.confidence >= confidence_threshold:
+                # confidence 足够，进入搜索
+                break
+            
+            # confidence 不足且未超过澄清次数上限，进入澄清阶段
+            if clarification_round >= max_clarification_rounds:
+                _log.warning(
+                    "Clarification exceeded max rounds (%d), proceeding with current understanding (confidence=%.2f)",
+                    max_clarification_rounds,
+                    router_result.confidence,
+                )
+                yield (
+                    "clarification_timeout",
+                    {
+                        "message": "已澄清多轮，系统将基于当前理解进行搜索",
+                        "confidence": router_result.confidence,
+                    },
+                )
+                break
+            
+            # 生成澄清选项
+            _log.info("Confidence low (%.2f < %.2f), entering clarification round %d", 
+                      router_result.confidence, confidence_threshold, clarification_round + 1)
+            
+            try:
+                clarify_result = await stream_clarify_user_intent(
+                    user_message=route_message,  # 原始用户输入
+                    understand_narration=router_result.narration_focus or "（无初步理解）",
+                    think_acc=think_acc,
+                )
+                
+                # 发送澄清选项给前端
+                yield (
+                    "clarification",
+                    {
+                        "prompt": clarify_result.clarification_prompt,
+                        "options": [
+                            {
+                                "option_id": opt.option_id,
+                                "narration": opt.narration,
+                                "search_aspects": opt.search_aspects,
+                            }
+                            for opt in clarify_result.options
+                        ],
+                    },
+                )
+                
+                # TODO: 在真实场景下，此处应等待前端用户选择或输入
+                # 目前为演示，自动选择第一个选项
+                if clarify_result.options:
+                    selected_option = clarify_result.options[0]
+                    # 如果用户自由输入（这里简化处理），则重新进入 Understand
+                    # 否则使用澄清选项的 search_aspects
+                    if not selected_option.search_aspects:
+                        # 用户自由输入情况（目前未实现）
+                        _log.info("User provided custom input, re-entering Understand")
+                        # 在真实场景中，current_message 会被更新为用户的新输入
+                        # current_message = user_custom_input
+                        break  # 临时：不实现用户交互循环
+                    else:
+                        # 使用澄清选项：直接构建 router_result，跳过后续 Understand
+                        router_result.search_aspects = selected_option.search_aspects
+                        router_result.narration_focus = selected_option.narration
+                        break
+            except Exception as e:
+                _log.exception("Clarification failed: %s, proceeding with current understanding", e)
+                yield (
+                    "clarification_error",
+                    {"message": f"澄清生成失败: {str(e)[:100]}"},
+                )
+                break
+            
+            clarification_round += 1
 
         # round 4 #7 诊断：title 不更新——三种可能：
         #   (a) should_auto_rename_session 返回 False（meta/title_auto_set/默认 title 不匹配）
@@ -364,7 +458,19 @@ async def stream_literature_turn(
 
     working = pipe_ctx.working
     outline_obj = pipe_ctx.outline_obj or outline_obj
-    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_turn.py:366","message":"after pipeline, before gate","data":{"working_sources_md":len(working.sources_md),"working_fetch_hits":len(working.fetch_hits),"working_fetch_results":len(pipe_ctx.fetch_results),"working_papers":len(working.papers),"working_id":id(working),"pipe_ctx.fetch_ok":pipe_ctx.fetch_ok,"pipe_ctx.fetch_failed":pipe_ctx.fetch_failed},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
+    _dbg("literature_turn:after_pipeline", "pipeline completed state", {
+        "hypothesisId": "H3",
+        "working_sources_md": len(working.sources_md),
+        "working_fetch_hits": len(working.fetch_hits),
+        "working_fetch_results": len(working.fetch_results),
+        "working_papers": len(working.papers),
+        "pipe_ctx_fetch_results": len(pipe_ctx.fetch_results),
+        "pipe_ctx_cite_records": len(pipe_ctx.cite_records),
+        "pipe_ctx_failed_lit": len(pipe_ctx.failed_literature),
+        "pipe_ctx_fetch_ok": pipe_ctx.fetch_ok,
+        "pipe_ctx_fetch_failed": pipe_ctx.fetch_failed,
+        "intent": intent.intent,
+    })
 
     if intent.intent == "query_corpus":
         if not working.sources_md and not working.fetch_hits:
@@ -377,7 +483,24 @@ async def stream_literature_turn(
 
     if not runs_generate(intent):
         # append_urls / query_corpus 等非生成意图：如果有新抓取的数据，仍需要落库
-        if working is not corpus and (working.fetch_hits or working.sources_md):
+        will_save = working is not corpus and (working.fetch_hits or working.sources_md)
+        _dbg("literature_turn:non_gen_gate", "non-generate intent gate check", {
+            "hypothesisId": "H1",
+            "working_is_corpus": working is corpus,
+            "has_fetch_hits": bool(working.fetch_hits),
+            "has_sources_md": bool(working.sources_md),
+            "will_save": will_save,
+            "intent": intent.intent,
+            "fetch_results_len": len(pipe_ctx.fetch_results),
+            "cite_records_len": len(pipe_ctx.cite_records),
+        })
+        if will_save:
+            _dbg("literature_turn:non_gen", "non-generate intent, saving to library", {
+                "hypothesisId": "H1",
+                "fetch_results_len": len(pipe_ctx.fetch_results),
+                "cite_records_len": len(pipe_ctx.cite_records),
+                "intent": intent.intent,
+            })
             finalize_ctx.corpus = working
             finalize_ctx.fetch_results = pipe_ctx.fetch_results
             finalize_ctx.cite_records = pipe_ctx.cite_records
@@ -394,20 +517,18 @@ async def stream_literature_turn(
         return
 
     if not working.sources_md and not working.fetch_hits:
-        # round 4 #5 诊断：UI 已显示 "抓取 N 篇" 但 working corpus 为空——
-        # 把关键计数全部打出来，下次复现时直接看日志定位是 fetch / merge / reset
-        # 哪一环掉链子。
-        import json, os as _os, traceback as _tb; _stack = "".join(_tb.format_stack()[-8:-2]); _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_turn.py:395","message":"GATE FAILED corpus empty","data":{"intent":intent.intent,"fetch_ok":pipe_ctx.fetch_ok,"fetch_failed":pipe_ctx.fetch_failed,"fetch_results":len(pipe_ctx.fetch_results),"papers":len(working.papers),"working_sources_md":len(working.sources_md),"working_fetch_hits":len(working.fetch_hits),"working_id":id(working),"corpus_id":id(corpus),"working_is_corpus":working is corpus,"stack":_stack},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
-        _log.warning(
-            "[round4-#5] corpus empty at generate gate session=%s intent=%s "
-            "fetch_ok=%d fetch_failed=%d fetch_results=%d papers=%d "
-            "working_id=%d corpus_id=%d working_is_corpus=%s",
-            session_id, intent.intent,
-            pipe_ctx.fetch_ok, pipe_ctx.fetch_failed,
-            len(pipe_ctx.fetch_results),
-            len(working.papers),
-            id(working), id(corpus), working is corpus,
-        )
+        _dbg("literature_turn:gen_gate_failed", "GATE FAILED corpus empty", {
+            "hypothesisId": "H3",
+            "intent": intent.intent,
+            "fetch_ok": pipe_ctx.fetch_ok,
+            "fetch_failed": pipe_ctx.fetch_failed,
+            "fetch_results_len": len(pipe_ctx.fetch_results),
+            "papers_count": len(working.papers),
+            "working_sources_md": len(working.sources_md),
+            "working_fetch_hits": len(working.fetch_hits),
+            "corpus_sources_md": len(corpus.sources_md),
+            "corpus_fetch_hits": len(corpus.fetch_hits),
+        })
         fail_msg = "没有可用的文献材料。"
         yield chat_text(fail_msg)
         finalize_ctx.chat_text = fail_msg

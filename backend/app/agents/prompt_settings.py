@@ -48,6 +48,9 @@ async def get_assessor_system_prompt() -> str:
     return await get_resolved_prompt("assessor_system_template")
 
 
+async def get_clarify_system_prompt() -> str:
+    return await get_resolved_prompt("clarify_system_template")
+
 async def get_query_corpus_system_prompt() -> str:
     return await get_resolved_prompt("query_corpus_system_template")
 
