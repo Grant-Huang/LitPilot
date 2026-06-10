@@ -144,6 +144,10 @@ export function LitPilotChatPage() {
   }, [hasArtifactPane, artifactSlot, setChatLayout]);
 
   useEffect(() => {
+    setChatLayout({ streamBusy: isStreamBusy });
+  }, [isStreamBusy, setChatLayout]);
+
+  useEffect(() => {
     if (!hasArtifactPane) {
       setChatLayout({ literatureDetailOpen: false });
       setSelectedLibraryId(null);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BookOutlined, MessageOutlined } from "@ant-design/icons";
+import { Modal } from "antd";
 import { ThreeColumnLayout } from "@meso.ai/ui";
 import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
@@ -134,18 +135,36 @@ export function LitPilotAppShell({ children }: Props) {
     [isChat, navigate, pathname, pendingHref],
   );
 
+  const doSelectSession = useCallback(
+    (id: string) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("litpilot:active-session", id);
+      }
+      void handleSelectSession(id);
+      if (!isChat) navigate("/chat");
+    },
+    [handleSelectSession, isChat, navigate],
+  );
+
   const sessionColumn = (
     <LitPilotSessionColumn
       sessions={sessions}
       activeId={activeSessionId}
       onSelect={(id) => {
-        // Update localStorage before navigation so the chat page always
-        // mounts with the correct session, even if context update is delayed.
-        if (typeof window !== "undefined") {
-          localStorage.setItem("litpilot:active-session", id);
+        if (id === activeSessionId) return;
+        const busy = chatBridge?.streamBusy ?? false;
+        if (busy) {
+          Modal.confirm({
+            title: "停止当前生成？",
+            content:
+              "切换会话将中止正在进行的文献综述生成。确定要切换吗？",
+            okText: "停止并切换",
+            cancelText: "取消",
+            onOk: () => doSelectSession(id),
+          });
+        } else {
+          doSelectSession(id);
         }
-        void handleSelectSession(id);
-        if (!isChat) navigate("/chat");
       }}
       onNewSession={() => {
         if (!isChat) navigate("/chat");

@@ -19,11 +19,14 @@ type ChatLayoutBridge = {
   artifactPanel: ReactNode | null;
   literatureDetailOpen: boolean;
   artifactPanelVisible: boolean;
+  /** True when a literature generation stream is in progress (busy/settling). */
+  streamBusy: boolean;
   openArtifactPanel: () => void;
   setChatLayout: (layout: {
     hasArtifact?: boolean;
     artifactPanel?: ReactNode | null;
     literatureDetailOpen?: boolean;
+    streamBusy?: boolean;
   }) => void;
   registerArtifactPanelControl: (control: ArtifactPanelControl | null) => void;
   resetChatLayout: () => void;
@@ -35,6 +38,7 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
   const [hasArtifact, setHasArtifact] = useState(false);
   const [artifactPanel, setArtifactPanel] = useState<ReactNode | null>(null);
   const [literatureDetailOpen, setLiteratureDetailOpen] = useState(false);
+  const [streamBusy, setStreamBusy] = useState(false);
   const [artifactControl, setArtifactControl] =
     useState<ArtifactPanelControl | null>(null);
 
@@ -43,12 +47,14 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
       hasArtifact?: boolean;
       artifactPanel?: ReactNode | null;
       literatureDetailOpen?: boolean;
+      streamBusy?: boolean;
     }) => {
       if (layout.hasArtifact !== undefined) setHasArtifact(layout.hasArtifact);
       if (layout.artifactPanel !== undefined) setArtifactPanel(layout.artifactPanel);
       if (layout.literatureDetailOpen !== undefined) {
         setLiteratureDetailOpen(layout.literatureDetailOpen);
       }
+      if (layout.streamBusy !== undefined) setStreamBusy(layout.streamBusy);
     },
     [],
   );
@@ -68,6 +74,7 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
     setHasArtifact(false);
     setArtifactPanel(null);
     setLiteratureDetailOpen(false);
+    setStreamBusy(false);
   }, []);
 
   const value = useMemo(
@@ -75,6 +82,7 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
       hasArtifact,
       artifactPanel,
       literatureDetailOpen,
+      streamBusy,
       artifactPanelVisible: artifactControl?.visible ?? false,
       openArtifactPanel,
       setChatLayout,
@@ -85,6 +93,7 @@ export function ChatLayoutBridgeProvider({ children }: { children: ReactNode }) 
       hasArtifact,
       artifactPanel,
       literatureDetailOpen,
+      streamBusy,
       artifactControl,
       openArtifactPanel,
       setChatLayout,
