@@ -41,6 +41,11 @@ export type WorkflowCard = {
   summary?: string;
   steps: WorkflowStep[];
   body?: string;
+  /**
+   * Stage narrative: brief summary of what the stage did and its results.
+   * Always shown outside the collapsible thinking section.
+   */
+  narrative?: string;
   /** Frozen think snapshot when a phase completes (see literature_phase_think). */
   pinnedThink?: string;
   locked?: boolean;
@@ -330,7 +335,34 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  // Map stage key → card type for narrative assignment
+  const NARRATIVE_STAGE_MAP: Record<string, WorkflowCardType> = {
+    understand: "understand",
+    search: "search",
+    fetch: "fetch",
+    cite: "cite",
+    generate: "generate",
+    clarify: "clarify",
+  };
+
   for (const ext of opts.extensions ?? []) {
+    if (ext.name === "literature_stage_narrative") {
+      const stage = String(ext.data.stage ?? "").toLowerCase();
+      const text = String(ext.data.text ?? "").trim();
+      if (!text) continue;
+      const ctype = NARRATIVE_STAGE_MAP[stage];
+      if (!ctype) continue;
+      // For cite: it gets merged into fetch card in post-processing, so assign to fetch too
+      const targetType = ctype === "cite" ? "fetch" : ctype;
+      const target = cards.find((c) => c.type === targetType);
+      if (target) {
+        // Append narratives (e.g. fetch + cite both assigned to fetch card)
+        target.narrative = target.narrative
+          ? target.narrative + "\n" + text
+          : text;
+      }
+      continue;
+    }
     if (ext.name === "literature_phase_think") {
       const content = String(ext.data.content ?? "").trim();
       if (!content) continue;
@@ -526,6 +558,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,
+      narrative: c.narrative,
       pinnedThink: c.pinnedThink,
       locked: c.locked ?? false,
       subTopics: c.subTopics,

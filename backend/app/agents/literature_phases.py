@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agents.execution_trace import append_tool, append_workflow, record_literature_stats, upsert_stage
+from app.core.stream_events import literature_stage_narrative as _stage_narrative
 from app.agents.literature_planner import (
     format_cite_context,
     format_fetch_context,
@@ -918,6 +919,14 @@ async def stream_fetch_phase(
     out["fetch_ok"] = fetch_ok
     out["fetch_failed"] = fetch_failed
 
+    # 抓取阶段叙述（始终可见，不折叠）
+    _fetch_narrative_parts = [f"获取全文 **{fetch_ok}** 篇成功"]
+    if fetch_failed:
+        _fetch_narrative_parts.append(f"**{fetch_failed}** 篇抓取失败")
+    if failed_hosts:
+        _fetch_narrative_parts.append(f"（失败域名：{', '.join(failed_hosts[:3])}）")
+    yield _stage_narrative("fetch", "，".join(_fetch_narrative_parts) + "。")
+
 
 async def stream_cite_phase(
     *,
@@ -1012,6 +1021,13 @@ async def stream_cite_phase(
     out["cite_records"] = cite_records
     out["ref_text"] = ref_text
     out["cite_ok"] = cite_ok
+
+    # 引用抽取叙述（始终可见）
+    _cite_fail = len(cite_records) - cite_ok
+    _cite_parts = [f"已提取引用 **{cite_ok}** 条（{fmt_label}）"]
+    if _cite_fail:
+        _cite_parts.append(f"{_cite_fail} 条不完整")
+    yield _stage_narrative("cite", "，".join(_cite_parts) + "。")
 
 
 def build_fetch_queue(

@@ -97,6 +97,18 @@ def artifact_stream_delta(
     return ("artifact", payload)
 
 
+def literature_stage_narrative(stage: str, text: str) -> tuple[str, dict[str, Any]]:
+    """Per-stage narrative summary shown as conversation body (outside thinking fold)."""
+    return (
+        "extension",
+        {
+            "name": "literature_stage_narrative",
+            "version": "1.0",
+            "data": {"stage": stage, "text": text},
+        },
+    )
+
+
 def clamp_corpus_answer(text: str, *, max_chars: int = CORPUS_QA_MAX_CHARS) -> str:
     body = (text or "").strip()
     if len(body) <= max_chars:
