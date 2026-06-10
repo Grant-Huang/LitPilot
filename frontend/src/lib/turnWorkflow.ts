@@ -41,6 +41,11 @@ export type WorkflowCard = {
   summary?: string;
   steps: WorkflowStep[];
   body?: string;
+  /**
+   * Stage narrative: brief summary of what the stage did and its results.
+   * Always shown outside the collapsible thinking section.
+   */
+  narrative?: string;
   /** Frozen think snapshot when a phase completes (see literature_phase_think). */
   pinnedThink?: string;
   locked?: boolean;
@@ -304,15 +309,24 @@ export function buildTurnWorkflowFromTrace(
     const ctype = stageToCardType(stage.name);
     if (!ctype) continue;
     activeType = ctype;
-    const existing = cards.find((c) => c.type === ctype && c.state === "running");
-    if (existing) {
-      existing.state = stageState(stage.state);
-      existing.title = _cardTitle(ctype, stage.name);
+    const cardTitle = _cardTitle(ctype, stage.name);
+    // Dedup by (type, title): if a card with this exact title already exists,
+    // update it (running→done) instead of creating a duplicate. This handles
+    // backends that emit the same stage event twice (retry paths, timeout
+    // fallbacks). For "generate" cards each section has a unique title, so
+    // different sections correctly produce separate cards.
+    const existingByTitle = cards.find(
+      (c) => c.type === ctype && c.title === cardTitle,
+    );
+    if (existingByTitle) {
+      if (existingByTitle.state === "running") {
+        existingByTitle.state = stageState(stage.state);
+      }
     } else {
       cards.push({
         id: `card-${ctype}-${cards.length}`,
         type: ctype,
-        title: _cardTitle(ctype, stage.name),
+        title: cardTitle,
         state: stageState(stage.state),
         steps: [...(extByPhase[ctype] ?? [])],
         locked: ctype === "clarify",
@@ -330,7 +344,34 @@ export function buildTurnWorkflowFromTrace(
     }
   }
 
+  // Map stage key → card type for narrative assignment
+  const NARRATIVE_STAGE_MAP: Record<string, WorkflowCardType> = {
+    understand: "understand",
+    search: "search",
+    fetch: "fetch",
+    cite: "cite",
+    generate: "generate",
+    clarify: "clarify",
+  };
+
   for (const ext of opts.extensions ?? []) {
+    if (ext.name === "literature_stage_narrative") {
+      const stage = String(ext.data.stage ?? "").toLowerCase();
+      const text = String(ext.data.text ?? "").trim();
+      if (!text) continue;
+      const ctype = NARRATIVE_STAGE_MAP[stage];
+      if (!ctype) continue;
+      // For cite: it gets merged into fetch card in post-processing, so assign to fetch too
+      const targetType = ctype === "cite" ? "fetch" : ctype;
+      const target = cards.find((c) => c.type === targetType);
+      if (target) {
+        // Append narratives (e.g. fetch + cite both assigned to fetch card)
+        target.narrative = target.narrative
+          ? target.narrative + "\n" + text
+          : text;
+      }
+      continue;
+    }
     if (ext.name === "literature_phase_think") {
       const content = String(ext.data.content ?? "").trim();
       if (!content) continue;
@@ -359,6 +400,22 @@ export function buildTurnWorkflowFromTrace(
     // 合并块单独负责（见下方）。
     if (target && !target.body && !THINK_STREAM_CARD_TYPES.has(target.type)) {
       target.body = detail;
+    }
+  }
+
+  // Apply narratives captured in the serialized trace (used when rendering
+  // stored turns that have no live extensionLog). Extension-loop narratives
+  // (above) take precedence — only fill in if the card has none yet.
+  if (trace.stageNarratives) {
+    for (const [stage, text] of Object.entries(trace.stageNarratives)) {
+      if (!text) continue;
+      const ctype = NARRATIVE_STAGE_MAP[stage];
+      if (!ctype) continue;
+      const targetType = ctype === "cite" ? "fetch" : ctype;
+      const target = cards.find((c) => c.type === targetType);
+      if (target && !target.narrative) {
+        target.narrative = text;
+      }
     }
   }
 
@@ -526,6 +583,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,
+      narrative: c.narrative,
       pinnedThink: c.pinnedThink,
       locked: c.locked ?? false,
       subTopics: c.subTopics,

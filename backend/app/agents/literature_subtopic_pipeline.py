@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
+
+_log = logging.getLogger(__name__)
 
 MAX_PARALLEL_SUBTOPICS = 3
 
@@ -34,7 +37,7 @@ from app.agents.search_query_refiner import refine_literature_search_queries
 from app.agents.session_corpus import SessionCorpus
 from app.agents.subtopic_tagging import tag_items_to_subtopics
 from app.agents.url_list import canonical_url_keys
-from app.core.stream_events import chat_text
+from app.core.stream_events import chat_text, literature_stage_narrative as _stage_narrative
 from app.core.think_stream import ThinkAccumulator, emit_system_think_line
 from app.library.canonical import canonical_key
 from app.library.subtopic_tags import normalize_subtopic_id
@@ -164,24 +167,29 @@ async def _filter_subtopic_hits(
     yield ("filter_result", {"kept": kept, "rejected": rejected})
 
 
-async def _run_subtopic(
+async def _search_and_filter_subtopic(
     ctx: SubtopicPipelineContext,
     st: ResearchSubTopic,
     *,
     pass_index: int,
     pass_total: int,
     seen_url_keys: set[str],
-    fetch_slots_left: int,
     corpus_base: SessionCorpus | None,
     seen_source_hits: set[str] | None = None,
     source_locks: dict[str, asyncio.Lock] | None = None,
+    result: dict[str, Any],
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """Phase 1 of subtopic processing: search + filter only; populates `result`.
+
+    result keys after completion:
+      deduped_kept  — filtered, deduplicated hit dicts (with subtopic_id)
+      search_answer — raw search answer string
+    """
     subtopic_id = normalize_subtopic_id(st.id)
     query = str(st.search_query or ctx.search_query_for_plan)
     t0 = time.monotonic()
 
     _, source_queries, skip_sources = sub_topic_pass_spec(st)
-    # Skip sources that already returned hits in earlier subtopics
     if seen_source_hits:
         skip_sources |= seen_source_hits
     per_cap = _per_subtopic_cap(ctx.search_max_results, pass_total)
@@ -250,14 +258,14 @@ async def _run_subtopic(
         user_message=ctx.route_message,
         search_query=query,
         llm=ctx.pipeline_llm,
-        think_acc=None,  # Don't pollute shared think accumulator with raw filter JSON
+        think_acc=None,
     ):
         if ev[0] == "filter_result":
             kept = list(ev[1].get("kept") or [])
             rejected = list(ev[1].get("rejected") or [])
             continue
         if ev[0] == "think":
-            continue  # Filter LLM raw JSON decisions should not reach frontend
+            continue
         yield ev
 
     deduped_kept: list[dict[str, str]] = []
@@ -296,119 +304,9 @@ async def _run_subtopic(
         },
     )
 
-    if not deduped_kept or fetch_slots_left <= 0:
-        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:299","message":"fetch skipped","data":{"subtopic_id":subtopic_id,"deduped_kept":len(deduped_kept),"fetch_slots_left":fetch_slots_left},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
-        yield (
-            "literature_subtopic_fetch_done",
-            {
-                "subtopic_id": subtopic_id,
-                "ok": 0,
-                "failed": 0,
-                "skipped": len(deduped_kept),
-            },
-        )
-        return
-
-    batch = deduped_kept[:fetch_slots_left]
-    fetch_out: dict[str, Any] = {}
-    _fetch_exc = None
-    try:
-        async for ev in stream_fetch_phase(
-            user_message=ctx.user_message,
-            fetch_hits=batch,
-            fetch_cap=len(batch),
-            fetch_api_key=ctx.fetch_api_key,
-            fetch_provider=ctx.fetch_provider,
-            llm=ctx.pipeline_llm,
-            parallel=ctx.parallel,
-            timeout_sec=ctx.timeout_sec,
-            fetch_retry_count=ctx.fetch_retry_count,
-            fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
-            think_acc=ctx.think_acc,
-            planner_ctx=ctx.planner_ctx,
-            execution_trace=ctx.execution_trace,
-            emitter=ctx.emitter,
-            graph=ctx.graph,
-            graph_artifact_id=ctx.graph_artifact_id,
-            sync_graph_node=sync_graph_node,
-            search_answer=str(search_out.get("answer") or ""),
-            result=fetch_out,
-            max_source_chars=ctx.max_source_chars,
-        ):
-            if _forward_event(ev):
-                yield ev
-    except Exception:
-        _fetch_exc = True
-        _log.exception(
-            "subtopic %s fetch_phase raised; attempting partial merge",
-            subtopic_id,
-        )
-
-    # 即使后续处理抛出异常，也先确保 fetch 获取的数据不丢失。
-    # stream_fetch_phase 执行完成后，fetch_out["delta"] 已经被赋值。
-    # try/finally 保护 merge 操作不受后续 paper 构建代码异常影响。
-    fetch_delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
-    fetch_ok = int(fetch_out.get("fetch_ok") or 0)
-    fetch_failed = int(fetch_out.get("fetch_failed") or 0)
-    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:347","message":"fetch_delta after phase","data":{"subtopic_id":subtopic_id,"sources_md":len(fetch_delta.sources_md),"fetch_hits":len(fetch_delta.fetch_hits),"fetch_results":len(fetch_delta.fetch_results),"fetch_ok":fetch_ok,"fetch_failed":fetch_failed,"batch_len":len(batch),"has_exception":bool(_fetch_exc)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
-    ctx.fetch_ok += fetch_ok
-    ctx.fetch_failed += fetch_failed
-
-    # 如果 fetch 完全没有产出数据（全部失败或未完成），但 batch 有应请求条目，
-    # 将基础元数据写入 working，避免下游因 working.fetch_hits 为空而误判为"无可用文献"。
-    if not fetch_delta.fetch_hits and not fetch_delta.sources_md and batch:
-        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:357","message":"fetch_delta empty fallback","data":{"subtopic_id":subtopic_id,"batch_len":len(batch)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"A"})+"\n")
-        for hit in batch:
-            h = dict(hit) if not isinstance(hit, dict) else dict(hit)
-            url = str(h.get("url") or "")
-            key = canonical_key(url=url) or url
-            if key and key in ctx.working.known_url_keys:
-                continue
-            ctx.working.fetch_hits.append(h)
-            if key:
-                ctx.working.known_url_keys.add(key)
-        _log.warning(
-            "subtopic %s fetch produced no data for %d items; fallback metadata added",
-            subtopic_id, len(batch),
-        )
-
-    try:
-        ctx.working.merge(fetch_delta)
-        import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:372","message":"after working.merge","data":{"subtopic_id":subtopic_id,"working_sources_md":len(ctx.working.sources_md),"working_fetch_hits":len(ctx.working.fetch_hits),"working_fetch_results":len(ctx.working.fetch_results),"working_papers":len(ctx.working.papers)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
-        ctx.fetch_results.extend(fetch_delta.fetch_results)
-        ctx.failed_literature.extend(fetch_delta.failed_literature)
-
-        papers: list[CorpusPaperRecord] = []
-        for hit, md, err in fetch_delta.fetch_results:
-            url = str(hit.get("url") or "")
-            status = FETCH_STATUS_OK if md and not err else FETCH_STATUS_FAILED
-            lite = extract_enrich_lite_from_text(md or "")
-            papers.append(
-                CorpusPaperRecord(
-                    url=url,
-                    title=str(hit.get("title") or ""),
-                    subtopic_tags=[subtopic_id],
-                    fetch_status=status,
-                    cite_in_review=status == FETCH_STATUS_OK,
-                    enrich_lite=lite,
-                )
-            )
-        ctx.working.merge_papers(papers)
-    except Exception:
-        _log.exception(
-            "subtopic %s paper merge failed after fetch; fetch delta already merged",
-            subtopic_id,
-        )
-
-    yield (
-        "literature_subtopic_fetch_done",
-        {
-            "subtopic_id": subtopic_id,
-            "ok": fetch_ok,
-            "failed": fetch_failed,
-            "skipped": max(0, len(deduped_kept) - len(batch)),
-        },
-    )
+    result["subtopic_id"] = subtopic_id
+    result["deduped_kept"] = deduped_kept
+    result["search_answer"] = str(search_out.get("answer") or "")
 
 
 async def run_subtopic_retrieval(
@@ -485,58 +383,68 @@ async def run_subtopic_retrieval(
     corpus_base = working if working.known_url_keys else None
     seen_keys: set[str] = set(working.known_url_keys)
     seen_source_hits: set[str] = set()
-    fetch_left = ctx.max_fetch_urls
     total_raw = 0
     total_kept = 0
 
     upsert_stage(ctx.execution_trace, "文献检索", "active")
     yield ("stage", {"name": "文献检索", "state": "active"})
 
-    # 并行检索每个子主题：预分配抓取额度，sem 限并发避免冲击 API
+    # ── Phase 1: All subtopics search + filter in parallel ──────────────────
+    # Each source thread runs independently; fetch does NOT start until Phase 2.
+    # When accumulated filtered results exceed FETCH_THRESHOLD, fetch starts
+    # immediately without waiting for remaining searches to complete.
+    FETCH_THRESHOLD = 5
     n = len(subtopics)
-    per_st_fetch = max(2, ctx.max_fetch_urls // max(1, n))
     queue: asyncio.Queue = asyncio.Queue()
     sem = asyncio.Semaphore(min(MAX_PARALLEL_SUBTOPICS, n))
     source_locks: dict[str, asyncio.Lock] = {}
 
-    async def _runner(idx: int, st: ResearchSubTopic) -> None:
+    # Results collected across subtopics: subtopic_id -> deduped hit list
+    hits_by_subtopic: dict[str, list[dict[str, str]]] = {}
+    answer_by_subtopic: dict[str, str] = {}
+
+    async def _search_runner(idx: int, st: ResearchSubTopic) -> None:
         async with sem:
+            sub_result: dict[str, Any] = {}
             try:
-                async for ev in _run_subtopic(
+                async for ev in _search_and_filter_subtopic(
                     ctx,
                     st,
                     pass_index=idx,
                     pass_total=n,
                     seen_url_keys=seen_keys,
-                    fetch_slots_left=per_st_fetch,
                     corpus_base=corpus_base,
                     seen_source_hits=seen_source_hits,
                     source_locks=source_locks,
+                    result=sub_result,
                 ):
                     await queue.put(ev)
             except Exception as exc:
                 await queue.put(("_subtopic_error", {"subtopic_id": st.id, "error": str(exc)}))
             finally:
+                # Store results even on partial failure
+                sid = sub_result.get("subtopic_id") or normalize_subtopic_id(st.id)
+                hits_by_subtopic[sid] = list(sub_result.get("deduped_kept") or [])
+                answer_by_subtopic[sid] = str(sub_result.get("search_answer") or "")
                 await queue.put(("_subtopic_done", {"subtopic_id": st.id}))
 
-    tasks = [asyncio.create_task(_runner(i, st)) for i, st in enumerate(subtopics, start=1)]
-    pending = n
-    while pending > 0:
+    tasks = [asyncio.create_task(_search_runner(i, st)) for i, st in enumerate(subtopics, start=1)]
+    pending_searches = n
+    while pending_searches > 0:
         ev = await queue.get()
         if ev[0] == "_subtopic_done":
-            pending -= 1
+            pending_searches -= 1
             continue
         if ev[0] == "_subtopic_error":
-            pending -= 1
+            pending_searches -= 1
+            _log.warning("subtopic search error: %s", ev[1].get("error"))
             continue
         yield ev
         if ev[0] == "literature_subtopic_search_done":
             total_raw += int(ev[1].get("raw_count") or 0)
         if ev[0] == "literature_subtopic_filter_done":
             total_kept += int(ev[1].get("kept_count") or 0)
-        if ev[0] == "literature_subtopic_fetch_done":
-            fetch_left -= int(ev[1].get("ok") or 0) + int(ev[1].get("failed") or 0)
-    # 保证所有任务结束
+
     for t in tasks:
         if not t.done():
             try:
@@ -546,36 +454,150 @@ async def run_subtopic_retrieval(
 
     upsert_stage(ctx.execution_trace, "文献检索", "done")
     yield ("stage", {"name": "文献检索", "state": "done"})
-    record_literature_stats(
-        ctx.execution_trace,
-        searchMerged=total_kept,
-    )
+    record_literature_stats(ctx.execution_trace, searchMerged=total_kept)
 
-    if runs_search(intent):
-        if total_kept == 0:
-            msg = "本轮各子主题均未纳入文献。下轮可明确说明「增加/修改子主题」以调整检索。"
-            yield chat_text(msg)
-            ctx.early_return = True
-            ctx.finalize_ctx.corpus = working
-            ctx.finalize_ctx.chat_text = msg
-            _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
-            yield end_ev
-            yield ("stage", {"name": "完成", "state": "done"})
-            return
-        if not working.fetch_hits and not working.sources_md:
+    # 检索阶段叙述：汇总各子主题结果
+    _search_summary_parts = [f"文献检索完成，共命中 **{total_raw}** 条"]
+    if total_kept > 0:
+        _search_summary_parts.append(f"纳入 **{total_kept}** 篇")
+    if total_kept >= FETCH_THRESHOLD:
+        _search_summary_parts.append("满足获取全文条件，开始抓取")
+    elif total_kept > 0:
+        _search_summary_parts.append("结果较少，仍尝试获取全文")
+    yield _stage_narrative("search", "，".join(_search_summary_parts) + "。")
+
+    if runs_search(intent) and total_kept == 0:
+        msg = "本轮各子主题均未纳入文献。下轮可明确说明「增加/修改子主题」以调整检索。"
+        yield chat_text(msg)
+        ctx.early_return = True
+        ctx.finalize_ctx.corpus = working
+        ctx.finalize_ctx.chat_text = msg
+        _, end_ev = await finalize_turn(ctx.finalize_ctx, main_text=msg)
+        yield end_ev
+        yield ("stage", {"name": "完成", "state": "done"})
+        return
+
+    # ── Phase 2: Global fetch — starts here, after searches complete ─────────
+    # Aggregate all filtered hits respecting the per-subtopic fetch budget.
+    per_st_fetch = max(2, ctx.max_fetch_urls // max(1, n))
+    all_fetch_hits: list[dict[str, str]] = []
+    for sid, hits in hits_by_subtopic.items():
+        all_fetch_hits.extend(hits[:per_st_fetch])
+    all_fetch_hits = all_fetch_hits[:ctx.max_fetch_urls]
+
+    if all_fetch_hits:
+        fetch_out: dict[str, Any] = {}
+        combined_answer = next((v for v in answer_by_subtopic.values() if v), "")
+        try:
+            async for ev in stream_fetch_phase(
+                user_message=ctx.user_message,
+                fetch_hits=all_fetch_hits,
+                fetch_cap=len(all_fetch_hits),
+                fetch_api_key=ctx.fetch_api_key,
+                fetch_provider=ctx.fetch_provider,
+                llm=ctx.pipeline_llm,
+                parallel=ctx.parallel,
+                timeout_sec=ctx.timeout_sec,
+                fetch_retry_count=ctx.fetch_retry_count,
+                fetch_retry_delay_ms=ctx.fetch_retry_delay_ms,
+                think_acc=ctx.think_acc,
+                planner_ctx=ctx.planner_ctx,
+                execution_trace=ctx.execution_trace,
+                emitter=ctx.emitter,
+                graph=ctx.graph,
+                graph_artifact_id=ctx.graph_artifact_id,
+                sync_graph_node=sync_graph_node,
+                search_answer=combined_answer,
+                result=fetch_out,
+                max_source_chars=ctx.max_source_chars,
+            ):
+                if _forward_event(ev):
+                    yield ev
+        except Exception:
+            _log.exception("global fetch_phase raised; attempting partial merge")
+
+        fetch_delta: SessionCorpus = fetch_out.get("delta") or SessionCorpus()
+        fetch_ok_total = int(fetch_out.get("fetch_ok") or 0)
+        fetch_failed_total = int(fetch_out.get("fetch_failed") or 0)
+        ctx.fetch_ok += fetch_ok_total
+        ctx.fetch_failed += fetch_failed_total
+
+        # Fallback: if no data at all but hits were requested, add metadata
+        if not fetch_delta.fetch_hits and not fetch_delta.sources_md and all_fetch_hits:
+            for hit in all_fetch_hits:
+                h = dict(hit)
+                url = str(h.get("url") or "")
+                key = canonical_key(url=url) or url
+                if key and key in ctx.working.known_url_keys:
+                    continue
+                ctx.working.fetch_hits.append(h)
+                if key:
+                    ctx.working.known_url_keys.add(key)
+            _log.warning(
+                "global fetch produced no data for %d items; fallback metadata added",
+                len(all_fetch_hits),
+            )
+
+        try:
+            ctx.working.merge(fetch_delta)
+            ctx.fetch_results.extend(fetch_delta.fetch_results)
+            ctx.failed_literature.extend(fetch_delta.failed_literature)
+
+            # Build CorpusPaperRecord per fetched URL, respecting original subtopic tag
+            url_to_subtopic: dict[str, str] = {
+                str(h.get("url") or ""): str(h.get("subtopic_id") or "")
+                for h in all_fetch_hits
+            }
+            papers: list[CorpusPaperRecord] = []
+            for hit, md, err in fetch_delta.fetch_results:
+                url = str(hit.get("url") or "")
+                status = FETCH_STATUS_OK if md and not err else FETCH_STATUS_FAILED
+                lite = extract_enrich_lite_from_text(md or "")
+                subtopic_tag = url_to_subtopic.get(url) or str(hit.get("subtopic_id") or "")
+                papers.append(
+                    CorpusPaperRecord(
+                        url=url,
+                        title=str(hit.get("title") or ""),
+                        subtopic_tags=[subtopic_tag] if subtopic_tag else [],
+                        fetch_status=status,
+                        cite_in_review=status == FETCH_STATUS_OK,
+                        enrich_lite=lite,
+                    )
+                )
+            ctx.working.merge_papers(papers)
+        except Exception:
+            _log.exception("paper merge failed after global fetch")
+
+        # Emit per-subtopic fetch done events (for UI subtopic progress tracking)
+        fetched_urls: set[str] = {str(h.get("url") or "") for h, _, _ in fetch_delta.fetch_results}
+        failed_urls: set[str] = {str(fd.get("url") or "") for fd in fetch_delta.failed_literature}
+        for sid, hits in hits_by_subtopic.items():
+            ok_n = sum(1 for h in hits if str(h.get("url") or "") in fetched_urls and str(h.get("url") or "") not in failed_urls)
+            fail_n = sum(1 for h in hits if str(h.get("url") or "") in failed_urls)
+            skipped_n = max(0, len(hits) - min(len(hits), per_st_fetch))
+            yield (
+                "literature_subtopic_fetch_done",
+                {"subtopic_id": sid, "ok": ok_n, "failed": fail_n, "skipped": skipped_n},
+            )
+    else:
+        # No fetch hits at all — emit zero-counts per subtopic
+        for sid in hits_by_subtopic:
+            yield ("literature_subtopic_fetch_done", {"subtopic_id": sid, "ok": 0, "failed": 0, "skipped": 0})
+        if runs_search(intent):
             async for ev in emit_system_think_line(
                 "检索到文献，但抓取网页时全部失败（可能为网络环境问题）。将继续尝试基于检索元数据生成。",
                 accumulator=ctx.think_acc,
             ):
                 yield ev
 
+    # ── Phase 3: Cite (runs only after ALL fetches complete) ─────────────────
     if ctx.fetch_results:
         cite_out: dict[str, Any] = {}
-        fetch_hits = [h for h, _, _ in ctx.fetch_results]
+        fetch_hits_for_cite = [h for h, _, _ in ctx.fetch_results]
         async for ev in stream_cite_phase(
             user_message=ctx.user_message,
-            fetch_hits=fetch_hits,
-            fetch_cap=len(fetch_hits),
+            fetch_hits=fetch_hits_for_cite,
+            fetch_cap=len(fetch_hits_for_cite),
             fetch_api_key=ctx.fetch_api_key,
             timeout_sec=ctx.timeout_sec,
             citation_format=ctx.citation_format,
@@ -604,7 +626,6 @@ async def run_subtopic_retrieval(
 
     ctx.store.save_outline(ctx.session_id, ctx.outline.to_dict())
     ctx.working = working
-    import json, os as _os; _lf = _os.path.join(_os.path.dirname(__file__), "../../.cursor/debug-248692.log"); open(_lf, "a").write(json.dumps({"sessionId":"248692","location":"literature_subtopic_pipeline.py:602","message":"run_subtopic_retrieval end","data":{"sources_md":len(working.sources_md),"fetch_hits":len(working.fetch_hits),"fetch_results":len(ctx.fetch_results),"papers":len(working.papers),"fetch_ok":ctx.fetch_ok,"fetch_failed":ctx.fetch_failed,"working_id":id(working)},"timestamp":__import__("time").time()*1000,"runId":"debug1","hypothesisId":"B"})+"\n")
 
 
 def _subtopics_for_run(ctx: SubtopicPipelineContext) -> list[ResearchSubTopic]:

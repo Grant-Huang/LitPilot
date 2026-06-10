@@ -236,10 +236,29 @@ async def iter_search_events(
         # Per-source lock: if this source is being searched concurrently by
         # another subtopic, wait for it; then double-check seen_source_hits.
         lock = (source_locks or {}).setdefault(name, asyncio.Lock()) if source_locks is not None else None
+        # Per-source retry: on first failure, wait briefly and try once more.
+        _max_attempts = 2
         if lock:
             async with lock:
                 if seen_source_hits and name in seen_source_hits:
                     return name, [], False
+                for _attempt in range(_max_attempts):
+                    _name, rows, failed = await _search_one_source(
+                        name,
+                        source_q,
+                        max_results=max_results,
+                        min_year=min_year,
+                        s2_api_key=s2_api_key,
+                    )
+                    if not failed or _attempt >= _max_attempts - 1:
+                        break
+                    _log.info("source %s attempt %d failed, retrying", name, _attempt + 1)
+                    await asyncio.sleep(2.0)
+                # Record result into seen_source_hits *inside* the lock.
+                if seen_source_hits is not None and rows:
+                    seen_source_hits.add(name)
+        else:
+            for _attempt in range(_max_attempts):
                 _name, rows, failed = await _search_one_source(
                     name,
                     source_q,
@@ -247,18 +266,10 @@ async def iter_search_events(
                     min_year=min_year,
                     s2_api_key=s2_api_key,
                 )
-                # Record result into seen_source_hits *inside* the lock so that
-                # another subtopic waiting on this lock immediately sees it.
-                if seen_source_hits is not None and rows:
-                    seen_source_hits.add(name)
-        else:
-            _name, rows, failed = await _search_one_source(
-                name,
-                source_q,
-                max_results=max_results,
-                min_year=min_year,
-                s2_api_key=s2_api_key,
-            )
+                if not failed or _attempt >= _max_attempts - 1:
+                    break
+                _log.info("source %s attempt %d failed, retrying", name, _attempt + 1)
+                await asyncio.sleep(2.0)
         return _name, rows, failed
 
     tasks: dict[str, asyncio.Task[tuple[str, list[dict[str, str]], bool]]] = {}

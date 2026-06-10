@@ -134,18 +134,24 @@ export function LitPilotAppShell({ children }: Props) {
     [isChat, navigate, pathname, pendingHref],
   );
 
+  const doSelectSession = useCallback(
+    (id: string) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("litpilot:active-session", id);
+      }
+      void handleSelectSession(id);
+      if (!isChat) navigate("/chat");
+    },
+    [handleSelectSession, isChat, navigate],
+  );
+
   const sessionColumn = (
     <LitPilotSessionColumn
       sessions={sessions}
       activeId={activeSessionId}
       onSelect={(id) => {
-        // Update localStorage before navigation so the chat page always
-        // mounts with the correct session, even if context update is delayed.
-        if (typeof window !== "undefined") {
-          localStorage.setItem("litpilot:active-session", id);
-        }
-        void handleSelectSession(id);
-        if (!isChat) navigate("/chat");
+        if (id === activeSessionId) return;
+        doSelectSession(id);
       }}
       onNewSession={() => {
         if (!isChat) navigate("/chat");

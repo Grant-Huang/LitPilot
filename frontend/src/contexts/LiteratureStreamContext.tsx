@@ -20,7 +20,7 @@ import { collectExecutionTraceFromStream } from "@/lib/executionTrace";
 import { handleLiteratureExtensionEvent } from "@/lib/literatureExtensionHandlers";
 import { materializeAssistantFromStream } from "@/lib/streamMaterialize";
 import { persistActiveSession } from "@/lib/sessionStorage";
-import { deriveLiveFieldsFromStream } from "@/lib/turnWorkflow";
+import { buildTurnWorkflowFromStream, deriveLiveFieldsFromStream } from "@/lib/turnWorkflow";
 import {
   computeLiteratureStreamPhase,
   isLiteratureStreamBusy,
@@ -275,11 +275,20 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     const pendingUser = pendingUserTextRef.current;
     const { chatText } = deriveLiveFieldsFromStream(streamState);
     const trace = collectExecutionTraceFromStream(streamState);
+    // Build the full workflow (including extension events) while we still have
+    // the stream state, so the pending placeholder renders identically to the
+    // live turn without any visual jump.
+    const workflow = buildTurnWorkflowFromStream(streamState);
     const hasTrace =
       trace.stages.length > 0 ||
       trace.tools.length > 0 ||
       trace.workflows.length > 0 ||
       Boolean(trace.thinkContent);
+
+    // Reset the stream state synchronously so that LitPilotLiveTurn disappears
+    // in the same React render as the pending-assistant appears, avoiding a
+    // frame where both are visible simultaneously.
+    reset();
 
     setLiveMessages((prev) => {
       const users = prev.filter((m) => m.role === "user");
@@ -312,6 +321,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
             ? {
                 executionTrace: trace,
                 thinkContent: trace.thinkContent,
+                turnWorkflow: workflow ?? undefined,
               }
             : undefined,
         },
@@ -330,7 +340,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
         await refreshFromServer();
       } finally {
         if (turnGenerationRef.current !== turnGen) return;
-        reset();
+        // reset() was already called synchronously above.
         streamStartedRef.current = false;
         turnSessionRef.current = null;
         streamSessionRef.current = null;

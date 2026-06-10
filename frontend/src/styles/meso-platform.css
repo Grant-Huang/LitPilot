@@ -3947,6 +3947,15 @@ a.library-badge--action:hover {
   padding: 0 0 10px var(--lp-indent);
 }
 
+/* Narrative: always visible outside the collapsible body (req 7) */
+.litpilot-wf-card__narrative {
+  padding: 3px 0 4px var(--lp-indent);
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
 .litpilot-wf-card__body-text {
   font-size: var(--lp-fs-body);
   line-height: var(--lp-lh-body);

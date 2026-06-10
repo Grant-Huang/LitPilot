@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { SearchProgressView } from "./SearchProgressView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
 import { LitPilotThinkFold } from "./LitPilotThinkFold";
@@ -22,6 +23,17 @@ type Props = {
   forceOpen?: boolean;
   extensions?: Array<{ name: string; data: Record<string, unknown> }>;
 };
+
+/** Render a string with **bold** markers as inline React nodes. */
+function renderBoldText(text: string): ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
 
 function WorkflowInlineLogLine({ step }: { step: WorkflowStep }) {
   const [expanded, setExpanded] = useState(false);
@@ -240,6 +252,18 @@ export function WorkflowCardView({
           <span className="litpilot-wf-card__inline-summary">{cardSummary}</span>
         ) : null}
       </div>
+
+      {/* Narrative — always visible regardless of collapsed state */}
+      {card.narrative ? (
+        <div className="litpilot-wf-card__narrative">
+          {card.narrative.split("\n").map((line, i) => (
+            <span key={i} style={i > 0 ? { display: "block" } : undefined}>
+              {renderBoldText(line)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {open ? (
         <div className="litpilot-wf-card__body">
           {hasThinkStream ? (
@@ -249,10 +273,7 @@ export function WorkflowCardView({
               turnStreaming={streaming}
             />
           ) : null}
-          {/* understand / search 的全部内容由上方 thinkfold 渲染；只有 brief 在
-              thinkfold 之外保留结构化 RQ+关键词 body。其它非 think-stream 卡片
-              （如 outline / generate）的 body 正常渲染。 */}
-          {card.body && card.type !== "understand" && card.type !== "search" ? (
+          {card.body ? (
             <div className="litpilot-wf-card__body-text">{card.body}</div>
           ) : null}
           {card.type === "understand" && card.subTopics?.length ? (

@@ -77,6 +77,7 @@ from app.core.stream_events import (
     chat_text,
     literature_brief_assessment,
     literature_phase_think,
+    literature_stage_narrative,
     process_text,
     process_text_extension,
     turn_start,
@@ -280,18 +281,30 @@ async def stream_literature_turn(
                 )
                 break
             
-            # 生成澄清选项
-            _log.info("Confidence low (%.2f < %.2f), entering clarification round %d", 
-                      router_result.confidence, confidence_threshold, clarification_round + 1)
-            
+            # 生成澄清选项，停止当前轮次，让用户选择
+            _log.info(
+                "Confidence low (%.2f < %.2f), generating clarification options",
+                router_result.confidence, confidence_threshold,
+            )
+            yield ("stage", {"name": "等待澄清", "state": "active"})
+
             try:
                 clarify_result = await stream_clarify_user_intent(
-                    user_message=route_message,  # 原始用户输入
+                    user_message=route_message,
                     understand_narration=router_result.narration_focus or "（无初步理解）",
                     think_acc=think_acc,
                 )
-                
-                # 发送澄清选项给前端
+
+                # 构建可读的澄清消息
+                lines = [clarify_result.clarification_prompt or "请选择最符合您研究意图的方向：", ""]
+                for opt in clarify_result.options:
+                    lines.append(f"**{opt.option_id}**：{opt.narration}")
+                lines += [
+                    "",
+                    "请在回复中说明您选择的方向编号，或直接描述您希望研究的具体内容，以便系统生成更准确的检索规划。",
+                ]
+                clarify_msg = "\n".join(lines)
+
                 yield (
                     "clarification",
                     {
@@ -306,34 +319,28 @@ async def stream_literature_turn(
                         ],
                     },
                 )
-                
-                # TODO: 在真实场景下，此处应等待前端用户选择或输入
-                # 目前为演示，自动选择第一个选项
-                if clarify_result.options:
-                    selected_option = clarify_result.options[0]
-                    # 使用澄清选项的 search_aspects
-                    if selected_option.search_aspects:
-                        # 澄清选项有效：使用其 search_aspects
-                        router_result.search_aspects = selected_option.search_aspects
-                        router_result.narration_focus = selected_option.narration
-                        break
-                    else:
-                        # 澄清选项无效（search_aspects 为空）：仍使用当前理解
-                        _log.warning("Clarify option has empty search_aspects, using current understanding")
-                        break
-                else:
-                    # 澄清生成失败（无选项）：使用当前理解
-                    _log.warning("No clarify options generated, using current understanding")
-                    break
+                yield literature_stage_narrative("clarify", clarify_msg)
+                yield chat_text(clarify_msg)
+                finalize_ctx.chat_text = clarify_msg
+
             except Exception as e:
-                _log.exception("Clarification failed: %s, proceeding with current understanding", e)
-                yield (
-                    "clarification_error",
-                    {"message": f"澄清生成失败: {str(e)[:100]}"},
+                _log.exception("Clarification failed: %s", e)
+                clarify_msg = (
+                    "系统暂时无法准确理解您的研究意图，请提供更多细节，例如：\n"
+                    "• 具体的研究领域或技术方向\n"
+                    "• 希望关注的核心问题或比较维度\n"
+                    "• 目标受众或应用场景"
                 )
-                break
-            
-            clarification_round += 1
+                yield chat_text(clarify_msg)
+                finalize_ctx.chat_text = clarify_msg
+
+            yield ("stage", {"name": "等待澄清", "state": "done"})
+            understand_think = think_acc.finalize()
+            if understand_think:
+                yield literature_phase_think("understand", understand_think)
+            _, end_ev = await finalize_turn(finalize_ctx, main_text=finalize_ctx.chat_text or "")
+            yield end_ev
+            return
 
         # round 4 #7 诊断：title 不更新——三种可能：
         #   (a) should_auto_rename_session 返回 False（meta/title_auto_set/默认 title 不匹配）
@@ -387,6 +394,27 @@ async def stream_literature_turn(
             stored_outline=outline_obj,
             intent=intent.intent,
         )
+
+        # 理解阶段叙述：主题 + 子主题 + 关键词
+        _topic_label = session_title or search_query_for_plan[:60] or route_message[:60]
+        _st_titles = [st.title for st in sub_topics[:5]]
+        _understand_narrative_parts = [f"**研究主题**：{_topic_label}"]
+        if _st_titles:
+            _understand_narrative_parts.append(
+                f"**子主题**（{len(sub_topics)} 个）：{' · '.join(_st_titles)}"
+            )
+        if router_result.search_aspects:
+            _kw_all = []
+            for asp in router_result.search_aspects[:3]:
+                kw = getattr(asp, "keywords", None) or (
+                    asp.get("keywords") if isinstance(asp, dict) else None
+                ) or []
+                _kw_all.extend(str(k) for k in kw[:3])
+            if _kw_all:
+                _understand_narrative_parts.append(f"**关键词**：{' · '.join(_kw_all[:8])}")
+        _understand_narrative = "\n".join(_understand_narrative_parts)
+        yield literature_stage_narrative("understand", _understand_narrative)
+
     else:
         yield ("stage", {"name": understand_stage_name, "state": "done"})
         upsert_stage(execution_trace, understand_stage_name, "done")
