@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BookOutlined, MessageOutlined } from "@ant-design/icons";
-import { Modal } from "antd";
 import { ThreeColumnLayout } from "@meso.ai/ui";
 import { useChatLayoutBridgeOptional } from "@/contexts/ChatLayoutBridgeContext";
 import { useChatSession } from "@/contexts/ChatSessionContext";
@@ -152,19 +151,7 @@ export function LitPilotAppShell({ children }: Props) {
       activeId={activeSessionId}
       onSelect={(id) => {
         if (id === activeSessionId) return;
-        const busy = chatBridge?.streamBusy ?? false;
-        if (busy) {
-          Modal.confirm({
-            title: "停止当前生成？",
-            content:
-              "切换会话将中止正在进行的文献综述生成。确定要切换吗？",
-            okText: "停止并切换",
-            cancelText: "取消",
-            onOk: () => doSelectSession(id),
-          });
-        } else {
-          doSelectSession(id);
-        }
+        doSelectSession(id);
       }}
       onNewSession={() => {
         if (!isChat) navigate("/chat");
