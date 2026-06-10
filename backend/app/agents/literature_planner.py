@@ -90,6 +90,23 @@ def _extract_router_from_text(text: str, user_message: str) -> LiteratureRouterR
             except (ValueError, TypeError):
                 pass  # Keep default
     
+    # 验证规划有效性：如果 search_aspects 和 search_query 都为空/无效，强制降低置信度以触发澄清
+    has_search_aspects = bool(result.search_aspects and len(result.search_aspects) > 0)
+    has_search_query = bool(result.search_query and result.search_query.strip())
+    
+    if not has_search_aspects and not has_search_query:
+        # 两者都无效：强制低置信度以触发澄清
+        _log.warning(
+            "Understand generated no valid search_aspects or search_query; forcing low confidence to trigger clarification"
+        )
+        result.confidence = 0.4  # 强制低置信度
+    elif not has_search_aspects and has_search_query:
+        # 仅有 search_query（单主题情况）：适度降低置信度（如果原本很高）
+        if result.confidence > 0.8:
+            _log.info("Single-topic understanding (no search_aspects); reducing confidence from %.2f to 0.75",
+                     result.confidence)
+            result.confidence = 0.75
+    
     return result
 
 
