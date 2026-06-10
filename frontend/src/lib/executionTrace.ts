@@ -37,6 +37,10 @@ export type ExecutionTrace = {
   thinkContent?: string;
   literatureStats?: Record<string, unknown>;
   weakSubtopics?: Array<{ passIndex: number; title: string; hitsTaken: number }>;
+  /** Per-stage narrative text keyed by stage name (e.g. "understand", "fetch").
+   *  Captured from literature_stage_narrative extension events so that narrative
+   *  survives serialization and is available when rendering stored turns. */
+  stageNarratives?: Record<string, string>;
 };
 
 /** 将 msg_meta.think 合并进 execution_trace，供历史消息展示思考过程。 */
@@ -112,11 +116,28 @@ export function collectExecutionTraceFromStream(
   }
 
   const think = stream.thinkContent?.trim();
+
+  // Capture per-stage narrative text so it survives serialization and can be
+  // applied when rendering stored turns (which have no live extensionLog).
+  let stageNarratives: Record<string, string> | undefined;
+  for (const e of stream.extensionLog) {
+    if (e.payload.name !== "literature_stage_narrative") continue;
+    const data = (e.payload.data ?? {}) as Record<string, unknown>;
+    const stage = String(data.stage ?? "").toLowerCase();
+    const text = String(data.text ?? "").trim();
+    if (!stage || !text) continue;
+    stageNarratives = stageNarratives ?? {};
+    stageNarratives[stage] = stageNarratives[stage]
+      ? stageNarratives[stage] + "\n" + text
+      : text;
+  }
+
   return {
     stages: stream.stages.map((s) => ({ name: s.name, state: s.state })),
     tools,
     workflows,
     thinkContent: think || undefined,
+    stageNarratives: stageNarratives ?? undefined,
   };
 }
 
