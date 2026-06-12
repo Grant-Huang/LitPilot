@@ -257,19 +257,19 @@ async def iter_search_events(
         delay_ms=max(0, search_retry_delay_ms),
     )
 
-    async def _run_one(name: str) -> tuple[str, list[dict[str, str]], bool]:
+    async def _run_one(name: str) -> tuple[str, list[dict[str, str]], bool, bool]:
         if name in skip:
-            return name, [], False
+            return name, [], False, True
         source_q = query_for_source(name, source_queries=sq, fallback=q)
         if len(source_q) < 2:
-            return name, [], False
+            return name, [], False, True
         # Per-source lock: if this source is being searched concurrently by
         # another subtopic, wait for it; then double-check seen_source_hits.
         lock = (source_locks or {}).setdefault(name, asyncio.Lock()) if source_locks is not None else None
         if lock:
             async with lock:
                 if seen_source_hits and name in seen_source_hits:
-                    return name, [], False
+                    return name, [], False, True
                 _name, rows, failed = await _search_one_source(
                     name,
                     source_q,
@@ -291,25 +291,16 @@ async def iter_search_events(
                 s2_api_key=s2_api_key,
                 **_retry_kwargs,
             )
-        return _name, rows, failed
+        return _name, rows, failed, False
 
-    tasks: dict[str, asyncio.Task[tuple[str, list[dict[str, str]], bool]]] = {}
+    tasks: dict[str, asyncio.Task[tuple[str, list[dict[str, str]], bool, bool]]] = {}
     for name in SOURCE_NAMES:
         if name in skip:
             continue
-        source_q = query_for_source(name, source_queries=sq, fallback=q)
         tasks[name] = asyncio.create_task(_run_one(name))
-        yield (
-            "source_start",
-            {
-                "source": name,
-                "label": SOURCE_LABELS.get(name, name),
-                "query": source_q,
-                "max_results": max_results,
-            },
-        )
 
     by_name: dict[str, list[dict[str, str]]] = {}
+    skipped_names: set[str] = set()
     pending = set(tasks.keys())
     loop_deadline = time.monotonic() + SOURCE_TIMEOUT_SEC + 15.0
     try:
@@ -335,9 +326,22 @@ async def iter_search_events(
                 )
                 break
             for finished in done_set:
-                name, rows, failed = await finished
+                name, rows, failed, skipped = await finished
                 pending.discard(name)
+                if skipped:
+                    skipped_names.add(name)
+                    continue
                 by_name[name] = rows
+                source_q = query_for_source(name, source_queries=sq, fallback=q)
+                yield (
+                    "source_start",
+                    {
+                        "source": name,
+                        "label": SOURCE_LABELS.get(name, name),
+                        "query": source_q,
+                        "max_results": max_results,
+                    },
+                )
                 yield (
                     "source_done",
                     _source_done_payload(
@@ -355,6 +359,8 @@ async def iter_search_events(
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     for name in pending:
+        if name in skipped_names:
+            continue
         by_name.setdefault(name, [])
         yield (
             "source_done",
