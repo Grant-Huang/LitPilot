@@ -170,6 +170,20 @@ def build_turn_workflow_meta(
             subtopic_count=subtopic_count,
         )
 
+    # Persist progressExtensions on search card for historical view
+    extensions_log = execution_trace.get("extensions_log")
+    if extensions_log:
+        search_card = next((c for c in cards if c.get("type") == "search"), None)
+        if search_card is not None:
+            search_card["progressExtensions"] = extensions_log
+
+    # Persist subTopics on understand and search cards
+    sub_topics = execution_trace.get("sub_topics")
+    if sub_topics:
+        for card in cards:
+            if card.get("type") in ("understand", "search"):
+                card["subTopics"] = sub_topics
+
     headline_parts: list[str] = []
     search_passes = _count_tools(tools, "web_search", "done")
     if search_passes:

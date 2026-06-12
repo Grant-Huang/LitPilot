@@ -6,6 +6,15 @@ import re
 import uuid
 from typing import Any
 
+_PROGRESS_EXT_NAMES = frozenset(
+    {
+        "literature_search_source_done",
+        "literature_subtopic_search_done",
+        "literature_subtopic_filter_done",
+        "literature_subtopic_fetch_done",
+    }
+)
+
 
 def new_trace() -> dict[str, Any]:
     return {"stages": [], "tools": [], "workflows": []}
@@ -90,3 +99,14 @@ def append_workflow(
     if duration_ms is not None:
         entry["duration_ms"] = duration_ms
     trace.setdefault("workflows", []).append(entry)
+
+
+def append_extension(trace: dict[str, Any], name: str, data: dict[str, Any]) -> None:
+    """Append a streaming extension event to the trace for later persistence."""
+    if name in _PROGRESS_EXT_NAMES:
+        trace.setdefault("extensions_log", []).append({"name": name, "data": data})
+
+
+def record_subtopics(trace: dict[str, Any], subtopics: list[dict[str, Any]]) -> None:
+    """Record the subtopic plan into the trace."""
+    trace["sub_topics"] = subtopics

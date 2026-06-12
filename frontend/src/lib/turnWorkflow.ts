@@ -509,7 +509,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       id: c.id ?? `card-${i}`,
       type: c.type,
       title: c.title,
-      state: c.state ?? "done",
+      state: c.state === "running" ? "done" : (c.state ?? "done"),
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,

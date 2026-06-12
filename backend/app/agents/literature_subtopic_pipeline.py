@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator
 MAX_PARALLEL_SUBTOPICS = 3
 
 from app.agents.enrich_lite import extract_enrich_lite_from_text
-from app.agents.execution_trace import record_literature_stats, upsert_stage
+from app.agents.execution_trace import append_extension, record_literature_stats, record_subtopics, upsert_stage
 from app.agents.intent_policy import runs_fetch, runs_search
 from app.agents.literature_intent import (
     LiteratureIntentResult,
@@ -228,20 +228,29 @@ async def _run_subtopic(
             source = str(ev[1].get("source") or "")
             if hits > 0 and source and seen_source_hits is not None:
                 seen_source_hits.add(source)
+            append_extension(ctx.execution_trace, ev[0], dict(ev[1]))
+        elif ev[0] in (
+            "literature_subtopic_search_done",
+            "literature_subtopic_filter_done",
+            "literature_subtopic_fetch_done",
+        ):
+            append_extension(ctx.execution_trace, ev[0], dict(ev[1]))
         if _forward_event(ev):
             yield ev
 
     raw_hits = list(search_out.get("hits") or [])
     duration_ms = int((time.monotonic() - t0) * 1000)
+    search_done_data = {
+        "subtopic_id": subtopic_id,
+        "title": st.title,
+        "raw_count": len(raw_hits),
+        "duration_ms": duration_ms,
+    }
     yield (
         "literature_subtopic_search_done",
-        {
-            "subtopic_id": subtopic_id,
-            "title": st.title,
-            "raw_count": len(raw_hits),
-            "duration_ms": duration_ms,
-        },
+        search_done_data,
     )
+    append_extension(ctx.execution_trace, "literature_subtopic_search_done", search_done_data)
 
     kept: list[dict[str, str]] = []
     rejected: list[dict[str, Any]] = []
@@ -281,31 +290,35 @@ async def _run_subtopic(
         hit["subtopic_id"] = subtopic_id
         deduped_kept.append(hit)
 
+    filter_done_data = {
+        "subtopic_id": subtopic_id,
+        "kept_count": len(deduped_kept),
+        "kept_urls": [h.get("url") for h in deduped_kept if h.get("url")],
+        "kept": [
+            {"title": h.get("title", ""), "url": h.get("url", "")}
+            for h in kept
+            if h.get("title") or h.get("url")
+        ],
+        "rejected": rejected,
+    }
     yield (
         "literature_subtopic_filter_done",
-        {
-            "subtopic_id": subtopic_id,
-            "kept_count": len(deduped_kept),
-            "kept_urls": [h.get("url") for h in deduped_kept if h.get("url")],
-            "kept": [
-                {"title": h.get("title", ""), "url": h.get("url", "")}
-                for h in kept
-                if h.get("title") or h.get("url")
-            ],
-            "rejected": rejected,
-        },
+        filter_done_data,
     )
+    append_extension(ctx.execution_trace, "literature_subtopic_filter_done", filter_done_data)
 
     if not deduped_kept or fetch_slots_left <= 0:
+        fetch_skip_data = {
+            "subtopic_id": subtopic_id,
+            "ok": 0,
+            "failed": 0,
+            "skipped": len(deduped_kept),
+        }
         yield (
             "literature_subtopic_fetch_done",
-            {
-                "subtopic_id": subtopic_id,
-                "ok": 0,
-                "failed": 0,
-                "skipped": len(deduped_kept),
-            },
+            fetch_skip_data,
         )
+        append_extension(ctx.execution_trace, "literature_subtopic_fetch_done", fetch_skip_data)
         return
 
     batch = deduped_kept[:fetch_slots_left]
@@ -396,15 +409,17 @@ async def _run_subtopic(
             subtopic_id,
         )
 
+    fetch_done_data = {
+        "subtopic_id": subtopic_id,
+        "ok": fetch_ok,
+        "failed": fetch_failed,
+        "skipped": max(0, len(deduped_kept) - len(batch)),
+    }
     yield (
         "literature_subtopic_fetch_done",
-        {
-            "subtopic_id": subtopic_id,
-            "ok": fetch_ok,
-            "failed": fetch_failed,
-            "skipped": max(0, len(deduped_kept) - len(batch)),
-        },
+        fetch_done_data,
     )
+    append_extension(ctx.execution_trace, "literature_subtopic_fetch_done", fetch_done_data)
 
 
 async def run_subtopic_retrieval(
@@ -450,20 +465,22 @@ async def run_subtopic_retrieval(
         yield end_ev
         return
 
+    subtopic_plan = [
+        {
+            "id": st.id,
+            "title": st.title,
+            "search_query": st.search_query,
+        }
+        for st in subtopics
+    ]
     yield (
         "literature_subtopic_plan",
         {
             "count": len(subtopics),
-            "subtopics": [
-                {
-                    "id": st.id,
-                    "title": st.title,
-                    "search_query": st.search_query,
-                }
-                for st in subtopics
-            ],
+            "subtopics": subtopic_plan,
         },
     )
+    record_subtopics(ctx.execution_trace, subtopic_plan)
 
     search_llm = await get_search_llm()
     queries = [st.search_query for st in subtopics]
