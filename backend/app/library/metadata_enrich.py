@@ -67,8 +67,12 @@ def enrich_patch_from_doi(doi: str) -> dict[str, Any]:
     return patch
 
 
-def build_enrich_patch_for_record(rec: CitationRecord) -> dict[str, Any]:
-    """Resolve DOI (incl. OpenAlex) then fetch Crossref bibliometrics."""
+def build_enrich_patch_for_record(rec: CitationRecord, *, timeout: float = 15.0) -> dict[str, Any]:
+    """Resolve DOI (incl. OpenAlex) then fetch Crossref bibliometrics.
+
+    *timeout* is split across the two network calls:
+    OpenAlex gets half, Crossref gets the remainder.
+    """
     doi = resolve_doi_for_record(rec)
     if not doi:
         return {}

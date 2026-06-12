@@ -26,6 +26,9 @@ def upsert_from_citation(
 ) -> Optional[dict[str, Any]]:
     lib = lib or LibraryStore()
     url = rec.url or ""
+    doi = (rec.doi or "").strip()
+    if not url and doi:
+        url = f"https://doi.org/{doi}"
     if not url:
         return None
 

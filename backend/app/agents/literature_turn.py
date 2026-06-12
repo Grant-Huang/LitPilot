@@ -1,16 +1,8 @@
 """Multi-turn literature session orchestration (v2)."""
 from __future__ import annotations
 
-import json
 import logging
-import os
-import time
 from typing import Any, AsyncIterator
-
-_DBG_LOG = os.path.join(os.path.dirname(__file__), "../../.cursor/debug-d10a07.log")
-def _dbg(location, message, data):
-    with open(_DBG_LOG, "a") as f:
-        f.write(json.dumps({"sessionId": "d10a07", "location": location, "message": message, "data": data, "timestamp": time.time() * 1000, "runId": "run1"}) + "\n")
 
 from app.agents.agent_settings import (
     get_citation_format,
@@ -450,19 +442,6 @@ async def stream_literature_turn(
 
     working = pipe_ctx.working
     outline_obj = pipe_ctx.outline_obj or outline_obj
-    _dbg("literature_turn:after_pipeline", "pipeline completed state", {
-        "hypothesisId": "H3",
-        "working_sources_md": len(working.sources_md),
-        "working_fetch_hits": len(working.fetch_hits),
-        "working_fetch_results": len(working.fetch_results),
-        "working_papers": len(working.papers),
-        "pipe_ctx_fetch_results": len(pipe_ctx.fetch_results),
-        "pipe_ctx_cite_records": len(pipe_ctx.cite_records),
-        "pipe_ctx_failed_lit": len(pipe_ctx.failed_literature),
-        "pipe_ctx_fetch_ok": pipe_ctx.fetch_ok,
-        "pipe_ctx_fetch_failed": pipe_ctx.fetch_failed,
-        "intent": intent.intent,
-    })
 
     if intent.intent == "query_corpus":
         if not working.sources_md and not working.fetch_hits:
@@ -476,23 +455,7 @@ async def stream_literature_turn(
     if not runs_generate(intent):
         # append_urls / query_corpus 等非生成意图：如果有新抓取的数据，仍需要落库
         will_save = working is not corpus and (working.fetch_hits or working.sources_md)
-        _dbg("literature_turn:non_gen_gate", "non-generate intent gate check", {
-            "hypothesisId": "H1",
-            "working_is_corpus": working is corpus,
-            "has_fetch_hits": bool(working.fetch_hits),
-            "has_sources_md": bool(working.sources_md),
-            "will_save": will_save,
-            "intent": intent.intent,
-            "fetch_results_len": len(pipe_ctx.fetch_results),
-            "cite_records_len": len(pipe_ctx.cite_records),
-        })
         if will_save:
-            _dbg("literature_turn:non_gen", "non-generate intent, saving to library", {
-                "hypothesisId": "H1",
-                "fetch_results_len": len(pipe_ctx.fetch_results),
-                "cite_records_len": len(pipe_ctx.cite_records),
-                "intent": intent.intent,
-            })
             finalize_ctx.corpus = working
             finalize_ctx.fetch_results = pipe_ctx.fetch_results
             finalize_ctx.cite_records = pipe_ctx.cite_records
@@ -509,18 +472,7 @@ async def stream_literature_turn(
         return
 
     if not working.sources_md and not working.fetch_hits:
-        _dbg("literature_turn:gen_gate_failed", "GATE FAILED corpus empty", {
-            "hypothesisId": "H3",
-            "intent": intent.intent,
-            "fetch_ok": pipe_ctx.fetch_ok,
-            "fetch_failed": pipe_ctx.fetch_failed,
-            "fetch_results_len": len(pipe_ctx.fetch_results),
-            "papers_count": len(working.papers),
-            "working_sources_md": len(working.sources_md),
-            "working_fetch_hits": len(working.fetch_hits),
-            "corpus_sources_md": len(corpus.sources_md),
-            "corpus_fetch_hits": len(corpus.fetch_hits),
-        })
+        logger.warning("No corpus available for generate intent %s", intent.intent)
         fail_msg = "没有可用的文献材料。"
         yield chat_text(fail_msg)
         finalize_ctx.chat_text = fail_msg

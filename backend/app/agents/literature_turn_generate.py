@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator
 MAX_PARALLEL_SECTIONS = 3
 
 from app.agents.execution_trace import upsert_stage
+
 from app.agents.literature_intent import LiteratureIntentResult, build_query_prompt
 from app.agents.prompt_settings import (
     get_matrix_system_prompt,

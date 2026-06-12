@@ -1,6 +1,7 @@
 """Upsert library after a literature workflow run."""
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -10,6 +11,8 @@ from app.library.models import provenance_entry
 from app.library.store import LibraryStore
 from app.library.upsert_citation import upsert_from_citation
 from app.skills.citation_extractor import CitationFormat, CitationRecord
+
+_log = logging.getLogger(__name__)
 
 
 def upsert_library_from_run(
@@ -46,20 +49,26 @@ def upsert_library_from_run(
         }
         if ctx_md and not err:
             patch["availability"] = {"fetch_status": "ok"}
-            item = lib.upsert(patch, url=url)
-            lib.save_full_text(item["id"], ctx_md)
-            _maybe_pdf_from_url(lib, item["id"], url)
-            merged += 1 if item.get("created_at") != item.get("updated_at") else 0
-            added += 1
-            ids.append(item["id"])
+            try:
+                item = lib.upsert(patch, url=url)
+                lib.save_full_text(item["id"], ctx_md)
+                _maybe_pdf_from_url(lib, item["id"], url)
+                merged += 1 if item.get("created_at") != item.get("updated_at") else 0
+                added += 1
+                ids.append(item["id"])
+            except Exception:
+                _log.warning("upsert/save_full_text failed for %s", url[:80], exc_info=True)
         else:
             patch["availability"] = {
                 "fetch_status": "failed",
                 "cite_status": "pending",
             }
-            item = lib.upsert(patch, url=url)
-            ids.append(item["id"])
-            added += 1
+            try:
+                item = lib.upsert(patch, url=url)
+                ids.append(item["id"])
+                added += 1
+            except Exception:
+                _log.warning("upsert failed for failed-fetch item %s", url[:80], exc_info=True)
 
     for rec in cite_records:
         before = lib.find_by_url_or_doi(url=rec.url, doi=rec.doi)
@@ -129,20 +138,25 @@ def upsert_library_from_run(
 
     _sync_exports(lib)
     unique_ids = list(dict.fromkeys(ids))
-    return {
+    result = {
         "added": added,
         "merged": merged,
         "item_ids": unique_ids,
         "total": len(lib.list_items()),
     }
+    return result
 
 
 def _sync_exports(lib: LibraryStore) -> None:
-    text = lib.export_ref_list_text()
-    ref_path = lib.fs.root / "refs" / "ref-list.txt"
-    ref_path.write_text(text, encoding="utf-8")
     from app.storage.file_store import _write_json_atomic
 
+    text = lib.export_ref_list_text()
+    ref_path = lib.fs.root / "refs" / "ref-list.txt"
+    ref_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ref_path.with_suffix(".txt.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    import os
+    os.replace(str(tmp), str(ref_path))
     _write_json_atomic(lib.fs.root / "refs" / "index.json", lib.sync_legacy_index())
 
 
