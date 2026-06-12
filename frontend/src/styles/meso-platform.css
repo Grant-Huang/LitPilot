@@ -3853,6 +3853,51 @@ a.library-badge--action:hover {
   word-break: break-word;
 }
 
+/* ── 全局统一披露行 ──────────────────────────────────────────────────────
+   所有层级的条目行（检索源、过滤论文等）共享同一套视觉语言，与 .litpilot-log-line
+   基线一致：14px marker + 8px gap + body 字号 + secondary 文字。让搜索详情展开区
+   的每一行与子主题行/日志行在缩进、字号、标记列上完全对齐。
+──────────────────────────────────────────────────────────────────────── */
+.lp-disclosure-rows {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-disclosure-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-body);
+  color: var(--color-text-secondary);
+}
+
+.lp-disclosure-row__marker {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.lp-disclosure-row__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-disclosure-row__meta {
+  flex-shrink: 0;
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 .litpilot-wf-card {
   border: none;
   border-radius: 0;
@@ -3971,7 +4016,7 @@ a.library-badge--action:hover {
 }
 
 .litpilot-search-detail-group {
-  padding: 2px 0 0 var(--lp-indent);
+  padding: 4px 0 0;
 }
 
 .litpilot-search-detail-group__label {
@@ -4193,36 +4238,11 @@ a.library-badge--action:hover {
   line-height: var(--lp-lh-body);
 }
 
-.litpilot-search-topic__sources {
-  list-style: none;
-  margin: var(--lp-space-1) 0 0 var(--lp-indent);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.litpilot-search-source {
-  display: flex;
-  gap: 8px;
-  font-size: var(--lp-fs-caption);
-  color: var(--color-text-secondary);
-}
-
-.litpilot-search-source__marker {
-  flex-shrink: 0;
-  width: 14px;
-  margin-top: 2px;
-}
-
-.litpilot-search-source__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
+/* .litpilot-search-source 现已继承 .lp-disclosure-row（统一 flex/gap/字号/缩进），
+   此处只保留 source 专属的 label / hits / failure 颜色修饰。 */
 .litpilot-search-source__label {
+  flex: 1;
+  min-width: 0;
   font-weight: var(--lp-fw-medium);
   color: var(--color-text-secondary);
 }
@@ -4324,96 +4344,14 @@ a.library-badge--action:hover {
   gap: 4px;
 }
 
-/* Expandable phase rows (检索 / 过滤) inside a subtopic — must be column layout */
-.litpilot-search-phase {
-  display: flex;
-  flex-direction: column;
-}
-
-.litpilot-search-phase__head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  text-align: left;
-}
-
-.litpilot-search-phase__head:hover {
-  color: var(--color-accent);
-}
-
-.litpilot-search-phase__marker {
-  flex-shrink: 0;
-  width: 12px;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  text-align: center;
-}
-
-.litpilot-search-phase__label {
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.litpilot-search-phase__count {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-left: 2px;
-}
-
-.litpilot-search-phase__items {
-  list-style: none;
-  margin: 2px 0 4px 20px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-/* Filter kept/rejected items */
-.litpilot-filter-item {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  font-size: 12px;
-  padding: 2px 0;
-  min-width: 0;
-}
-
-.litpilot-filter-item__dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  margin-top: 4px;
-  align-self: flex-start;
-}
-
-.litpilot-filter-item--kept .litpilot-filter-item__dot {
-  background-color: #16a34a;
-}
-
-.litpilot-filter-item--rejected .litpilot-filter-item__dot {
-  background-color: var(--color-text-muted);
-  opacity: 0.45;
-}
-
+/* 过滤论文行：继承 .lp-disclosure-row 的基线（14px / 8px gap / 14px marker），
+   只添加 kept/rejected 颜色变体。7px 实心点已改用 StatusIcon。 */
 .litpilot-filter-item__title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
 }
 
 .litpilot-filter-item--rejected .litpilot-filter-item__title {
@@ -4421,9 +4359,14 @@ a.library-badge--action:hover {
   opacity: 0.75;
 }
 
+/* kept 的勾选 icon 显绿色 */
+.litpilot-filter-item--kept .lp-status-icon--done {
+  color: var(--color-success);
+}
+
 .litpilot-filter-item__verdict {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--lp-fs-caption);
   color: var(--color-text-muted);
   white-space: nowrap;
   max-width: 220px;
@@ -4432,7 +4375,7 @@ a.library-badge--action:hover {
 }
 
 .litpilot-filter-item--kept .litpilot-filter-item__verdict {
-  color: #16a34a;
+  color: var(--color-success);
 }
 
 .litpilot-composer__meta {
@@ -4634,7 +4577,7 @@ a.library-badge--action:hover {
   display: flex;
   align-items: flex-start;
   gap: var(--lp-space-2);
-  font-size: var(--lp-fs-caption);
+  font-size: var(--lp-fs-body);
   color: var(--color-text-secondary);
   line-height: var(--lp-lh-body);
 }
