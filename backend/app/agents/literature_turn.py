@@ -171,6 +171,10 @@ async def stream_literature_turn(
             "use_existing_corpus": intent.use_existing_corpus,
         },
     )
+    _log.info(
+        "intent resolved: intent=%s defer_generate=%s skip_search=%s skip_fetch=%s",
+        intent.intent, intent.defer_generate, intent.skip_web_search, intent.skip_fetch,
+    )
 
     graph_artifact_id = _new_id("wf")
     emitter = WorkflowNodeEmitter(graph_artifact_id)
@@ -453,6 +457,12 @@ async def stream_literature_turn(
             return
 
     if not runs_generate(intent):
+        _log.warning(
+            "skipping generate phase: intent=%s defer_generate=%s "
+            "fetch_hits=%d sources_md=%d",
+            intent.intent, intent.defer_generate,
+            len(working.fetch_hits), len(working.sources_md),
+        )
         # append_urls / query_corpus 等非生成意图：如果有新抓取的数据，仍需要落库
         will_save = working is not corpus and (working.fetch_hits or working.sources_md)
         if will_save:

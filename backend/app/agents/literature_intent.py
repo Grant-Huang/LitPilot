@@ -268,10 +268,17 @@ def _parse_intent_json(raw: str, user_message: str) -> LiteratureIntentResult:
         _FULL_REGEN_RE.search(msg)
     )
 
+    defer = bool(data.get("defer_generate"))
+    # new_topic / subtopic_change 的核心需求就是生成综述，LLM 无权决定是否 defer。
+    # 历史表明 LLM 有时在非首轮会话中错误输出 defer_generate: true，
+    # 导致搜索+抓取正常完成后跳过生成阶段（用户看到"检索 1 轮 · 抓取 3 篇"后直接结束）。
+    if intent in ("new_topic", "subtopic_change"):
+        defer = False
+
     return LiteratureIntentResult(
         intent=intent,
         gen_directives=str(data.get("gen_directives") or msg).strip()[:500],
-        defer_generate=bool(data.get("defer_generate")),
+        defer_generate=defer,
         skip_web_search=bool(data.get("skip_web_search")),
         skip_fetch=bool(data.get("skip_fetch")),
         use_existing_corpus=bool(data.get("use_existing_corpus", True)),
