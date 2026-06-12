@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import {
   buildSearchProgressTree,
+  searchAggregate,
+  formatSearchDone,
   subtopicDisplayTitle,
   subtopicStatusLabel,
   subtopicDone,
@@ -11,6 +13,8 @@ import {
   type FilterDetailItem,
 } from "@/lib/searchProgressTree";
 import { StatusIcon } from "./StatusIcon";
+import { KeywordChips } from "./KeywordChips";
+import { CountUp } from "./CountUp";
 
 type SubTopicDef = { id?: string; title?: string; search_query?: string };
 
@@ -47,9 +51,7 @@ function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
         <span className="lp-subtopic-plan__title">
           子主题 {index + 1}：{title}
         </span>
-        {query ? (
-          <span className="lp-subtopic-plan__query">关键词：{query}</span>
-        ) : null}
+        {query ? <KeywordChips query={query} /> : null}
       </div>
     </li>
   );
@@ -89,6 +91,8 @@ function FilterDetailRow({ item }: { item: FilterDetailItem }) {
   );
 }
 
+/** 子主题块（2 层结构）：一行标题/状态，点击展开「查看详情」披露——
+ *  把原先 检索/过滤 两层 phase 行收掉，直接平铺检索源与过滤结果两组。 */
 function SubtopicBlock({
   node,
   defaultOpen,
@@ -97,8 +101,6 @@ function SubtopicBlock({
   defaultOpen: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
   const title = subtopicDisplayTitle(node);
   const status = subtopicStatusLabel(node);
   const pending =
@@ -107,84 +109,66 @@ function SubtopicBlock({
     pending ? "running"
     : subtopicDone(node) ? "done"
     : "pending";
+  const hasDetail = node.sources.length > 0 || node.filterDetails.length > 0;
 
   return (
     <div className={`litpilot-search-topic litpilot-search-topic--${pending ? "running" : "done"}`}>
       <button
         type="button"
         className="litpilot-search-topic__head"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
+        onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
+        aria-expanded={hasDetail ? open : undefined}
+        disabled={!hasDetail}
       >
         <span className="litpilot-search-topic__marker">
           <StatusIcon status={headIconStatus} />
         </span>
         <span className="litpilot-search-topic__title">{title}</span>
         <span className="litpilot-search-topic__status">{status}</span>
+        {hasDetail ? (
+          <span className="litpilot-log-line__chevron" aria-hidden="true">
+            {open ? " ▾" : " ▸"}
+          </span>
+        ) : null}
       </button>
-      {open ? (
-        <ul className="litpilot-search-topic__sources">
-          {/* Search phase: per-source details */}
-          {node.search.status !== "pending" ? (
-            <li key="search" className="litpilot-search-phase">
-              <button
-                type="button"
-                className="litpilot-search-phase__head"
-                onClick={() => setSourcesOpen((v) => !v)}
-                aria-expanded={sourcesOpen}
-              >
-                <span className="litpilot-search-phase__marker">
-                  {phaseStatusIcon(node.search.status)}
-                </span>
-                <span className="litpilot-search-phase__label">检索</span>
-                <span className="litpilot-search-phase__count">
-                  {node.search.detail ?? (node.search.status === "running" ? "进行中…" : "完成")}
-                  <span className="litpilot-log-line__chevron" aria-hidden="true">
-                    {sourcesOpen ? " ▾" : " ▸"}
-                  </span>
-                </span>
-              </button>
-              {sourcesOpen && node.sources.length > 0 ? (
-                <ul className="litpilot-search-phase__items">
-                  {node.sources.map((src, i) => (
-                    <SourceRow key={src.label + "-" + i} source={src} />
-                  ))}
-                </ul>
-              ) : null}
-            </li>
+      <div
+        className={`litpilot-search-topic__detail-wrap${
+          open && hasDetail ? " litpilot-search-topic__detail-wrap--open" : ""
+        }`}
+      >
+        <div className="litpilot-search-topic__detail">
+          {node.sources.length > 0 ? (
+            <div className="litpilot-search-detail-group">
+              <p className="litpilot-search-detail-group__label">
+                {phaseStatusIcon(node.search.status)} 检索源
+              </p>
+              <ul className="litpilot-search-phase__items">
+                {node.sources.map((src, i) => (
+                  <SourceRow key={src.label + "-" + i} source={src} />
+                ))}
+              </ul>
+            </div>
           ) : null}
-
-          {/* Filter phase: kept/rejected details */}
-          {node.filter.status !== "pending" ? (
-            <li key="filter" className="litpilot-search-phase">
-              <button
-                type="button"
-                className="litpilot-search-phase__head"
-                onClick={() => setFilterOpen((v) => !v)}
-                aria-expanded={filterOpen}
-              >
-                <span className="litpilot-search-phase__marker">
-                  {phaseStatusIcon(node.filter.status)}
-                </span>
-                <span className="litpilot-search-phase__label">过滤</span>
-                <span className="litpilot-search-phase__count">
-                  {node.filter.detail ?? (node.filter.status === "running" ? "进行中…" : "完成")}
-                  <span className="litpilot-log-line__chevron" aria-hidden="true">
-                    {filterOpen ? " ▾" : " ▸"}
+          {node.filterDetails.length > 0 ? (
+            <div className="litpilot-search-detail-group">
+              <p className="litpilot-search-detail-group__label">
+                {phaseStatusIcon(node.filter.status)} 过滤
+                {node.filter.detail ? (
+                  <span className="litpilot-search-detail-group__count">
+                    {" "}
+                    {node.filter.detail}
                   </span>
-                </span>
-              </button>
-              {filterOpen && node.filterDetails.length > 0 ? (
-                <ul className="litpilot-search-phase__items">
-                  {node.filterDetails.map((item, i) => (
-                    <FilterDetailRow key={item.title + "-" + i} item={item} />
-                  ))}
-                </ul>
-              ) : null}
-            </li>
+                ) : null}
+              </p>
+              <ul className="litpilot-search-phase__items">
+                {node.filterDetails.map((item, i) => (
+                  <FilterDetailRow key={item.title + "-" + i} item={item} />
+                ))}
+              </ul>
+            </div>
           ) : null}
-        </ul>
-      ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -227,18 +211,23 @@ export function SearchProgressView({
     const phases = [st.search, st.filter];
     return phases.some((p) => p.status === "running");
   });
-  const aggregatePending =
-    streaming && !summary.allDone && summary.completedSubtopics < summary.totalSubtopics;
-  const aggregateLabel = summary.allDone
-    ? `已完成 ${summary.completedSubtopics}/${summary.totalSubtopics} 个子主题`
-    : aggregatePending
-      ? `正在检索 · ${summary.completedSubtopics}/${summary.totalSubtopics} 个子主题`
-      : null;
+  const agg = searchAggregate(summary);
+  const showRunning = streaming && !summary.allDone;
 
   return (
     <div className="litpilot-search-progress" role="list">
-      {aggregateLabel ? (
-        <p className="litpilot-search-progress__aggregate">{aggregateLabel}</p>
+      {showRunning ? (
+        <p className="litpilot-search-progress__aggregate litpilot-stream-shimmer">
+          检索中 · <CountUp value={agg.completed} />/{agg.total} 子主题
+          {agg.hits > 0 ? (
+            <>
+              {" · 命中 "}
+              <CountUp value={agg.hits} />
+            </>
+          ) : null}
+        </p>
+      ) : agg.total > 0 ? (
+        <p className="litpilot-search-progress__aggregate">{formatSearchDone(agg)}</p>
       ) : null}
       {summary.subtopics.map((node, i) => (
         <SubtopicBlock

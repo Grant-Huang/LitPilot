@@ -68,7 +68,7 @@ export function TurnWorkflowBlock({
                     <StatusIcon status="running" />
                   </span>
                   <p className="litpilot-log-line__text">
-                    <span className="litpilot-log-line__primary">
+                    <span className="litpilot-log-line__primary litpilot-stream-shimmer">
                       {liveProcessText.trim() || pendingText}
                     </span>
                   </p>
@@ -84,6 +84,11 @@ export function TurnWorkflowBlock({
   return (
     <div className="litpilot-turn-log">
       <div className="litpilot-turn-log__cards">
+        {streaming && liveProcessText.trim() ? (
+          <p className="litpilot-turn-log__narration litpilot-stream-shimmer">
+            {liveProcessText.trim()}
+          </p>
+        ) : null}
         {workflow.cards.map((card) => (
           <WorkflowCardView
             key={card.id}

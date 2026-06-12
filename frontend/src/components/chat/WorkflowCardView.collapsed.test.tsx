@@ -39,7 +39,8 @@ describe("WorkflowCardView collapsed head visibility", () => {
     );
   });
 
-  it("does not render the body region when the card is done and not manually opened", () => {
+  it("keeps the body collapsed (no open modifier) when the card is done and not manually opened", () => {
+    // 折叠改由 CSS（grid-rows 0fr）实现：body 仍在 DOM 中，但卡片不带 --open。
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({
@@ -49,8 +50,8 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming={false}
       />,
     );
-    expect(html).not.toContain("litpilot-wf-card__body");
-    expect(html).not.toContain("Some brief assessment text");
+    expect(html).toContain("litpilot-wf-card__body-wrap");
+    expect(html).not.toMatch(/class="[^"]*litpilot-wf-card--open/);
   });
 
   it("renders the body when forceOpen is set", () => {
@@ -64,7 +65,8 @@ describe("WorkflowCardView collapsed head visibility", () => {
     expect(html).toContain("litpilot-wf-card__body");
   });
 
-  it("shows latest tool one-liner in collapsed head for running card with tool steps", () => {
+  it("auto-expands a running streaming card and shows its tool steps in the body", () => {
+    // 克制叙事：当前运行阶段自动展开，直接展示步骤，而非折叠头里的一行轮播摘要。
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({
@@ -79,7 +81,7 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming
       />,
     );
-    expect(html).toContain("litpilot-wf-card__carousel-summary");
+    expect(html).toMatch(/class="[^"]*litpilot-wf-card--open/);
     expect(html).toContain("抓取：paper B");
   });
 
@@ -106,8 +108,7 @@ describe("WorkflowCardView collapsed head visibility", () => {
       />,
     );
     expect(html).toContain("litpilot-wf-card__head");
-    expect(html).not.toContain("litpilot-wf-card__body");
-    expect(html).not.toContain("检索 hint");
+    expect(html).not.toMatch(/class="[^"]*litpilot-wf-card--open/);
   });
 
   it("the search card also collapses to a clickable head row when done", () => {
@@ -123,7 +124,7 @@ describe("WorkflowCardView collapsed head visibility", () => {
       />,
     );
     expect(html).toContain("litpilot-wf-card__head");
-    expect(html).not.toContain("litpilot-wf-card__body");
+    expect(html).not.toMatch(/class="[^"]*litpilot-wf-card--open/);
   });
 
   it("collapsed done card head carries done modifier for CSS styling", () => {
@@ -137,7 +138,7 @@ describe("WorkflowCardView collapsed head visibility", () => {
     expect(html).toContain("litpilot-wf-card__head");
   });
 
-  it("does not render body when card is running and collapsed (think content hidden)", () => {
+  it("auto-expands a running streaming card and surfaces live think content", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({ state: "running" })}
@@ -145,7 +146,7 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming
       />,
     );
-    expect(html).not.toContain("litpilot-wf-card__body");
-    expect(html).not.toContain("思考中");
+    expect(html).toMatch(/class="[^"]*litpilot-wf-card--open/);
+    expect(html).toContain("思考中");
   });
 });

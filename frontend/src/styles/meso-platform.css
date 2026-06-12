@@ -3936,6 +3936,155 @@ a.library-badge--action:hover {
   padding: 0 0 10px var(--lp-indent);
 }
 
+/* ── 叙事流升级：高度过渡 / 旁白 / 关键词 chip / 时间线节点 ──────────────────
+   克制叙事：阶段卡片用 grid-rows 0fr↔1fr 平滑开合，避免硬渲染造成的布局跳动。
+──────────────────────────────────────────────────────────────────────────── */
+.litpilot-wf-card__body-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.litpilot-wf-card--open .litpilot-wf-card__body-wrap {
+  grid-template-rows: 1fr;
+}
+
+.litpilot-wf-card__body-wrap > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 子主题「查看详情」披露：同样用 grid-rows 平滑开合 */
+.litpilot-search-topic__detail-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.litpilot-search-topic__detail-wrap--open {
+  grid-template-rows: 1fr;
+}
+
+.litpilot-search-topic__detail-wrap > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.litpilot-search-detail-group {
+  padding: 2px 0 0 var(--lp-indent);
+}
+
+.litpilot-search-detail-group__label {
+  display: flex;
+  align-items: center;
+  gap: var(--lp-space-1);
+  margin: 4px 0 2px;
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-muted);
+}
+
+.litpilot-search-detail-group__count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 新增日志行淡入 */
+.litpilot-log-line {
+  animation: lp-fade-in 0.18s ease;
+}
+
+@keyframes lp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 流式文字微光：用于旁白字幕与运行中状态行，营造"正在生成"的活感 */
+.litpilot-stream-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-text-secondary) 0%,
+    var(--color-text-muted) 35%,
+    var(--color-text) 50%,
+    var(--color-text-muted) 65%,
+    var(--color-text-secondary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: lp-text-shimmer 2.2s linear infinite;
+}
+
+@keyframes lp-text-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* turn 级旁白字幕：把 process_text 作为连接动作的散文呈现在活动卡片上方 */
+.litpilot-turn-log__narration {
+  margin: 2px 0 8px;
+  padding-left: var(--lp-indent);
+  font-size: var(--lp-fs-body);
+  line-height: var(--lp-lh-stream);
+  color: var(--color-text-secondary);
+  position: relative;
+}
+
+/* 关键词 chip：取代原始引号查询串 */
+.lp-kw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lp-space-1);
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+}
+
+.lp-kw-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--lp-fs-caption);
+  line-height: var(--lp-lh-body);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-light);
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+/* 时间线运行节点：当前阶段的状态点加一圈淡 accent 光环，读作"活动节点" */
+.litpilot-wf-card--running .litpilot-wf-card__marker {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .litpilot-wf-card__body-wrap,
+  .litpilot-search-topic__detail-wrap {
+    transition: none;
+  }
+
+  .litpilot-log-line,
+  .litpilot-stream-shimmer {
+    animation: none;
+  }
+
+  /* 关闭微光后恢复为普通可读文字（否则保持透明会不可见） */
+  .litpilot-stream-shimmer {
+    -webkit-text-fill-color: currentColor;
+    color: var(--color-text-secondary);
+    background: none;
+  }
+}
+
 .litpilot-wf-card__body-text {
   font-size: var(--lp-fs-body);
   line-height: var(--lp-lh-body);
