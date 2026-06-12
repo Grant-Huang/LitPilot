@@ -18,7 +18,6 @@ export type WorkflowCardType =
   | "outline"
   | "generate"
   | "matrix"
-  | "revise"
   | "corpus_qa"
   | "clarify"
   | "manage";
@@ -45,8 +44,6 @@ export type WorkflowCard = {
   pinnedThink?: string;
   locked?: boolean;
   subTopics?: Array<{ id: string; title: string; search_query: string }>;
-  /** Sub-section steps for merge card types (e.g. citation in fetch). */
-  subsectionSteps?: WorkflowStep[];
   /**
    * Cached extension data for search subtopic progress (search_done / filter_done
    * / source_done). Used by SearchProgressView when live extensions are unavailable
@@ -72,7 +69,6 @@ const CARD_TITLES: Record<WorkflowCardType, string> = {
   outline: "大纲规划",
   generate: "综述生成",
   matrix: "文献矩阵",
-  revise: "章节修订",
   corpus_qa: "语料问答",
   clarify: "等待澄清",
   manage: "文献库操作",
@@ -290,7 +286,7 @@ export function buildTurnWorkflowFromTrace(
         : ext.name.includes("source") || ext.name.includes("library")
           ? "fetch"
           : ext.name.includes("section")
-            ? "revise"
+            ? "generate"
             : ext.name.includes("subtopic")
               ? "understand"
               : ext.name.includes("paper")
@@ -435,22 +431,13 @@ export function buildTurnWorkflowFromTrace(
   // 例如曾出现 "抓取全文" 显示在 "文献检索" 之前的 bug（round 3 审查 #3）。
   const CANONICAL_ORDER: WorkflowCardType[] = [
     "understand", "brief", "search", "fetch", "cite", "attributes",
-    "outline", "matrix", "generate", "revise", "corpus_qa", "clarify", "manage",
+    "outline", "generate", "matrix", "corpus_qa", "clarify", "manage",
   ];
   const orderIdx = (c: WorkflowCard) => {
     const i = CANONICAL_ORDER.indexOf(c.type);
     return i < 0 ? 999 : i;
   };
   enrichedCards.sort((a, b) => orderIdx(a) - orderIdx(b));
-
-  // Merge "cite" card into "fetch" card as subsection (引用抽取)
-  const citedFetchCard = enrichedCards.find((c) => c.type === "fetch");
-  const citeCard = enrichedCards.find((c) => c.type === "cite");
-  if (citedFetchCard && citeCard) {
-    citedFetchCard.subsectionSteps = citeCard.steps;
-    const idx = enrichedCards.indexOf(citeCard);
-    if (idx !== -1) enrichedCards.splice(idx, 1);
-  }
 
   let mergedKept = 0;
   let hasFilter = false;
@@ -529,7 +516,6 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       pinnedThink: c.pinnedThink,
       locked: c.locked ?? false,
       subTopics: c.subTopics,
-      subsectionSteps: c.subsectionSteps,
       progressExtensions: c.progressExtensions,
     })),
   };

@@ -18,7 +18,6 @@ type Props = {
   card: WorkflowCard;
   trace?: ExecutionTrace;
   streaming?: boolean;
-  defaultOpen?: boolean;
   forceOpen?: boolean;
   extensions?: Array<{ name: string; data: Record<string, unknown> }>;
 };
@@ -119,72 +118,43 @@ function renderStepLogLines(
   );
 }
 
-function FetchSubsectionBlock({
-  label,
-  steps,
-  trace,
-}: {
-  label: string;
-  steps: WorkflowStep[];
-  trace?: ExecutionTrace;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="litpilot-wf-subsection">
-      <button
-        type="button"
-        className="litpilot-wf-subsection__head"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className="litpilot-wf-subsection__marker" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
-        <span className="litpilot-wf-subsection__label">{label}</span>
-      </button>
-      {open ? renderStepLogLines(steps, trace) : null}
-    </div>
-  );
+function formatToolOneLiner(step: WorkflowStep): string | null {
+  if (step.kind !== "tool") return null;
+  if (step.status === "pending") return null;
+  const primary = step.title;
+  const duration = step.duration_ms
+    ? ` · ${(step.duration_ms / 1000).toFixed(1)}s`
+    : "";
+  const preview = step.preview ? ` · ${step.preview}` : "";
+  const tag = step.status === "running" ? "⚙ " : step.status === "error" ? "⚠ " : "✓ ";
+  const text = `${tag}${primary}${preview}${duration}`;
+  return text.length > 120 ? text.slice(0, 117) + "…" : text;
 }
 
 export function WorkflowCardView({
   card,
   trace,
   streaming = false,
-  defaultOpen = false,
   forceOpen,
   extensions = [],
 }: Props) {
   const locked = card.locked || card.type === "clarify";
   const isRunning = card.state === "running";
 
-  // null = 用户未操作（跟随系统默认）；true/false = 用户操作，锁定意图
   const [userIntent, setUserIntent] = useState<boolean | null>(null);
 
-  // 流结束后清除用户意图，让下一轮 turn 回到系统默认
   useEffect(() => {
     if (!streaming) setUserIntent(null);
   }, [streaming]);
 
-  const pinnedThink = card.pinnedThink?.trim() ?? "";
-  const hasBriefBody = Boolean(card.body?.trim());
-  const retainWhileStreaming =
-    streaming &&
-    card.state === "done" &&
-    (card.type === "understand" || card.type === "brief") &&
-    (Boolean(pinnedThink) || hasBriefBody);
+  // 卡片默认折叠：只有 forceOpen / locked / 用户手动展开 时才打开
+  const systemOpen = forceOpen || locked;
 
-  // 系统默认开/关
-  const systemOpen =
-    forceOpen ||
-    locked ||
-    isRunning ||
-    (streaming && defaultOpen) ||
-    retainWhileStreaming;
-
-  // 用户意图优先；未操作时走系统默认
   const open = userIntent !== null ? userIntent : systemOpen;
-  const canToggle = !locked && !isRunning && card.state === "done";
+
+  const canToggle = !locked;
+
+  const pinnedThink = card.pinnedThink?.trim() ?? "";
 
   const cardSummary = useMemo(
     () => summarizeWorkflowCard(card, { trace, extensions }),
@@ -196,17 +166,24 @@ export function WorkflowCardView({
     [card.steps],
   );
 
+  const toolSteps = useMemo(
+    () => visibleSteps.filter((s) => s.kind === "tool"),
+    [visibleSteps],
+  );
+
+  const headSummary = useMemo(() => {
+    if (card.state === "done" && cardSummary) return { text: cardSummary, className: "litpilot-wf-card__inline-summary" };
+    if (toolSteps.length === 0) return null;
+    const latest = toolSteps[toolSteps.length - 1];
+    const text = formatToolOneLiner(latest);
+    if (!text) return null;
+    return { text, className: "litpilot-wf-card__carousel-summary" };
+  }, [card.state, cardSummary, toolSteps]);
+
   const liveThink = trace?.thinkContent?.trim() ?? "";
-  // Search card: ONLY use pinnedThink (per-stage snapshot from literature_phase_think).
-  // The live buffer accumulates ALL stages from the turn start, so using it for search
-  // would show understand/brief stage content ("整理结构化检索规划…") in the search card
-  // (round 4 #1).
-  // understand/brief: keep current behavior — liveThink while running, pinnedThink when done.
   const thinkForCard = card.type === "search"
     ? pinnedThink
     : isRunning ? liveThink : pinnedThink;
-  // Search card shows thinkfold only when it has its own per-stage snapshot (pinnedThink).
-  // understand/brief show thinkfold live during streaming.
   const hasThinkStream = card.type === "search"
     ? Boolean(pinnedThink)
     : (card.type === "understand" || card.type === "brief") &&
@@ -220,25 +197,26 @@ export function WorkflowCardView({
         open ? " litpilot-wf-card--open" : ""
       }${streaming && isRunning ? " litpilot-wf-card--live" : ""}`}
     >
-      <div className="litpilot-wf-card__head">
+      <div
+        className="litpilot-wf-card__head"
+        onClick={canToggle ? () => setUserIntent((prev) => (prev !== null ? !prev : !systemOpen)) : undefined}
+        style={canToggle ? { cursor: "pointer" } : undefined}
+        role={canToggle ? "button" : undefined}
+        tabIndex={canToggle ? 0 : undefined}
+        aria-expanded={open}
+      >
         <span className="litpilot-wf-card__marker">
           <StatusIcon status={headStatus} />
         </span>
-        {canToggle ? (
-          <button
-            type="button"
-            className="litpilot-wf-card__title-btn"
-            onClick={() => setUserIntent((prev) => (prev !== null ? !prev : !systemOpen))}
-            aria-expanded={open}
-          >
-            {card.title}
-          </button>
-        ) : (
-          <span className="litpilot-wf-card__title">{card.title}</span>
-        )}
-        {cardSummary ? (
-          <span className="litpilot-wf-card__inline-summary">{cardSummary}</span>
+        <span className="litpilot-wf-card__title">{card.title}</span>
+        {!open && headSummary ? (
+          <span className={headSummary.className}>
+            {headSummary.text}
+          </span>
         ) : null}
+        <span className="litpilot-wf-card__chevron" aria-hidden="true">
+          {open ? " ▾" : " ▸"}
+        </span>
       </div>
       {open ? (
         <div className="litpilot-wf-card__body">
@@ -249,9 +227,6 @@ export function WorkflowCardView({
               turnStreaming={streaming}
             />
           ) : null}
-          {/* understand / search 的全部内容由上方 thinkfold 渲染；只有 brief 在
-              thinkfold 之外保留结构化 RQ+关键词 body。其它非 think-stream 卡片
-              （如 outline / generate）的 body 正常渲染。 */}
           {card.body && card.type !== "understand" && card.type !== "search" ? (
             <div className="litpilot-wf-card__body-text">{card.body}</div>
           ) : null}
@@ -273,39 +248,7 @@ export function WorkflowCardView({
               streaming={streaming && isRunning}
             />
           ) : null}
-          {card.type === "fetch" && card.subsectionSteps?.length ? (
-            <div className="litpilot-wf-subsections">
-              <FetchSubsectionBlock
-                label="文献获取"
-                steps={card.steps}
-                trace={trace}
-              />
-              <FetchSubsectionBlock
-                label="引用抽取"
-                steps={card.subsectionSteps}
-                trace={trace}
-              />
-            </div>
-          ) : (
-            <div className="litpilot-log-lines" role="list">
-              {visibleSteps.map((step) => {
-                if (step.kind === "tool" && trace) {
-                  const tool = trace.tools.find(
-                    (t, idx) => `tool-${t.id}-${idx}` === step.key,
-                  );
-                  if (tool) {
-                    return (
-                      <LitPilotToolStep
-                        key={step.key}
-                        toolCall={toolStepToState(tool)}
-                      />
-                    );
-                  }
-                }
-                return <WorkflowInlineLogLine key={step.key} step={step} />;
-              })}
-            </div>
-          )}
+          {renderStepLogLines(card.steps, trace, visibleSteps)}
         </div>
       ) : null}
     </section>

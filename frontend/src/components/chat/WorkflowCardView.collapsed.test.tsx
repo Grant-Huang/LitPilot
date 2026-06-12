@@ -15,32 +15,24 @@ function makeCard(overrides: Partial<WorkflowCard> = {}): WorkflowCard {
 }
 
 describe("WorkflowCardView collapsed head visibility", () => {
-  it("renders the head row with a clickable title button when card is done and collapsed", () => {
+  it("renders the head row as a clickable element when card is done and collapsed", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({ summary: "已完成" })}
         streaming={false}
       />,
     );
-    // Head row must exist in DOM (not hidden)
     expect(html).toContain("litpilot-wf-card__head");
-    // Title is a button so it is keyboard-activatable and clickable
-    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
     expect(html).toContain("aria-expanded");
-    // Marker and summary appear on the collapsed row
     expect(html).toContain("litpilot-wf-card__marker");
-    expect(html).toContain("litpilot-wf-card__inline-summary");
     expect(html).toContain("已完成");
   });
 
-  it("uses a ✓ marker and the card carries the done+not-open modifier class so the collapsed head can be styled as a visible block", () => {
+  it("uses a done marker and the card carries the done modifier class without open", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView card={makeCard()} streaming={false} />,
     );
-    // The collapsed marker is a done-status icon (SVG checkmark in StatusIcon).
     expect(html).toMatch(/litpilot-wf-card__marker[^>]*>.*lp-status-icon--done/);
-    // The section root carries --done but NOT --open, so the new CSS rule that
-    // highlights collapsed heads can apply.
     expect(html).toMatch(/class="[^"]*litpilot-wf-card--done/);
     expect(html).not.toMatch(
       /class="[^"]*litpilot-wf-card--done[^"]*litpilot-wf-card--open/,
@@ -57,12 +49,11 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming={false}
       />,
     );
-    // Body should be omitted entirely when collapsed.
     expect(html).not.toContain("litpilot-wf-card__body");
     expect(html).not.toContain("Some brief assessment text");
   });
 
-  it("renders the body when forceOpen is set (e.g. programmatic expansion)", () => {
+  it("renders the body when forceOpen is set", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({ summary: "3 个子主题", state: "done" })}
@@ -70,14 +61,39 @@ describe("WorkflowCardView collapsed head visibility", () => {
         forceOpen
       />,
     );
-    // Body is present.
     expect(html).toContain("litpilot-wf-card__body");
-    // The title remains a clickable button so the user can collapse the
-    // card again.
-    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
   });
 
-  it("the brief card also collapses to a clickable head row when done (same visibility rule as understand)", () => {
+  it("shows latest tool one-liner in collapsed head for running card with tool steps", () => {
+    const html = renderToStaticMarkup(
+      <WorkflowCardView
+        card={makeCard({
+          type: "fetch",
+          title: "抓取全文",
+          state: "running",
+          steps: [
+            { key: "tool-1", kind: "tool", title: "抓取：paper A", status: "done", duration_ms: 3200 },
+            { key: "tool-2", kind: "tool", title: "抓取：paper B", status: "running" },
+          ],
+        })}
+        streaming
+      />,
+    );
+    expect(html).toContain("litpilot-wf-card__carousel-summary");
+    expect(html).toContain("抓取：paper B");
+  });
+
+  it("shows card summary in collapsed head when card is done", () => {
+    const html = renderToStaticMarkup(
+      <WorkflowCardView
+        card={makeCard({ summary: "纳入 47 篇", state: "done" })}
+        streaming={false}
+      />,
+    );
+    expect(html).toContain("纳入 47 篇");
+  });
+
+  it("the brief card also collapses to a clickable head row when done", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({
@@ -89,15 +105,12 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming={false}
       />,
     );
-    // Same rule: title is a clickable button, head row exists, body hidden.
-    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
     expect(html).toContain("litpilot-wf-card__head");
     expect(html).not.toContain("litpilot-wf-card__body");
-    // The full body text is NOT rendered when collapsed.
     expect(html).not.toContain("检索 hint");
   });
 
-  it("the search card also collapses to a clickable head row when done (same visibility rule)", () => {
+  it("the search card also collapses to a clickable head row when done", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({
@@ -109,59 +122,30 @@ describe("WorkflowCardView collapsed head visibility", () => {
         streaming={false}
       />,
     );
-    // Same visibility rule: clickable title button, head row exists, body hidden.
-    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
     expect(html).toContain("litpilot-wf-card__head");
     expect(html).not.toContain("litpilot-wf-card__body");
   });
 
-  it("collapsed done card head carries --done modifier (not --open) so CSS uses accent-based background for cross-theme visibility", () => {
-    // CSS contract: .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__head
-    // uses background: color-mix(in srgb, var(--color-accent, #d97706) 6%, transparent)
-    // and border-left: color-mix(in srgb, var(--color-accent, #d97706) 38%, transparent)
-    // ensuring the card is never invisible on any theme.
+  it("collapsed done card head carries done modifier for CSS styling", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView card={makeCard()} streaming={false} />,
     );
-    // Root element must have --done class.
     expect(html).toMatch(/class="[^"]*litpilot-wf-card--done/);
-    // Root element must NOT have --open class, so the collapsed-head rule applies.
     expect(html).not.toMatch(
       /class="[^"]*litpilot-wf-card--done[^"]*litpilot-wf-card--open/,
     );
-    // The head row must exist for the CSS rule to target it.
     expect(html).toContain("litpilot-wf-card__head");
-    // The title button must exist and be visible.
-    expect(html).toMatch(/<button[^>]*class="[^"]*litpilot-wf-card__title-btn/);
   });
 
-  it("collapsed done card title button text is rendered with visible color", () => {
-    // The CSS rule .litpilot-wf-card--done:not(.litpilot-wf-card--open) .litpilot-wf-card__title-btn
-    // sets color: var(--color-text-secondary, #555) which is always visible.
-    const html = renderToStaticMarkup(
-      <WorkflowCardView card={makeCard()} streaming={false} />,
-    );
-    // Verify the title text is actually rendered (not hidden/truncated to nothing).
-    expect(html).toContain("理解研究问题");
-    // The title appears inside a button element for accessibility.
-    expect(html).toMatch(
-      /<button[^>]*class="[^"]*litpilot-wf-card__title-btn[^"]*"[^>]*>[\s\S]*理解研究问题/,
-    );
-  });
-
-  it("hides 进行中 when think stream is active", () => {
+  it("does not render body when card is running and collapsed (think content hidden)", () => {
     const html = renderToStaticMarkup(
       <WorkflowCardView
         card={makeCard({ state: "running" })}
         trace={{ stages: [], tools: [], workflows: [], thinkContent: "思考中" }}
         streaming
-        defaultOpen
       />,
     );
-    // Card head should not say "进行中" (it uses StatusIcon with "等待" for pending).
-    // The think-fold header may show "进行中" via StatusIcon aria-label; that is correct.
-    const headMatch = html.match(/<div class="litpilot-wf-card__head">[\s\S]*?<\/div>/);
-    if (headMatch) expect(headMatch[0]).not.toContain("进行中");
-    expect(html).toContain("思考中");
+    expect(html).not.toContain("litpilot-wf-card__body");
+    expect(html).not.toContain("思考中");
   });
 });

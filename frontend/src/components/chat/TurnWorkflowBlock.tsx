@@ -29,10 +29,6 @@ export function TurnWorkflowBlock({
   liveProcessText = "",
 }: Props) {
   const bridge = useChatLayoutBridgeOptional();
-  const runningId = useMemo(() => {
-    const running = workflow.cards.find((c) => c.state === "running");
-    return running?.id ?? null;
-  }, [workflow.cards]);
 
   const completion = useMemo(
     () =>
@@ -94,7 +90,6 @@ export function TurnWorkflowBlock({
             card={card}
             trace={trace}
             streaming={streaming}
-            defaultOpen={card.id === runningId}
             forceOpen={card.type === "clarify"}
             extensions={extensions}
           />
