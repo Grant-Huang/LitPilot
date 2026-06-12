@@ -14,7 +14,7 @@ LitPilot 是一款面向科研人员的**文献综述助手**。用户用自然�
 |------|------|------|
 | 主会话窗口 | `/chat` | 文献综述对话、流程可视化、流式输出、右侧 Artifact 面板 |
 | 文献库 | `/library` | 引用索引浏览、元数据编辑、按状态/标签筛选、引用复制导出 |
-| 设置 - 个人 | `/settings/personal` | 个人偏好（引用格式） |
+| 设置 - 个人 | `/settings/personal` | 个人偏好（引用格式固定 APA，已无可切换项） |
 | 设置 - 管理员 | `/settings/admin/*` | 凭据、实例、能力（检索/抓取）、Prompts、存储 |
 
 ### 0.3 顶层数据流（一次综述）
@@ -121,10 +121,11 @@ LitPilot 是一款面向科研人员的**文献综述助手**。用户用自然�
 | `outline` | 大纲规划 |
 | `generate` | 综述生成 |
 | `matrix` | 文献矩阵 |
-| `revise` | 章节修订 |
 | `corpus_qa` | 语料问答 |
 | `clarify` | 等待澄清 |
 | `manage` | 文献库操作 |
+
+> 精简后已移除 `revise`（章节修订）。意图缩减为 new_topic / append_urls / query_corpus 三类，详见第 1.9 节与 `docs/flow-card-logic-and-prompts.md`。
 
 #### 1.4.2 卡片状态与视觉
 - 状态：`pending | running | done | error`。
@@ -144,7 +145,7 @@ LitPilot 是一款面向科研人员的**文献综述助手**。用户用自然�
   → 逻辑检索 · arXiv（21 篇）
   → 混合检索 · OpenAlex（48 篇）
 ⚙ 抓取 43/150 · 已获取 12 篇，4 篇超时，27 篇待入队
-✓ 引用抽取 · 12 篇完成 · APA/ACM 格式化 · 3s
+✓ 引用抽取 · 12 篇完成 · APA 格式化 · 3s
 ○ 综述生成 · 逐章流式生成…（进行中）
 ```
 
@@ -182,7 +183,7 @@ LitPilot 是一款面向科研人员的**文献综述助手**。用户用自然�
 
 #### 1.5.2 链接上传
 - "+"附件按钮，接受 `.txt/.csv/.json`，从中解析 http(s) 链接。
-- **首轮禁用上传**（new_topic，须先用文字描述主题）；首条助手回复后开启（append_urls 多轮可追加链接）。
+- **首轮（第 1 轮）禁用上传**（new_topic，须先用文字描述主题）；**第 2 轮起的追加轮次开启上传**（append_urls 可上传 URL 列表文件并追加文献）。
 - 解析后超出 `max_fetch_urls`（来自设置，默认上限 50）时按设置保留前 N 条。
 - 已选链接以可关闭标签显示"N 个链接"。
 - Toast 反馈：
@@ -262,7 +263,7 @@ data: {}
 - `meta.json`：标题、created_at、updated_at、pinned 等。
 - `messages.jsonl`：用户/助手消息（extras 序列化为 JSON）。
 - `corpus.json`：本会话文献语料。
-- `review-latest.md` / `review-vN.md`：最新与版本化综述（v1, v1a, v1b, v2…）。
+- `review-latest.md` / `review-vN.md`：最新与版本化综述（v1, v2, v3…，每次重写递增，无字母后缀）。
 - `matrix-latest.md`：最新文献矩阵。
 - `outline.json`：大纲（多子主题时）。
 
@@ -286,7 +287,7 @@ data: {}
 | **大纲 Outline** | 多子主题大纲结构（主题、研究问题、子主题、章节结构） | artifact `literature-outline+json` |
 | **综述 Review** | 最新综述 markdown，含版本下拉（latest / v1 / v1a…）+ 导出按钮 | artifact `markdown`（delivery=artifact） |
 | **矩阵 Matrix** | 文献矩阵（论文 × 属性：问题/方法/发现） | artifact `literature-matrix+markdown` |
-| **文献 Literature** | 本会话收录文献（标题、作者、年份、摘要、DOI/URL、引用，可按子主题标签筛选，可导出 APA/ACM） | 后端 `GET /api/sessions/{id}/library` |
+| **文献 Literature** | 本会话收录文献（标题、作者、年份、摘要、DOI/URL、引用，可按子主题标签筛选，导出 APA） | 后端 `GET /api/sessions/{id}/library` |
 
 **可见性与提示：**
 - 存在综述产物即认为有 Artifact 面板。
@@ -295,19 +296,21 @@ data: {}
 
 ### 1.9 意图路由与计划确认
 
-#### 1.9.1 意图类型（后端判定）
-- `new_topic`：首轮，完整流水线。
-- `subtopic_change`：用户显式修改子主题。
-- `append_urls`：多轮追加链接（不重新检索）。
-- `review_refine`：基于用户编辑重生成（不检索/抓取）。
-- `query_corpus`：对已有语料提问（不生成综述，走聊天气泡）。
-- `short_answer`：意图不明时的兜底。
+#### 1.9.1 意图类型（后端判定，精简为 3 类）
+- `new_topic`：首轮（无语料），完整流水线（理解→检索→抓取→引用→综述→矩阵）。
+- `append_urls`：第 2 轮起含 URL/上传链接，**抓取用户 URL → 追加文献 → 基于扩充语料重写整篇综述**（不重新检索）。
+- `query_corpus`：**其余一切情况的兜底**，LLM 依据已生成综述与语料回答问题（不生成综述，走聊天气泡）。
+
+判定顺序：①首轮→new_topic；②第 2 轮起含 URL→append_urls；③其余→query_corpus。已删除 `subtopic_change`、`review_refine`、`short_answer` 分支。
+
+详见 `docs/flow-card-logic-and-prompts.md`。
 
 #### 1.9.2 计划确认门（plan_confirm）
 当开启大纲模式且首轮 `plan_confirm=true`：
 - 生成大纲后**在抓取前暂停**，发出 `literature_clarification`（kind=outline_confirm）。
-- 显示澄清卡（type=clarify，强制展开），列出已生成子主题，提供：①确认继续；②修改大纲重生成；③增删子主题。
+- 显示澄清卡（type=clarify，强制展开），列出已生成子主题，提供：①确认继续；②选择其它推荐研究方向重生成。
 - 用户下一条消息触发 `resume_mode=generate_only`（跳过检索）。
+- 注：本门用于首轮 new_topic 的方向确认；不再支持会话中"增删/修改子主题"操作。
 
 #### 1.9.3 澄清卡内容示例
 ```
@@ -318,8 +321,7 @@ data: {}
  • 子主题 2: 信任与安全
 你可以：
  1. 确认继续撰写综述
- 2. 修改大纲并重新生成
- 3. 添加/删除子主题
+ 2. 选择其它推荐研究方向并重新生成
 ```
 
 ### 1.10 主会话异常与边界
@@ -338,7 +340,7 @@ data: {}
 ## 2. 文献库（`/library`）
 
 ### 2.1 用途
-集中管理综述会话中自动抽取/生成的全部引用：浏览、查看、筛选、编辑元数据，支持 APA/ACM 格式化，并提供被引/他引等文献计量数据。
+集中管理综述会话中自动抽取/生成的全部引用：浏览、查看、筛选、编辑元数据，统一按 APA 格式化，并提供被引/他引等文献计量数据。
 
 ### 2.2 页面布局：两栏
 - 头部：标题"文献库"；副标题"共 {count} 条文献"；操作按钮"刷新元数据"（并行从 Crossref/OpenAlex 拉取被引/参考文献，默认并行 4，范围 1–12）。
@@ -370,7 +372,7 @@ data: {}
 - **出处/年份/计量**：`{venue} · {year} · 被引 {n} / 他引 {n}`。
 - **标签**：最多显示 3 个，溢出显示"+n"。
 - **右侧操作**：
-  - "引用"下拉：复制 APA / 复制 ACM（按 listIndex 格式化后复制到剪贴板）。
+  - "引用"按钮：复制 APA（按 listIndex 格式化后复制到剪贴板）。
   - 收藏按钮 ★/☆（切换 `starred`，调 `PATCH /library/items/{id}/star`）。
   - 删除按钮（确认弹窗："从文献库删除该条？仅移除库内记录，不影响已生成的综述文件。"）。
 - **徽标行**（最多 3 个，按优先级）：抓取失败 / 引用失败 / 全文（点开全文 Tab）/ PDF / DOI（跳 doi.org）/ 原文（跳 url）/ "{n} 个综述"（点开综述 Tab）。
@@ -382,7 +384,7 @@ data: {}
 
 1. **摘要**（始终）：书目区（标题/作者/出处/引证/DOI/出版社）+ 内联 DOI 编辑器 + 摘要正文。摘要优先取 `item.abstract`（>40 字且无 URL 视为有效），否则从全文抽取并标注"以下摘自抓取正文中的 Abstract 段落。"；无则"暂无摘要。"
 2. **全文**（仅 `has_full_text`）：markdown 渲染（净化，最多 12 万字）；不可用时"全文尚未落盘或抓取失败。"
-3. **元数据**（始终）：被引/他引（含"他引预览"前 10 条参考文献）、DOI 编辑器、URL、卷/期/页码、出版社、标签编辑器、收录综述列表、APA/ACM 引用文本。
+3. **元数据**（始终）：被引/他引（含"他引预览"前 10 条参考文献）、DOI 编辑器、URL、卷/期/页码、出版社、标签编辑器、收录综述列表、APA 引用文本。
 4. **综述**（仅 provenance 非空）：列出引用了本条的会话（标题可点击跳转该会话、文中引用序号"文中引用 [3]"、会话首问）；来自 `GET /library/items/{id}/related-sessions`，失败回退本地 provenance。
 5. **PDF**（仅 `has_pdf` 且 full_text.path 含 `pdfs/`）：iframe 内嵌 `/api/library/pdfs/{filename}`。
 
@@ -412,7 +414,7 @@ type LibraryItem = {
     fetch_status?: "ok"|"failed"|"blocked"|"pending";
     cite_status?: "ok"|"failed"|"partial"|"pending";
   };
-  citations?: Record<string,string>;    // {"apa": "...", "acm": "..."}（含 [n] 占位）
+  citations?: Record<string,string>;    // {"apa": "..."}（含 [n] 占位；仅 APA）
   provenance?: Array<{ session_id: string; role: string; turn_at?: string; session_title?: string; review_ref_index?: number }>;
   tags?: string[];            // 最多 20
   subtopic_tags?: string[];
@@ -437,18 +439,17 @@ type LibraryItem = {
 
 ### 2.7 引用抽取与格式化
 
-#### 2.7.1 两种格式
+#### 2.7.1 引用格式（仅 APA）
 - **APA**：`[1] A. Author (2020). Deep Learning. Nature. https://doi.org/10.1038/x`
-- **ACM**：`[1] A. Author. 2020. Deep Learning. Nature. DOI:https://doi.org/10.1038/x`
 
-引用文本以 `[n]` 占位存储于 `item.citations.apa/acm`，渲染/复制时用真实列表序号替换。
+引用文本以 `[n]` 占位存储于 `item.citations.apa`，渲染/复制时用真实列表序号替换。已移除 ACM 格式与个人切换项。
 
 #### 2.7.2 抽取流水线
 1. **出版商识别**：从域名识别 arxiv / dblp / acm / ieee / semantic_scholar / elsevier / researchgate / google_scholar / 通用；其中 elsevier、researchgate、google_scholar 为**屏蔽源**（直接报错）。
 2. **元数据层合并**：出版商 API（arXiv Atom、Semantic Scholar API）+ HTML 引用 meta（Highwire/Google Scholar）+ 正文抽取（标题/作者/年份/DOI/摘要）。
 3. **成功判定**：有效标题（>8 字、无导航关键词、非纯哈希）+ 作者或年份至少其一 + 学术信号（有 DOI / 可信出版商 / arXiv URL）。
 4. **富化**：OpenAlex（DOI 或按标题/作者/年份反查）+ Crossref（被引、参考文献、补全元数据）。
-5. **入库**：按 canonical key（DOI 优先，否则 URL）去重 upsert；分配 display_index；生成 APA/ACM；写 provenance（session_id、role、时间戳）；同步兼容导出。
+5. **入库**：按 canonical key（DOI 优先，否则 URL）去重 upsert；分配 display_index；生成 APA 引用；写 provenance（session_id、role、时间戳）；同步兼容导出。
 6. **元数据不足不写半条**：正文中标注"待核实"。
 
 ### 2.8 文献库接口
@@ -479,13 +480,9 @@ type LibraryItem = {
 ## 3. 设置 — 个人偏好（`/settings/personal`）
 
 - 路由：`/settings/personal`；`/settings` 默认重定向至此。
-- 唯一字段：**参考文献格式** `citation_format`（下拉：`apa` / `acm`，默认 `apa`）。
-  - 提示："影响引用抽取与综述参考文献章节格式。"
-  - 仅在变更（dirty）时启用"保存"，成功提示"个人偏好已保存"。
-- 接口：
-  - `GET /api/settings/personal/preferences` → `{ citation_format }`
-  - `PUT /api/settings/personal/preferences`（body `{ citation_format }`）
-- 持久化文件：`/config/personal.preferences.json`；保存后失效本地缓存。
+- **引用格式固定为 APA**，不再提供 APA/ACM 切换项（原 `citation_format` 偏好已移除）。
+- 该页面现无可配置字段；可保留为占位说明页，或在导航中隐去。
+- 如保留接口，`GET /api/settings/personal/preferences` 恒返回 `{ citation_format: "apa" }`（只读）。
 
 ---
 
@@ -493,7 +490,7 @@ type LibraryItem = {
 
 ### 4.1 配置体系与优先级
 - **系统设置（管理员）**：凭据 / 实例 / 能力 / Prompts / 存储，落盘 `/config/system.*.json`。
-- **个人设置**：引用格式，落盘 `/config/personal.preferences.json`。
+- **个人设置**：引用格式已固定 APA，无可切换项（如保留 `/config/personal.preferences.json` 仅为只读占位）。
 - **优先级**：系统配置 > `.env` 环境变量 > `deploy.defaults.json`。秘钥若系统配置缺省则回退 `.env`（TAVILY_API_KEY、JINA_API_KEY、OPENAI_API_KEY 等）。
 - 运行时把系统+个人+env 合并为单一扁平 dict 传给 agents。
 - 旧版 `agent.json` 首次运行迁移到 v2（幂等）。
@@ -666,7 +663,7 @@ provider 为 jina 时显示凭据绑定（`web_fetch-ref`，类型 jina）。
 | `system.instances.json` | LLM 实例绑定 |
 | `system.capabilities.json` | 能力参数 + 引用 + Prompts |
 | `system.storage.json` | Turso 连接 |
-| `personal.preferences.json` | 个人偏好（引用格式） |
+| `personal.preferences.json` | 个人偏好（引用格式已固定 APA，只读占位） |
 | `deploy.defaults.json` | 部署默认（非敏感） |
 
 ---
@@ -682,6 +679,7 @@ provider 为 jina 时显示凭据绑定（`web_fetch-ref`，类型 jina）。
 - 多子主题（multi-aspect brief）：按子主题并行检索，可开 outline_mode + plan_confirm 在生成前确认大纲。
 - 检索后端可选：tavily / brave / multi_academic / openalex / native；抓取后端：jina / native（native 支持 PDF 解析 pypdf / pymupdf4llm）。
 - LLM 提供商：openai / zhipu / alibaba / minimax_intl / minimax_cn / ollama。
+- **意图精简为 3 类**：new_topic（首轮完整流水线）、append_urls（第 2 轮起追加 URL 并基于扩充语料重写综述）、query_corpus（其余兜底，依据已生成综述回答）。引用格式固定 APA。流程与提示词详见 `docs/flow-card-logic-and-prompts.md`。
 
 ---
 
@@ -691,20 +689,21 @@ provider 为 jina 时显示凭据绑定（`web_fetch-ref`，类型 jina）。
 - **流式优先**：综述/进度必须真流式（SSE 透传，避免代理缓冲；前端 rAF 批渲染 + 120s 看门狗）。
 - **秘钥安全**：API 返回一律掩码，明文只存服务端配置文件 / env。
 - **成本可见**：检索/抓取/LLM 均可能产生第三方费用，UI 不隐藏并行度等放大成本的设置。
-- **国际化**：界面文案中文为主（可扩展），引用格式支持 APA/ACM 切换。
+- **国际化**：界面文案中文为主（可扩展）；引用格式固定 APA。
 
 ---
 
 ## 7. 复制开发验收清单（节选）
 - [ ] 四列布局、响应式宽度、Artifact 开合收窄主区。
 - [ ] 会话 CRUD + 置顶 + 本地激活会话恢复。
-- [ ] SSE 流式 + 流程卡片（13 种类型）+ 日志行展开 + 检索进度树 + 完成栏 CTA。
-- [ ] Composer：多行输入、回车发送、链接上传（首轮禁用）、停止、静默提示、并行度芯片。
-- [ ] 意图路由 6 类 + 计划确认门 + 澄清卡。
+- [ ] SSE 流式 + 流程卡片（精简后 12 种，已移除 revise 章节修订）+ 日志行展开 + 检索进度树 + 完成栏 CTA。
+- [ ] Composer：多行输入、回车发送、链接上传（首轮禁用、第 2 轮起启用）、停止、静默提示、并行度芯片。
+- [ ] 意图路由 3 类（new_topic / append_urls / query_corpus）+ 计划确认门 + 澄清卡。
+- [ ] append_urls：追加文献后基于扩充语料重写整篇综述（v(n+1)）。
 - [ ] Artifact 四 Tab（大纲/综述/矩阵/文献）+ 综述版本下拉 + 导出。
-- [ ] 文献库两栏 + 搜索/筛选/标签 + 卡片徽标 + 详情五 Tab + DOI/标签编辑 + 刷新元数据 + 引用复制（APA/ACM）。
-- [ ] 引用抽取流水线（出版商识别、屏蔽源、成功判定、Crossref/OpenAlex 富化、去重 upsert、provenance）。
-- [ ] 个人设置（引用格式）+ 管理员五页（概览/凭据/实例/能力/Prompts/存储）+ 掩码 + 测试 + 优先级合并。
+- [ ] 文献库两栏 + 搜索/筛选/标签 + 卡片徽标 + 详情五 Tab + DOI/标签编辑 + 刷新元数据 + 引用复制（APA）。
+- [ ] 引用抽取流水线（出版商识别、屏蔽源、成功判定、Crossref/OpenAlex 富化、去重 upsert、provenance）；引用格式固定 APA。
+- [ ] 管理员五页（概览/凭据/实例/能力/Prompts/存储）+ 掩码 + 测试 + 优先级合并（个人设置无引用格式切换）。
 - [ ] 统一响应结构、原子写、FileLock、看门狗、掩码安全。
 
 ---
