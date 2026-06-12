@@ -211,6 +211,8 @@ async def stream_search_phase(
                     skip_sources=skip_sources,
                     source_locks=source_locks,
                     seen_source_hits=seen_source_hits,
+                    search_retry_count=search_retry_count,
+                    search_retry_delay_ms=fetch_retry_delay_ms,
                 ):
                     if kind == "source_start":
                         await ma_queue.put(
@@ -428,6 +430,7 @@ async def _stream_expanded_multi_academic_by_source(
     total: int,
     search_max_results: int,
     search_retry_count: int,
+    fetch_retry_delay_ms: int,
     source_mode: str,
     upload_count: int,
     upload_urls: list[str],
@@ -524,6 +527,8 @@ async def _stream_expanded_multi_academic_by_source(
         include_domains=include_domains,
         exclude_domains=exclude_domains,
         s2_api_key=s2_key or "",
+        search_retry_count=search_retry_count,
+        search_retry_delay_ms=fetch_retry_delay_ms,
     ):
         if kind == "source_start":
             yield ("literature_search_source_start", payload)

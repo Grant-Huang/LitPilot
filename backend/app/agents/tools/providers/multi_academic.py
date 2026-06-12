@@ -119,20 +119,43 @@ async def _search_one_source(
     max_results: int,
     min_year: int,
     s2_api_key: str,
-) -> tuple[list[dict[str, str]], bool]:
-    """Run one source for one query; holds the global per-source slot."""
+    max_retries: int = 0,
+    delay_ms: int = 500,
+) -> tuple[str, list[dict[str, str]], bool]:
+    """Run one source for one query; holds the global per-source slot.
+
+    Retries up to *max_retries* additional times when the source returns
+    zero results or fails.  Breaks out of the retry loop as soon as any
+    attempt yields hits > 0.
+    """
     per_source = max(1, int(max_results))
+    attempts = max(0, max_retries) + 1
+    best_rows: list[dict[str, str]] = []
+    best_failed = True
+
     async with source_slot(name):
-        return await _bounded(
-            name,
-            _source_coro(
+        for attempt in range(attempts):
+            _, rows, failed = await _bounded(
                 name,
-                query,
-                per_source=per_source,
-                min_year=min_year,
-                s2_api_key=s2_api_key,
-            ),
-        )
+                _source_coro(
+                    name,
+                    query,
+                    per_source=per_source,
+                    min_year=min_year,
+                    s2_api_key=s2_api_key,
+                ),
+            )
+            if rows:
+                best_rows = rows
+                best_failed = failed
+                break
+            if not failed:
+                best_rows = rows
+                best_failed = False
+            if attempt + 1 < attempts and delay_ms > 0:
+                await asyncio.sleep(delay_ms / 1000.0)
+
+    return name, best_rows, best_failed
 
 
 async def _bounded(name: str, coro) -> tuple[str, list[dict[str, str]], bool]:
@@ -209,6 +232,8 @@ async def iter_search_events(
     skip_sources: frozenset[str] | None = None,
     source_locks: dict[str, asyncio.Lock] | None = None,
     seen_source_hits: set[str] | None = None,
+    search_retry_count: int = 0,
+    search_retry_delay_ms: int = 500,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Single pass: parallel across sources (each source at most one slot).
 
@@ -226,6 +251,11 @@ async def iter_search_events(
     per_source = max(1, int(max_results))
     sq = dict(source_queries or {})
     skip = skip_sources or frozenset()
+
+    _retry_kwargs = dict(
+        max_retries=max(0, search_retry_count),
+        delay_ms=max(0, search_retry_delay_ms),
+    )
 
     async def _run_one(name: str) -> tuple[str, list[dict[str, str]], bool]:
         if name in skip:
@@ -246,6 +276,7 @@ async def iter_search_events(
                     max_results=max_results,
                     min_year=min_year,
                     s2_api_key=s2_api_key,
+                    **_retry_kwargs,
                 )
                 # Record result into seen_source_hits *inside* the lock so that
                 # another subtopic waiting on this lock immediately sees it.
@@ -258,6 +289,7 @@ async def iter_search_events(
                 max_results=max_results,
                 min_year=min_year,
                 s2_api_key=s2_api_key,
+                **_retry_kwargs,
             )
         return _name, rows, failed
 
@@ -389,6 +421,8 @@ async def iter_multi_pass_by_source_events(
     include_domains: list[str] | tuple[str, ...] | None = None,
     exclude_domains: list[str] | tuple[str, ...] | None = None,
     s2_api_key: str = "",
+    search_retry_count: int = 0,
+    search_retry_delay_ms: int = 500,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Multi pass: one worker per source; topics serialized per source, sources in parallel."""
     _ = exclude_domains
@@ -399,6 +433,11 @@ async def iter_multi_pass_by_source_events(
     pass_rows: dict[int, dict[str, list[dict[str, str]]]] = {
         spec.pass_index: {} for spec in passes
     }
+
+    _retry_kwargs = dict(
+        max_retries=max(0, search_retry_count),
+        delay_ms=max(0, search_retry_delay_ms),
+    )
 
     async def _source_worker(source_name: str) -> None:
         for spec in passes:
@@ -435,6 +474,7 @@ async def iter_multi_pass_by_source_events(
                 max_results=spec.max_results,
                 min_year=min_year,
                 s2_api_key=s2_api_key,
+                **_retry_kwargs,
             )
             pass_rows[spec.pass_index][source_name] = rows
             await event_q.put(

@@ -72,6 +72,8 @@ cite_extract → M1 结构化 → …
 - `topic_parallel = 1`，`source_parallel = 5`
 - 模块：`source_gate.py`（每源全局 `Lock`）· `iter_multi_pass_by_source_events`（`multi_academic.py`）
 - **单主题** multi_academic 仍用原 5 源并行（主题间无冲突）
+- **源级重试**：每源最多 `search_retry_count` 次重试（默认 3），间隔 `search_retry_delay_ms`；任意一次返回 hits > 0 即跳出重试；重试在 `source_slot` 锁内执行，保持同源串行语义
+- **UI 显示**：同源重试只更新 `source_done` 事件（前端同 label 覆盖），会话框中始终只显示一条记录
 
 ### multi_academic 五源
 
