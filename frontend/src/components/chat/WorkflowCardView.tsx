@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SearchProgressView } from "./SearchProgressView";
 import { LitPilotToolStep } from "./LitPilotToolStep";
 import { LitPilotThinkFold } from "./LitPilotThinkFold";
@@ -147,8 +147,19 @@ export function WorkflowCardView({
     if (!streaming) setUserIntent(null);
   }, [streaming]);
 
-  // 卡片默认折叠：只有 forceOpen / locked / 用户手动展开 时才打开
-  const systemOpen = forceOpen || locked;
+  // 运行中阶段做完（running→done）时清掉自动展开意图，让卡片干净地收起。
+  // locked / clarify 卡不受影响（始终保持展开）。
+  const prevStateRef = useRef(card.state);
+  useEffect(() => {
+    if (prevStateRef.current === "running" && card.state === "done" && !locked) {
+      setUserIntent(null);
+    }
+    prevStateRef.current = card.state;
+  }, [card.state, locked]);
+
+  // 默认折叠；forceOpen / locked / 流式运行中的当前阶段 → 自动展开（克制叙事的核心）。
+  // 用户手动 toggle 后以 userIntent 为准。
+  const systemOpen = forceOpen || locked || (streaming && isRunning);
 
   const open = userIntent !== null ? userIntent : systemOpen;
 
@@ -218,7 +229,7 @@ export function WorkflowCardView({
           {open ? " ▾" : " ▸"}
         </span>
       </div>
-      {open ? (
+      <div className="litpilot-wf-card__body-wrap">
         <div className="litpilot-wf-card__body">
           {hasThinkStream ? (
             <LitPilotThinkFold
@@ -250,7 +261,7 @@ export function WorkflowCardView({
           ) : null}
           {renderStepLogLines(card.steps, trace, visibleSteps)}
         </div>
-      ) : null}
+      </div>
     </section>
   );
 }

@@ -31,6 +31,10 @@ export type SubtopicProgressNode = {
   sources: SourceNode[];
   filterDetails: FilterDetailItem[];
   durationMs?: number;
+  /** 检索阶段去重前命中数（search_done.raw_count）。 */
+  rawCount?: number;
+  /** 过滤后保留数（filter_done.kept_count）。 */
+  keptCount?: number;
 };
 
 export type SearchProgressSummary = {
@@ -161,8 +165,8 @@ export function buildSearchProgressTree(
       const raw = typeof data.raw_count === "number" ? data.raw_count : 0;
       node.search = phase("done", "检索", "(" + raw + ")");
       node.filter = phase("running", "过滤");
-      // 保存 raw_count 供后续 filter_done 使用
-      (node as Record<string, unknown>).rawCount = raw;
+      // 保存 raw_count 供后续 filter_done 与 aggregate 使用
+      node.rawCount = raw;
       if (typeof data.duration_ms === "number") node.durationMs = data.duration_ms;
       continue;
     }
@@ -170,8 +174,9 @@ export function buildSearchProgressTree(
     if (ext.name === "literature_subtopic_filter_done") {
       const kept =
         typeof data.kept_count === "number" ? data.kept_count : 0;
-      const raw = ((node as Record<string, unknown>).rawCount as number) || 0;
+      const raw = node.rawCount ?? 0;
       node.filter = phase("done", "过滤", `(${kept}/${raw})`);
+      node.keptCount = kept;
 
       // Parse kept items
       const keptItems = Array.isArray(data.kept) ? data.kept : [];
@@ -251,4 +256,70 @@ export function subtopicStatusLabel(node: SubtopicProgressNode): string {
   if (node.filter.status === "running") return "过滤中…";
   if (node.search.status === "running") return "检索中…";
   return "待开始";
+}
+
+export type SearchAggregate = {
+  completed: number;
+  total: number;
+  /** 各子主题各源命中数之和（去重前），用于"命中 N"实时计数。 */
+  hits: number;
+  /** 过滤后保留总数。 */
+  kept: number;
+  /** 去重前总数（缺失时为 0，呈现时去掉分母）。 */
+  raw: number;
+  allDone: boolean;
+};
+
+/** 把进度树压成单行所需的聚合数字（取代旧的逐源/逐过滤项铺开）。 */
+export function searchAggregate(summary: SearchProgressSummary): SearchAggregate {
+  let hits = 0;
+  let kept = 0;
+  let raw = 0;
+  for (const node of summary.subtopics) {
+    for (const src of node.sources) hits += src.hits || 0;
+    kept += node.keptCount ?? 0;
+    raw += node.rawCount ?? 0;
+  }
+  return {
+    completed: summary.completedSubtopics,
+    total: summary.totalSubtopics,
+    hits,
+    kept,
+    raw,
+    allDone: summary.allDone,
+  };
+}
+
+/** 完成态摘要行：`{total} 个子主题 · 保留 {kept}/{raw}`（raw 缺失时去掉分母）。 */
+export function formatSearchDone(agg: SearchAggregate): string {
+  const base = `${agg.total} 个子主题`;
+  return agg.raw > 0
+    ? `${base} · 保留 ${agg.kept}/${agg.raw}`
+    : `${base} · 保留 ${agg.kept}`;
+}
+
+/**
+ * 把检索查询串拆成关键词 chip。
+ * 先抽取 `"..."` 引号短语（保持整体），再按空白切分剩余 token；
+ * trim、去重（大小写不敏感）、剔除空串与 AND/OR/NOT 布尔算子。
+ */
+export function parseSearchKeywords(query: string): string[] {
+  if (!query) return [];
+  const ops = new Set(["AND", "OR", "NOT"]);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw: string) => {
+    const tok = raw.trim();
+    if (!tok || ops.has(tok.toUpperCase())) return;
+    const key = tok.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(tok);
+  };
+  const remainder = query.replace(/"([^"]+)"/g, (_match, phrase: string) => {
+    push(phrase);
+    return " ";
+  });
+  for (const tok of remainder.split(/\s+/)) push(tok);
+  return out;
 }
