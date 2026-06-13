@@ -22,7 +22,7 @@ _SHARED_SEARCH_QUERY_RULES = (
 
 UNDERSTANDING_JSON_CONTRACT = """最后一行单独输出 JSON（不要 markdown 代码块）：
 {
-  "narration": "3-5句中文解说：研究主题全景、子方向逻辑关系、检索核心挑战",
+  "narration": "3-5句中文：点出研究方向的核心焦点、主要术语消歧点、检索面临的边界",
   "confidence": 0.85,
   "session_title": "8-24字，禁止「综述」「新综述」等泛称",
   "search_query": "≤120字首条英文检索线索（单主题 brief 时使用）",
@@ -133,30 +133,24 @@ ATTRIBUTE_JSON_CONTRACT = """{
 
 # --- Default role templates (static configurable) ---
 
-DEFAULT_UNDERSTANDING_SYSTEM = f"""你是文献综述助手的过程解说员与检索规划器（Checkpoint A）。
+DEFAULT_UNDERSTANDING_SYSTEM = f"""根据用户 brief，用 3–5 句中文说明研究主题的核心方向与术语消歧点。
+不要写综述正文；不要编造论文标题或作者；不要向用户提问。
 
-【背景约束】
-- 本综述聚焦用户提问领域；检索式须通过共现词明确消歧
+背景约束：
+- 聚焦用户提问领域；检索式须通过共现词消歧
 - 目标数据源：arXiv、Semantic Scholar、OpenAlex、CrossRef；PubMed 仅用于生物医学向 brief
 
-【任务】
-1. 用 3–5 句中文说明：研究主题全景、子方向逻辑关系、检索核心挑战（术语歧义、跨学科边界）。
-   不要编造论文标题/作者/DOI；不要写综述正文；不要向用户提问。
-2. 评估用户意图的置信度（confidence）[0.0, 1.0]：
-   - 0.9–1.0：用户意图明确、术语规范、无歧义
-   - 0.7–0.8：用户意图清晰但可能有不精确之处
-   - 0.5–0.6：用户表述模糊、有多种理解方向
-   - 0.0–0.4：用户意图模糊或明显需要澄清
-3. 生成完整的检索规划（search_aspects）。
-4. 末行输出 JSON（无 markdown 代码块）：
+评估用户意图置信度（confidence）[0.0, 1.0]：
+- 0.9–1.0：意图明确、术语规范、无歧义
+- 0.7–0.8：意图清晰但可能有不精确之处
+- 0.5–0.6：表述模糊、有多种理解方向
+- 0.0–0.4：意图模糊或明显需要澄清
+
+生成完整检索规划（search_aspects），末行输出 JSON（无 markdown 代码块）：
 {UNDERSTANDING_JSON_CONTRACT}"""
 
-DEFAULT_NARRATE_SEARCH_AFTER = """你是文献综述的过程解说员。根据【检索结果】用 **1–2 句** 简洁说明：
-- 命中规模与整体相关性
-- 抓取优先级（1 条原则）
-总字数控制在 **80 字以内**。不要编造未出现的论文细节。不要输出 JSON。"""
-DEFAULT_NARRATE_FETCH_AFTER = """你是文献综述的过程解说员。根据【抓取结果】用 **1 句** 简要说明抓取概况。
-总字数控制在 **40 字以内**。不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
+DEFAULT_NARRATE_SEARCH_AFTER = """根据【检索结果】用 1–2 句说明命中规模、整体相关性及抓取优先判断。总字数 80 字以内。不要编造未出现的论文细节。不要输出 JSON。"""
+DEFAULT_NARRATE_FETCH_AFTER = """根据【抓取结果】用 1 句说明抓取概况。总字数 40 字以内。不要编造数字；以【抓取结果】为准。不要输出 JSON。"""
 
 DEFAULT_ROUTER_SYSTEM = f"""你是文献综述助手的路由器。根据用户首条研究问题，输出唯一 JSON（无 markdown 代码块）：
 {ROUTER_JSON_CONTRACT}"""
@@ -183,7 +177,7 @@ CLARIFY_JSON_CONTRACT = f"""{{
   "options": [
     {{
       "option_id": "opt_1",
-      "narration": "该选项的3-5句解说",
+      "narration": "1句中文：点出该选项区别于其他选项的核心角度",
       "search_aspects": [
         {{
           "aspect_id": 1,
@@ -200,27 +194,14 @@ CLARIFY_JSON_CONTRACT = f"""{{
   ]
 }}"""
 
-DEFAULT_CLARIFY_SYSTEM = f"""你是学术文献综述助手的澄清与推荐器。
+DEFAULT_CLARIFY_SYSTEM = f"""生成 2–3 个具体研究方向选项，帮助用户从模糊 brief 中确认意图。
+每个选项包含 option_id、narration（1句，点出与其他选项的区分角度）、search_aspects（完整检索规划，可直接进入搜索）。
 
-【背景】
-- 用户的初始表述模糊、多义或不够专业
-- 系统对用户意图的初步理解（Understand 阶段）信心度不足（< 0.7）
-- 需要帮助用户明确研究方向，以便进行准确的文献检索
+约束：
+- 选项间须有明显区别，各代表不同研究角度或深度
+- 每个选项自成一体，用户选择后可直接进入检索
+- 所有检索式必须为英文
 
-【任务】
-生成 2–3 个具体的研究方向选项，帮助用户明确意图。
-每个选项需包含：
-1. option_id：选项标识（opt_1, opt_2, opt_3）
-2. narration：1–2句简短解说（帮助用户快速理解该选项的区别）
-3. search_aspects：完整的检索规划（格式与 Understand 阶段一致，可直接进入搜索）
-
-【约束】
-- 选项间应有明显区别（不重复、不过度相似，各代表不同研究角度或深度）
-- 每个选项自成一体，用户选择后可直接进入文献检索
-- **所有检索式必须为英文**
-- 不要在此处生成澄清选择题；该步骤本身就是澄清方式
-
-【输出】
 JSON（无 markdown 代码块）：
 {CLARIFY_JSON_CONTRACT}"""
 
@@ -290,8 +271,7 @@ DEFAULT_SYNTHESIS_MATRIX_SYSTEM = (
 - 仅使用材料中出现的信息；无法确认的内容标注「待核实」
 - 引用编号优先沿用 [Citations] 中的编号或 [网页材料] 中的 [n]
 - 表格内容短句化，避免长段落撑爆单元格
-- 使用与用户相同的语言
-- 文末注明 AI 辅助生成，需用户核实事实与引用"""
+- 使用与用户相同的语言"""
 )
 
 DEFAULT_ATTRIBUTE_SYSTEM = f"""你是学术论文结构化提取器。根据给定标题与正文摘录，输出 JSON（不要 markdown 代码块）：
