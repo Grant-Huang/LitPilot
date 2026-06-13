@@ -733,7 +733,6 @@ async def stream_fetch_phase(
             retry_delay_ms=fetch_retry_delay_ms,
             fetch_provider=fetch_provider,
         ):
-            url = hit["url"]
             if phase == "tick":
                 yield (
                     "literature_progress",
@@ -747,6 +746,7 @@ async def stream_fetch_phase(
                     },
                 )
                 continue
+            url = str(hit.get("url") or "")
             if phase == "start":
                 idx = fetch_idx
                 fetch_idx += 1
