@@ -175,7 +175,8 @@ export function buildSearchProgressTree(
       const kept =
         typeof data.kept_count === "number" ? data.kept_count : 0;
       const raw = node.rawCount ?? 0;
-      node.filter = phase("done", "过滤", `(${kept}/${raw})`);
+      const filterDetail = (kept > 0 || raw > 0) ? `(${kept}/${raw})` : undefined;
+      node.filter = phase("done", "过滤", filterDetail);
       node.keptCount = kept;
 
       // Parse kept items
@@ -205,15 +206,25 @@ export function buildSearchProgressTree(
 
   const subtopics = [...map.values()];
 
-  // Merge pass-level source data into subtopics if they have no sources yet
+  // Merge pass-level source data into subtopics that have no sources yet.
+  // Aggregate hits across all passes by label to avoid duplicate entries.
   if (passSources.size > 0 && subtopics.length > 0) {
+    const merged = new Map<string, SourceNode>();
+    for (const [, srcMap] of passSources) {
+      for (const [label, src] of srcMap) {
+        const existing = merged.get(label);
+        if (existing) {
+          existing.hits += src.hits;
+          existing.hits_taken += src.hits_taken;
+        } else {
+          merged.set(label, { ...src });
+        }
+      }
+    }
     for (const node of subtopics) {
       if (node.sources.length > 0) continue;
-      // Assign first pass's source data to any subtopic missing sources
-      for (const [, srcMap] of passSources) {
-        for (const [, src] of srcMap) {
-          node.sources.push(src);
-        }
+      for (const [, src] of merged) {
+        node.sources.push(src);
       }
     }
   }
