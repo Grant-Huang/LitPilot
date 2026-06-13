@@ -95,8 +95,8 @@ export const sessionsApi = {
       body: JSON.stringify(body),
     }),
   get: (id: string) => apiRequestData<SessionMeta & { review_versions?: unknown[] }>(`/sessions/${id}`),
-  messages: (id: string) =>
-    apiRequestData<ChatMessage[]>(`/sessions/${id}/messages`),
+  messages: (id: string, limit = 500) =>
+    apiRequestData<ChatMessage[]>(`/sessions/${id}/messages?limit=${limit}`),
   review: (id: string) =>
     apiRequestData<{
       filename: string;

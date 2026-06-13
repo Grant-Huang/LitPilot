@@ -118,14 +118,13 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
 
   const handleSelectSession = useCallback(
     async (id: string) => {
-      const switching = id !== activeSessionId;
       setActiveSessionId(id);
       if (typeof window !== "undefined") {
         localStorage.setItem(STORAGE_KEY, id);
       }
-      if (switching) {
-        setMessages([]);
-      }
+      // Keep the current messages visible until the target session's messages
+      // finish loading; loadGenRef guards against races and loadMessages
+      // swaps in the new list atomically, so there is no blank flash on switch.
       try {
         await loadMessages(id);
       } catch (e: unknown) {
