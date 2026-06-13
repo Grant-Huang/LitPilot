@@ -358,6 +358,10 @@ async def _stream_review(
     version_id: str | None = None
     outline_obj = ctx.outline_obj
     if not outline_obj:
+        from app.schemas.literature_outline import LiteratureOutline as _Outline
+        stored = ctx.store.load_outline(ctx.session_id)
+        outline_obj = _Outline.from_dict(stored) if stored else None
+    if not outline_obj:
         yield chat_text("未找到子主题大纲，无法生成综述。")
         return
 

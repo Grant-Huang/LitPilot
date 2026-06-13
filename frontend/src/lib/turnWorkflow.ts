@@ -477,6 +477,7 @@ export function buildTurnWorkflowFromTrace(
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
     .map((c) => (c.summary && c.summary !== "已完成") ? c.summary : c.title)
+    .filter(Boolean)
     .slice(0, 4);
 
   const summary = opts.streaming
