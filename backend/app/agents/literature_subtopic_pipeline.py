@@ -128,6 +128,8 @@ async def _filter_subtopic_hits(
     hits: list[dict[str, str]],
     user_message: str,
     search_query: str,
+    subtopic_title: str = "",
+    subtopic_description: str = "",
     llm: Any,
     think_acc: Any = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
@@ -145,6 +147,8 @@ async def _filter_subtopic_hits(
         hits=hits,
         user_message=user_message,
         search_query=search_query,
+        subtopic_title=subtopic_title,
+        subtopic_description=subtopic_description,
         llm=llm,
         think_acc=think_acc,
     ):
@@ -258,6 +262,8 @@ async def _run_subtopic(
         hits=raw_hits,
         user_message=ctx.route_message,
         search_query=query,
+        subtopic_title=st.title,
+        subtopic_description=st.description,
         llm=ctx.pipeline_llm,
         think_acc=None,  # Don't pollute shared think accumulator with raw filter JSON
     ):

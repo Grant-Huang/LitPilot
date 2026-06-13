@@ -13,18 +13,19 @@ from app.llm.base import LLMMessage
 
 _log = logging.getLogger(__name__)
 
-RELEVANCE_SYSTEM = """你是学术文献相关性评审助手。根据【用户研究说明】与【检索式】，评估每条检索命中的相关程度。
+RELEVANCE_SYSTEM = """你是学术文献相关性评审助手。根据【用户研究说明】、【子主题】与【检索式】，评估每条检索命中的相关程度。
 
 评分（1-5）：
-- 5：高度相关，应优先阅读
-- 4：明确相关
-- 3：边缘相关，可保留作背景
-- 2：弱相关，与主题关联牵强
-- 1：不相关或明显误检（领域/任务/对象不符）
+- 5：高度相关，文献的研究对象/方法/结论与子主题核心内容直接对应
+- 4：明确相关，涉及子主题主要方面
+- 3：边缘相关，有一定背景参考价值，但非直接研究该子主题
+- 2：弱相关，仅泛义层面关联，对该子主题几乎无直接贡献
+- 1：不相关或误检（领域/任务/对象不符；仅因共用词汇命中）
 
 规则：
 - score >= 3 时 keep=true，否则 keep=false
 - reason 用一句中文说明判断依据（20 字内为佳）
+- 文献主题域与子主题明显不符时（如子主题为制造/工业，文献谈市政/医疗/心理），直接评 1
 - 必须为每条输入输出 decisions 的一项，index 与输入列表 0-based 对齐
 
 仅输出 JSON：
@@ -41,7 +42,7 @@ KEEP_SCORE_THRESHOLD = 3
 # 减少串行批数；prompt 中每条命中也已精简，避免上下文膨胀。
 BATCH_SIZE = 40
 # 单条命中片段截断阈值（控制 prompt 体积）
-HIT_SNIPPET_CHARS = 100
+HIT_SNIPPET_CHARS = 200
 HIT_URL_CHARS = 80
 USER_MSG_TRIM_CHARS = 800
 QUERY_TRIM_CHARS = 300
@@ -217,11 +218,16 @@ def keep_all_hits(hits: list[dict[str, str]], *, summary: str = "") -> Relevance
     )
 
 
+SUBTOPIC_TRIM_CHARS = 200
+
+
 async def _run_filter_batches(
     hits: list[dict[str, str]],
     *,
     user_message: str,
     search_query: str,
+    subtopic_title: str = "",
+    subtopic_description: str = "",
     llm: Any,
     think_acc: ThinkAccumulator | None,
     yield_think: bool,
@@ -235,8 +241,15 @@ async def _run_filter_batches(
     for batch_start in range(0, len(hits), BATCH_SIZE):
         batch = hits[batch_start : batch_start + BATCH_SIZE]
         lines = [_hit_label(h, index=i) for i, h in enumerate(batch)]
+        subtopic_block = ""
+        if subtopic_title or subtopic_description:
+            parts = [subtopic_title.strip()]
+            if subtopic_description:
+                parts.append(subtopic_description.strip()[:SUBTOPIC_TRIM_CHARS])
+            subtopic_block = f"【子主题】\n{chr(10).join(p for p in parts if p)}\n\n"
         prompt = (
             f"【用户研究说明】\n{(user_message or '').strip()[:USER_MSG_TRIM_CHARS]}\n\n"
+            f"{subtopic_block}"
             f"【检索式】\n{(search_query or '').strip()[:QUERY_TRIM_CHARS]}\n\n"
             f"【待评估文献】共 {len(batch)} 条\n"
             + "\n".join(lines)
@@ -296,6 +309,8 @@ async def filter_hits_by_relevance(
     *,
     user_message: str,
     search_query: str,
+    subtopic_title: str = "",
+    subtopic_description: str = "",
     llm=None,
 ) -> RelevanceFilterResult:
     """Score merged search hits; drop low-relevance items.
@@ -316,8 +331,15 @@ async def filter_hits_by_relevance(
     for batch_start in range(0, len(hits), BATCH_SIZE):
         batch = hits[batch_start : batch_start + BATCH_SIZE]
         lines = [_hit_label(h, index=i) for i, h in enumerate(batch)]
+        subtopic_block = ""
+        if subtopic_title or subtopic_description:
+            parts = [subtopic_title.strip()]
+            if subtopic_description:
+                parts.append(subtopic_description.strip()[:SUBTOPIC_TRIM_CHARS])
+            subtopic_block = f"【子主题】\n{chr(10).join(p for p in parts if p)}\n\n"
         prompt = (
             f"【用户研究说明】\n{(user_message or '').strip()[:USER_MSG_TRIM_CHARS]}\n\n"
+            f"{subtopic_block}"
             f"【检索式】\n{(search_query or '').strip()[:QUERY_TRIM_CHARS]}\n\n"
             f"【待评估文献】共 {len(batch)} 条\n"
             + "\n".join(lines)
@@ -371,6 +393,8 @@ async def _filter_subtopic_hits_stream(
     hits: list[dict[str, str]],
     user_message: str,
     search_query: str,
+    subtopic_title: str = "",
+    subtopic_description: str = "",
     llm: Any,
     think_acc: ThinkAccumulator | None,
 ) -> AsyncIterator[tuple[str, Any]]:
@@ -395,6 +419,8 @@ async def _filter_subtopic_hits_stream(
             hits,
             user_message=user_message,
             search_query=search_query,
+            subtopic_title=subtopic_title,
+            subtopic_description=subtopic_description,
             llm=llm,
             think_acc=think_acc,
             yield_think=True,
