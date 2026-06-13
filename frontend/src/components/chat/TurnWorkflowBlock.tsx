@@ -58,20 +58,22 @@ export function TurnWorkflowBlock({
               </span>
               <span className="litpilot-wf-card__title">{pendingTitle}</span>
             </div>
-            <div className="litpilot-wf-card__body">
-              <div className="litpilot-log-lines" role="list">
-                <div
-                  className="litpilot-log-line litpilot-log-line--running"
-                  role="listitem"
-                >
-                  <span className="litpilot-log-line__marker">
-                    <StatusIcon status="running" />
-                  </span>
-                  <p className="litpilot-log-line__text">
-                    <span className="litpilot-log-line__primary litpilot-stream-shimmer">
-                      {liveProcessText.trim() || pendingText}
+            <div className="litpilot-wf-card__body-wrap">
+              <div className="litpilot-wf-card__body">
+                <div className="litpilot-log-lines" role="list">
+                  <div
+                    className="litpilot-log-line litpilot-log-line--running"
+                    role="listitem"
+                  >
+                    <span className="litpilot-log-line__marker">
+                      <StatusIcon status="running" />
                     </span>
-                  </p>
+                    <p className="litpilot-log-line__text">
+                      <span className="litpilot-log-line__primary litpilot-stream-shimmer">
+                        {liveProcessText.trim() || pendingText}
+                      </span>
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -84,11 +86,6 @@ export function TurnWorkflowBlock({
   return (
     <div className="litpilot-turn-log">
       <div className="litpilot-turn-log__cards">
-        {streaming && liveProcessText.trim() ? (
-          <p className="litpilot-turn-log__narration litpilot-stream-shimmer">
-            {liveProcessText.trim()}
-          </p>
-        ) : null}
         {workflow.cards.map((card) => (
           <WorkflowCardView
             key={card.id}

@@ -300,7 +300,7 @@ export function buildTurnWorkflowFromTrace(
     const ctype = stageToCardType(stage.name);
     if (!ctype) continue;
     activeType = ctype;
-    const existing = cards.find((c) => c.type === ctype && c.state === "running");
+    const existing = cards.find((c) => c.type === ctype);
     if (existing) {
       existing.state = stageState(stage.state);
       existing.title = _cardTitle(ctype, stage.name);
