@@ -153,9 +153,16 @@ export function WorkflowCardView({
     prevStateRef.current = card.state;
   }, [card.state, locked]);
 
+  // 在当前 streaming 会话中只要这张卡曾经运行过，就保持展开，避免多 section 之间
+  // 的 running→done→running 切换导致卡片反复折叠/展开产生抖动。
+  // streaming 结束时重置，卡片收起一次即可。
+  const hadRunRef = useRef(false);
+  if (streaming && isRunning) hadRunRef.current = true;
+  if (!streaming) hadRunRef.current = false;
+
   // 默认折叠；forceOpen / locked / 流式运行中的当前阶段 → 自动展开（克制叙事的核心）。
   // 用户手动 toggle 后以 userIntent 为准。
-  const systemOpen = forceOpen || locked || (streaming && isRunning);
+  const systemOpen = forceOpen || locked || (streaming && (isRunning || hadRunRef.current));
 
   const open = userIntent !== null ? userIntent : systemOpen;
 
