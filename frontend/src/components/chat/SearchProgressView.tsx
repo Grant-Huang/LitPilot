@@ -81,8 +81,10 @@ function FilterDetailRow({ item }: { item: FilterDetailItem }) {
     ? "保留"
     : `剔除 [${item.score ?? "?"}]${reason ? " · " + reason.slice(0, 50) : ""}`;
   return (
-    <li className={`litpilot-filter-item litpilot-filter-item--${variant}`}>
-      <span className="litpilot-filter-item__dot" aria-hidden="true" />
+    <li className={`lp-disclosure-row litpilot-filter-item--${variant}`}>
+      <span className="lp-disclosure-row__marker">
+        <StatusIcon status={item.keep ? "done" : "pending"} />
+      </span>
       <span className="litpilot-filter-item__title" title={title}>{title}</span>
       <span className="litpilot-filter-item__verdict">{verdict}</span>
     </li>
@@ -147,7 +149,7 @@ function SubtopicBlock({
                   </span>
                 ) : null}
               </p>
-              <ul className="litpilot-search-phase__items">
+              <ul className="lp-disclosure-rows">
                 {node.filterDetails.map((item, i) => (
                   <FilterDetailRow key={item.title + "-" + i} item={item} />
                 ))}
