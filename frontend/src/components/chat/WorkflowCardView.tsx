@@ -143,10 +143,6 @@ export function WorkflowCardView({
 
   const [userIntent, setUserIntent] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    if (!streaming) setUserIntent(null);
-  }, [streaming]);
-
   // 运行中阶段做完（running→done）时清掉自动展开意图，让卡片干净地收起。
   // locked / clarify 卡不受影响（始终保持展开）。
   const prevStateRef = useRef(card.state);

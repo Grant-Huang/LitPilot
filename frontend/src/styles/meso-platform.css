@@ -3943,6 +3943,7 @@ a.library-badge--action:hover {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.22s ease;
+  overflow: hidden;
 }
 
 .litpilot-wf-card--open .litpilot-wf-card__body-wrap {
