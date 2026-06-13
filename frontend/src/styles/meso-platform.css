@@ -3986,7 +3986,7 @@ a.library-badge--action:hover {
 ──────────────────────────────────────────────────────────────────────────── */
 .litpilot-wf-card__body-wrap {
   display: grid;
-  grid-template-rows: 0fr;
+  grid-template-rows: minmax(0px, 0fr);
   transition: grid-template-rows 0.22s ease;
   overflow: hidden;
 }
