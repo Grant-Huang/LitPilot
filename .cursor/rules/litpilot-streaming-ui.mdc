@@ -11,6 +11,7 @@ alwaysApply: false
 ## 信息架构
 
 - **进度文案只出现一处**：动态 `literature_progress.detail` 仅服务于当前 running 卡片内的思考流；不得同时写入顶部 headline、已完成卡片摘要、Brief 伪卡片 body。
+- **输入器芯片**：`literature_progress` 的 `parallel` / `in_flight` / `elapsed_sec` 亦驱动输入器区域（并行度芯片、静默计时提示），此属输入器独立职责，不与卡片内思考流重复。
 - **流式 headline**：`TurnCompletionBar` 仅在回合完成后显示统计摘要，streaming 时不渲染。
 - **Brief 卡片**：仅在有 `literature_brief_assessment` 结构化结果（RQ / 关键词 / hint）时创建；禁止用心跳 progress 文案伪造「Brief 评估 · 已完成」。
 

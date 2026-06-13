@@ -539,9 +539,11 @@ data: {}
 | 规则 | 说明 |
 |------|------|
 | 默认折叠 | 卡片体折叠，头部滚动展示最新 tool 摘要（单行，自动截断） |
+| 自动展开 | streaming 中 running 状态卡片自动展开（`streaming && isRunning`） |
 | 自动滚动 | running 状态下，新 tool_result 到达时头部摘要自动更新为最新项 |
 | 点击展开 | 用户点击卡片头部展开体，查看全部 tool 日志行列表 |
-| 展开不折叠 | 用户手动展开后保持展开，直到用户主动折叠或流结束 |
+| 用户意图持久 | 用户手动展开/折叠后，展开状态持久保留，不受 streaming 结束影响 |
+| 完成收起 | 卡片 running→done 时自动收起（清空 userIntent），但用户后续手动展开不受干扰 |
 | 完成定格 | 卡片 done 后，头部显示聚合摘要（替代最新 tool 摘要） |
 | 单条无变化 | 仅 1 条 tool 时，折叠态头部显示该项摘要 |
 | 展开详情 | 展开态下点击单条日志行可进一步展开/折叠详情（chevron ▸/▾），`<pre>` 显示 |
@@ -641,7 +643,7 @@ SSE 事件还驱动输入器区域的状态展示：
 | **看门狗** | 收到响应头后若 120 秒无任何 chunk，判定上游冻结并自动 abort |
 | **断点续传游标** | 流地址支持 `?since=N`，按事件序号续传 |
 | **走马灯** | 卡片默认折叠，头部滚动显示最新 tool 摘要；点击展开查看全部日志行；done 后显示聚合摘要 |
-| **卡片展开** | running 状态卡片默认展开；clarify 卡片强制展开；done 后自动折叠（仅留摘要头） |
+| **卡片展开** | running 状态卡片自动展开（`streaming && isRunning`）；clarify 卡片强制展开；running→done 时自动收起；用户手动展开/折叠后状态持久，不受 streaming 结束影响 |
 
 直连 `POST /api/chat/literature/execute` 已废弃（410），统一走 Task API。详见 [design/task-streaming.md](./design/task-streaming.md)。
 
