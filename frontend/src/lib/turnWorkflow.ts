@@ -476,7 +476,7 @@ export function buildTurnWorkflowFromTrace(
   const runningCard = enrichedCards.find((c) => c.state === "running");
   const summaryParts = enrichedCards
     .filter((c) => c.state === "done")
-    .map((c) => c.summary || c.title)
+    .map((c) => (c.summary && c.summary !== "已完成") ? c.summary : c.title)
     .slice(0, 4);
 
   const summary = opts.streaming
@@ -509,7 +509,7 @@ function normalizeTurnWorkflow(raw: TurnWorkflow): TurnWorkflow {
       id: c.id ?? `card-${i}`,
       type: c.type,
       title: c.title,
-      state: c.state === "running" ? "done" : (c.state ?? "done"),
+      state: (c.state === "running" || c.state === "pending") ? "done" : (c.state ?? "done"),
       summary: c.summary,
       steps: c.steps ?? [],
       body: c.body,

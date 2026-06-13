@@ -133,7 +133,10 @@ export function summarizeWorkflowCard(
       return toolErr ? `${toolDone} 篇 · ${toolErr} 失败` : `${toolDone} 篇`;
     }
     const queue = card.steps.find((s) => s.title.includes("抓取队列"));
-    if (queue) return queue.title.replace("抓取队列 ", "");
+    if (queue) {
+      const detail = queue.title.replace(/^抓取队列\s*/, "").trim();
+      if (detail) return detail;
+    }
   }
   if (card.type === "generate") {
     const hasMatrix = ctx?.trace?.stages.some((s) => s.name.includes("矩阵"));
@@ -229,7 +232,10 @@ export function buildTurnCompletionSummary(
   if (hasMatrix) parts.push("矩阵已更新");
   if (failedLiterature > 0) parts.push(`${failedLiterature} 条未纳入`);
 
-  const headline = parts.length ? parts.join(" · ") : workflow.summary || "本回合已完成";
+  const fallbackSummary = workflow.summary?.split(" · ").every((s) => s === "已完成")
+    ? ""
+    : workflow.summary;
+  const headline = parts.length ? parts.join(" · ") : fallbackSummary || "本回合已完成";
 
   let brief = "";
   const chat = (opts?.chatText ?? "").trim();
