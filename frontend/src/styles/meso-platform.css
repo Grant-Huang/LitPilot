@@ -3955,6 +3955,21 @@ a.library-badge--action:hover {
   min-height: 0;
 }
 
+/* 来源 chips：内联显示在子主题行下，不展开，扁平化层级 */
+.litpilot-search-topic__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0 4px calc(var(--lp-indent) + 22px);
+  font-size: var(--lp-fs-caption);
+  color: var(--color-text-muted);
+  line-height: var(--lp-lh-body);
+}
+
+.litpilot-search-topic__source-chip--failed {
+  color: var(--color-error);
+}
+
 /* 子主题「查看详情」披露：同样用 grid-rows 平滑开合 */
 .litpilot-search-topic__detail-wrap {
   display: grid;

@@ -57,21 +57,19 @@ function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
   );
 }
 
-function SourceRow({ source }: { source: SourceNode }) {
+function SourceChipsRow({ sources }: { sources: SourceNode[] }) {
+  if (!sources.length) return null;
   return (
-    <li className={`litpilot-search-source litpilot-search-source--${source.status}`}>
-      <span className="litpilot-search-source__marker">
-        {phaseStatusIcon(source.status)}
-      </span>
-      <span className="litpilot-search-source__label">
-        {source.label}
-        {source.failed ? (
-          <span className="litpilot-search-source__failure"> 失败</span>
-        ) : (
-          <span className="litpilot-search-source__hits-inline"> ({source.hits})</span>
-        )}
-      </span>
-    </li>
+    <div className="litpilot-search-topic__sources">
+      {sources.map((src) => (
+        <span
+          key={src.label}
+          className={`litpilot-search-topic__source-chip${src.failed ? " litpilot-search-topic__source-chip--failed" : ""}`}
+        >
+          {src.label}·{src.failed ? "失败" : src.hits}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -109,7 +107,7 @@ function SubtopicBlock({
     pending ? "running"
     : subtopicDone(node) ? "done"
     : "pending";
-  const hasDetail = node.sources.length > 0 || node.filterDetails.length > 0;
+  const hasDetail = node.filterDetails.length > 0;
 
   return (
     <div className={`litpilot-search-topic litpilot-search-topic--${pending ? "running" : "done"}`}>
@@ -131,24 +129,13 @@ function SubtopicBlock({
           </span>
         ) : null}
       </button>
+      <SourceChipsRow sources={node.sources} />
       <div
         className={`litpilot-search-topic__detail-wrap${
           open && hasDetail ? " litpilot-search-topic__detail-wrap--open" : ""
         }`}
       >
         <div className="litpilot-search-topic__detail">
-          {node.sources.length > 0 ? (
-            <div className="litpilot-search-detail-group">
-              <p className="litpilot-search-detail-group__label">
-                {phaseStatusIcon(node.search.status)} 检索源
-              </p>
-              <ul className="litpilot-search-phase__items">
-                {node.sources.map((src, i) => (
-                  <SourceRow key={src.label + "-" + i} source={src} />
-                ))}
-              </ul>
-            </div>
-          ) : null}
           {node.filterDetails.length > 0 ? (
             <div className="litpilot-search-detail-group">
               <p className="litpilot-search-detail-group__label">
