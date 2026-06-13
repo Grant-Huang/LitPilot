@@ -59,8 +59,8 @@ function PlanRow({ st, index }: { st: SubTopicDef; index: number }) {
 
 function SourceRow({ source }: { source: SourceNode }) {
   return (
-    <li className={`litpilot-search-source litpilot-search-source--${source.status}`}>
-      <span className="litpilot-search-source__marker">
+    <li className={`lp-disclosure-row litpilot-search-source--${source.status}`}>
+      <span className="lp-disclosure-row__marker">
         {phaseStatusIcon(source.status)}
       </span>
       <span className="litpilot-search-source__label">
@@ -83,8 +83,10 @@ function FilterDetailRow({ item }: { item: FilterDetailItem }) {
     ? "保留"
     : `剔除 [${item.score ?? "?"}]${reason ? " · " + reason.slice(0, 50) : ""}`;
   return (
-    <li className={`litpilot-filter-item litpilot-filter-item--${variant}`}>
-      <span className="litpilot-filter-item__dot" aria-hidden="true" />
+    <li className={`lp-disclosure-row litpilot-filter-item--${variant}`}>
+      <span className="lp-disclosure-row__marker">
+        <StatusIcon status={item.keep ? "done" : "pending"} />
+      </span>
       <span className="litpilot-filter-item__title" title={title}>{title}</span>
       <span className="litpilot-filter-item__verdict">{verdict}</span>
     </li>
@@ -142,7 +144,7 @@ function SubtopicBlock({
               <p className="litpilot-search-detail-group__label">
                 {phaseStatusIcon(node.search.status)} 检索源
               </p>
-              <ul className="litpilot-search-phase__items">
+              <ul className="lp-disclosure-rows">
                 {node.sources.map((src, i) => (
                   <SourceRow key={src.label + "-" + i} source={src} />
                 ))}
@@ -160,7 +162,7 @@ function SubtopicBlock({
                   </span>
                 ) : null}
               </p>
-              <ul className="litpilot-search-phase__items">
+              <ul className="lp-disclosure-rows">
                 {node.filterDetails.map((item, i) => (
                   <FilterDetailRow key={item.title + "-" + i} item={item} />
                 ))}
