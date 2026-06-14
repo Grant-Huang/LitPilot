@@ -153,7 +153,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     },
-    [activeSessionId, fetchSessions, loadMessages],
+    [fetchSessions, loadMessages],
   );
 
   const handleDeleteSession = useCallback(
