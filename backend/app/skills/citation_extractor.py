@@ -874,11 +874,11 @@ async def extract_and_persist_batch(
         if not rec.year:
             rec.year = str(ep.get("year") or "")
 
-    enrich_iter = iter(enrich_list)
+    enrich_map = {id(rec): ep for rec, ep in zip(enrich_candidates, enrich_list)}
     lib = LibraryStore()
 
     for rec in results:
-        ep = next(enrich_iter, {})
+        ep = enrich_map.get(id(rec), {})
         _patch(rec, ep)
         _evaluate_success(rec, detect_publisher(rec.url), rec.url)
         if not rec.success:

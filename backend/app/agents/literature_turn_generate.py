@@ -170,22 +170,34 @@ async def _stream_synthesis_matrix(
     )
     matrix_art_id = new_id("matrix")
     matrix_parts: list[str] = []
+    matrix_events: list[tuple[str, dict]] = []
     matrix_tokens = await get_prompt_max_tokens("matrix_system_template")
+    MATRIX_TIMEOUT = 300  # 矩阵生成最长等待时间（秒）
+
+    async def _gen_matrix() -> None:
+        try:
+            async for chunk in ctx.llm.chat_stream(
+                [LLMMessage(role="user", content=matrix_prompt)],
+                system=matrix_system,
+                max_tokens=matrix_tokens,
+                temperature=0.25,
+            ):
+                matrix_parts.append(chunk)
+                matrix_events.append(
+                    artifact_stream_delta(matrix_art_id, chunk, lang=SYNTHESIS_MATRIX_LANG)
+                )
+        except Exception:
+            _log.exception("synthesis matrix streaming failed")
+
+    matrix_task = asyncio.create_task(_gen_matrix())
     try:
-        async for chunk in ctx.llm.chat_stream(
-            [LLMMessage(role="user", content=matrix_prompt)],
-            system=matrix_system,
-            max_tokens=matrix_tokens,
-            temperature=0.25,
-        ):
-            matrix_parts.append(chunk)
-            yield artifact_stream_delta(
-                matrix_art_id,
-                chunk,
-                lang=SYNTHESIS_MATRIX_LANG,
-            )
-    except Exception:
-        _log.exception("synthesis matrix streaming failed")
+        await asyncio.wait_for(matrix_task, timeout=MATRIX_TIMEOUT)
+    except asyncio.TimeoutError:
+        _log.warning("synthesis matrix timed out after %ss", MATRIX_TIMEOUT)
+        matrix_task.cancel()
+
+    for ev in matrix_events:
+        yield ev
 
     matrix_text = "".join(matrix_parts)
     if not matrix_text.strip():
