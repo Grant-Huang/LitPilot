@@ -364,6 +364,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       setActiveSessionId,
       loadSessions,
       persistActiveSession,
+      streamingSessionId: streamSessionRef.current,
     };
     for (let i = extensionHandledRef.current; i < log.length; i += 1) {
       const ext = log[i];
