@@ -232,7 +232,10 @@ async def _run_subtopic(
             source = str(ev[1].get("source") or "")
             if hits > 0 and source and seen_source_hits is not None:
                 seen_source_hits.add(source)
-            append_extension(ctx.execution_trace, ev[0], dict(ev[1]))
+            enriched = dict(ev[1])
+            enriched["subtopic_id"] = subtopic_id
+            append_extension(ctx.execution_trace, ev[0], enriched)
+            ev = (ev[0], enriched)
         elif ev[0] in (
             "literature_subtopic_search_done",
             "literature_subtopic_filter_done",
