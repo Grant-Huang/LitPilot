@@ -202,11 +202,14 @@ async def _stream_synthesis_matrix(
     matrix_text = "".join(matrix_parts)
     if not matrix_text.strip():
         try:
-            resp = await ctx.llm.chat(
-                [LLMMessage(role="user", content=matrix_prompt)],
-                system=matrix_system,
-                max_tokens=matrix_tokens,
-                temperature=0.25,
+            resp = await asyncio.wait_for(
+                ctx.llm.chat(
+                    [LLMMessage(role="user", content=matrix_prompt)],
+                    system=matrix_system,
+                    max_tokens=matrix_tokens,
+                    temperature=0.25,
+                ),
+                timeout=MATRIX_TIMEOUT,
             )
             matrix_text = (resp.content or "").strip()
             if matrix_text:
@@ -323,25 +326,40 @@ async def _generate_section_streaming(
         refine_plan.revision_directives if refine_plan else gen_directives
     )
     sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
+    SECTION_TIMEOUT = 180  # 每章节最长生成时间（秒）
+    sec_events: list[tuple[str, dict]] = []
+
+    async def _gen_sec_stream() -> None:
+        try:
+            async for chunk in stream_section_generate(
+                ctx.llm,
+                outline=outline_obj,
+                section=section,
+                paper_index=ctx.working.paper_index,
+                prior_excerpt=prior_excerpt,
+                prior_section_body=refine_plan.prior_bodies.get(section.id, "")
+                if refine_plan
+                else "",
+                gen_directives=sec_directives,
+                writing_emphasis=ctx.planner_ctx.writing_emphasis,
+                is_refine=sec_is_refine,
+                max_tokens=sec_tokens,
+            ):
+                sec_parts.append(chunk)
+                sec_events.append(artifact_stream_delta(review_art_id, chunk))
+        except Exception:
+            _log.exception("section %s streaming failed", section.id)
+
+    sec_task = asyncio.create_task(_gen_sec_stream())
     try:
-        async for chunk in stream_section_generate(
-            ctx.llm,
-            outline=outline_obj,
-            section=section,
-            paper_index=ctx.working.paper_index,
-            prior_excerpt=prior_excerpt,
-            prior_section_body=refine_plan.prior_bodies.get(section.id, "")
-            if refine_plan
-            else "",
-            gen_directives=sec_directives,
-            writing_emphasis=ctx.planner_ctx.writing_emphasis,
-            is_refine=sec_is_refine,
-            max_tokens=sec_tokens,
-        ):
-            sec_parts.append(chunk)
-            yield artifact_stream_delta(review_art_id, chunk)
-    except Exception:
-        _log.exception("section %s streaming failed", section.id)
+        await asyncio.wait_for(sec_task, timeout=SECTION_TIMEOUT)
+    except asyncio.TimeoutError:
+        _log.warning("section %s timed out after %ss", section.id, SECTION_TIMEOUT)
+        sec_task.cancel()
+
+    for ev in sec_events:
+        yield ev
+
     sec_body = "".join(sec_parts)
     if not sec_body.strip():
         sec_body = f"（章节「{section.title}」生成为空。）\n"
@@ -598,25 +616,46 @@ async def _stream_review(
                     refine_plan.revision_directives if refine_plan else gen_directives
                 )
                 sec_tokens = section_refine_tokens if sec_is_refine else section_tokens
+                seq_sec_events: list[tuple[str, dict]] = []
+
+                async def _gen_seq_sec(
+                    _sec=section,
+                    _sec_parts=sec_parts,
+                    _sec_events=seq_sec_events,
+                    _sec_tokens=sec_tokens,
+                    _sec_directives=sec_directives,
+                    _sec_is_refine=sec_is_refine,
+                ) -> None:
+                    try:
+                        async for chunk in stream_section_generate(
+                            ctx.llm,
+                            outline=outline_obj,
+                            section=_sec,
+                            paper_index=ctx.working.paper_index,
+                            prior_excerpt=prior,
+                            prior_section_body=refine_plan.prior_bodies.get(_sec.id, "")
+                            if refine_plan
+                            else "",
+                            gen_directives=_sec_directives,
+                            writing_emphasis=ctx.planner_ctx.writing_emphasis,
+                            is_refine=_sec_is_refine,
+                            max_tokens=_sec_tokens,
+                        ):
+                            _sec_parts.append(chunk)
+                            _sec_events.append(artifact_stream_delta(review_art_id, chunk))
+                    except Exception:
+                        _log.exception("section %s streaming failed", _sec.id)
+
+                seq_task = asyncio.create_task(_gen_seq_sec())
                 try:
-                    async for chunk in stream_section_generate(
-                        ctx.llm,
-                        outline=outline_obj,
-                        section=section,
-                        paper_index=ctx.working.paper_index,
-                        prior_excerpt=prior,
-                        prior_section_body=refine_plan.prior_bodies.get(section.id, "")
-                        if refine_plan
-                        else "",
-                        gen_directives=sec_directives,
-                        writing_emphasis=ctx.planner_ctx.writing_emphasis,
-                        is_refine=sec_is_refine,
-                        max_tokens=sec_tokens,
-                    ):
-                        sec_parts.append(chunk)
-                        yield artifact_stream_delta(review_art_id, chunk)
-                except Exception:
-                    _log.exception("section %s streaming failed", section.id)
+                    await asyncio.wait_for(seq_task, timeout=SECTION_TIMEOUT)
+                except asyncio.TimeoutError:
+                    _log.warning("section %s timed out after %ss", section.id, SECTION_TIMEOUT)
+                    seq_task.cancel()
+
+                for ev in seq_sec_events:
+                    yield ev
+
                 sec_body = "".join(sec_parts)
                 if not sec_body.strip():
                     sec_body = f"（章节「{section.title}」生成为空。）\n"
