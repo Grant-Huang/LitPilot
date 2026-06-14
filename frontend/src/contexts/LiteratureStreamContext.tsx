@@ -113,7 +113,9 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
       streamStartedRef.current = false;
       streamFinalizeRef.current = false;
       turnSessionRef.current = sessionId;
-      streamSessionRef.current = sessionId;
+      // streamSessionRef tracks which session the active stream belongs to.
+      // Only send() and the reconnect path should write it — not session switches,
+      // otherwise the extension-handler guard (streamingSessionId check) breaks.
       pendingUserTextRef.current = null;
       extensionHandledRef.current = 0;
       connectedTaskIdRef.current = null;
@@ -245,6 +247,7 @@ export function LiteratureStreamProvider({ children }: { children: ReactNode }) 
     }
 
     reconnectingRef.current = true;
+    streamSessionRef.current = activeTask.sessionId;
     void connectTaskStream(activeTask.taskId, 0, false)
       .catch((e: unknown) => {
         if (e instanceof Error && e.name === "AbortError") return;
