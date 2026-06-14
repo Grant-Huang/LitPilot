@@ -568,7 +568,10 @@ def _evaluate_success(rec: CitationRecord, publisher: str, url: str) -> None:
 
     meta_ok = bool(rec.authors or rec.year)
 
-    rec.success = bool(title_ok and meta_ok and has_scholarly_signal)
+    # Records with strong metadata (title + authors + year) pass even without a
+    # scholarly-domain signal, since many legit papers are on generic publisher sites.
+    strong_meta = bool(rec.authors and rec.year)
+    rec.success = bool(title_ok and meta_ok and (has_scholarly_signal or strong_meta))
 
     if not rec.success:
 
