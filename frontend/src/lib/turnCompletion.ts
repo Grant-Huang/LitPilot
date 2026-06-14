@@ -232,9 +232,11 @@ export function buildTurnCompletionSummary(
   if (hasMatrix) parts.push("矩阵已更新");
   if (failedLiterature > 0) parts.push(`${failedLiterature} 条未纳入`);
 
-  const fallbackSummary = workflow.summary?.split(" · ").every((s) => s === "已完成")
-    ? ""
-    : workflow.summary;
+  const rawSummary = workflow.summary ?? "";
+  const fallbackSummary =
+    !rawSummary || rawSummary.split(" · ").every((s) => s === "已完成")
+      ? ""
+      : rawSummary.replace(/(\s*·\s*)+$/, "").trim();
   const headline = parts.length ? parts.join(" · ") : fallbackSummary || "本回合已完成";
 
   let brief = "";

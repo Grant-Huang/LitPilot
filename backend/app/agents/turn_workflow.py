@@ -211,13 +211,12 @@ def build_turn_workflow_meta(
 
 def _default_summary(cards: list[dict[str, Any]], intent: str) -> str:
     summaries = [
-        str(c.get("summary") or c.get("title") or "")
-        for c in cards
-        if c.get("summary") or c.get("title")
+        v for c in cards
+        if (v := str(c.get("summary") or c.get("title") or "").strip())
     ]
     if summaries:
         return " · ".join(summaries[:4])
-    titles = [str(c.get("title") or "") for c in cards if c.get("title")]
+    titles = [v for c in cards if (v := str(c.get("title") or "").strip())]
     if not titles:
         return intent
     return " · ".join(titles[:4])

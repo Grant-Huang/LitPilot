@@ -63,6 +63,11 @@ _QUERY_RE = re.compile(
     re.I,
 )
 _EXPAND_HINT_RE = re.compile(r"再搜|补充检索|找更多|扩展检索|继续检索|更多文献", re.I)
+_EXPLICIT_WRITE_RE = re.compile(
+    r"(帮我|请|直接|现在|开始)?(撰写|写|生成)(综述|文献综述|总结报告|综合报告)"
+    r"|帮我写|开始(撰写|写|生成)|直接(撰写|写|生成)",
+    re.I,
+)
 _JSON_BLOCK = re.compile(r"\{[\s\S]*\}")
 
 CORPUS_GUIDANCE_FOOTER = (
@@ -236,6 +241,15 @@ def detect_intent_rules(
             intent="review_refine",
             gen_directives=msg[:500],
             full_regen=bool(_FULL_REGEN_RE.search(msg)),
+            skip_web_search=True,
+            skip_fetch=True,
+            use_existing_corpus=True,
+        )
+
+    if _EXPLICIT_WRITE_RE.search(msg) and turn_ctx.has_corpus:
+        return LiteratureIntentResult(
+            intent="review_refine",
+            gen_directives=msg[:500],
             skip_web_search=True,
             skip_fetch=True,
             use_existing_corpus=True,
