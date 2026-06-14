@@ -139,7 +139,12 @@ function extensionInlineStep(name: string, data: Record<string, unknown>): Workf
   return null;
 }
 
-const CHAT_INTENTS = new Set(["query_corpus"]);
+const CHAT_INTENTS = new Set([
+  "query_corpus",
+  "new_topic",
+  "review_refine",
+  "subtopic_change",
+]);
 
 export function workflowNeedsChat(intent: string): boolean {
   return CHAT_INTENTS.has(intent);
@@ -196,7 +201,7 @@ export function deriveLiveFieldsFromStream(stream: StreamState): {
   const briefSummary = briefParts.trim();
   const liveProgressDetail = (progressDetail || processDelta).trim();
   const chatText = workflowNeedsChat(intent)
-    ? (stream.textContent ?? "").slice(0, 800)
+    ? (stream.textContent ?? "").slice(0, 4000)
     : "";
 
   return {

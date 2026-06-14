@@ -30,6 +30,7 @@ from app.agents.literature_progress import (
     PROGRESS_INTERVAL_SEC,
     merge_async_iter_with_progress,
 )
+from app.core.stream_events import chat_text as chat_text_event
 from app.core.think_stream import (
     ThinkAccumulator,
     emit_system_think_line,
@@ -239,6 +240,14 @@ async def narrate_phase_stream(
             use_reasoning=ctx.use_reasoning,
         ):
             yield ev
+            kind, payload = ev
+            if (
+                kind == "think"
+                and isinstance(payload.get("delta"), str)
+                and not payload.get("done")
+                and payload.get("source") == "model"
+            ):
+                yield chat_text_event(payload["delta"])
     except Exception:
         _log.exception("orchestrator phase narration failed; skip narration")
         async for ev in emit_system_think_line(
