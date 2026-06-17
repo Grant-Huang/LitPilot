@@ -10,6 +10,7 @@ import {
 } from "@meso.ai/ui/runtime";
 import type { StreamCallbacks, StreamOptions } from "@meso.ai/ui";
 import { useThrottledRAFState } from "@/hooks/useThrottledRAFState";
+import { pushDebugTrace, clearDebugTrace } from "@/lib/debugTrace";
 
 export type BatchedStreamStartOptions = StreamOptions & {
   /** Override hook URL (e.g. task stream with since=). */
@@ -87,6 +88,14 @@ export function useBatchedSSEStream(url: string, callbacks?: StreamCallbacks) {
 
   const applyStreamEvent = useCallback(
     (event: SSEEvent) => {
+      // [3-layer trace] T3: 浏览器接到 + 应用瞬间
+      pushDebugTrace(
+        event as unknown as {
+          type: string;
+          payload?: unknown;
+          _trace?: { persist_ms?: number; yield_ms?: number };
+        },
+      );
       const next = applyEvent(workingRef.current, event);
       workingRef.current = next;
       pendingRef.current = next;
@@ -125,6 +134,8 @@ export function useBatchedSSEStream(url: string, callbacks?: StreamCallbacks) {
 
       const targetUrl = options?.url ?? url;
       if (!options?.preserveState) {
+        // [3-layer trace] 每个新流重新清零
+        clearDebugTrace();
         const initial = { ...createInitialStreamState(), status: "streaming" as const };
         workingRef.current = initial;
         commitNow(initial);
